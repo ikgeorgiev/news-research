@@ -1,4 +1,4 @@
-from app.utils import canonicalize_url, decode_cursor, encode_cursor, normalize_title
+from app.utils import canonicalize_url, clean_summary_text, decode_cursor, encode_cursor, normalize_title
 from datetime import datetime, timezone
 
 
@@ -19,3 +19,8 @@ def test_cursor_roundtrip():
     dt, ident = decoded
     assert ident == 42
     assert dt == now
+
+
+def test_clean_summary_text_removes_html_tags():
+    raw = "<p>CHARLOTTE&nbsp;N.C.</p><div>Monthly <b>distribution</b></div>"
+    assert clean_summary_text(raw) == "CHARLOTTE N.C. Monthly distribution"

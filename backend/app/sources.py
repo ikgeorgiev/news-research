@@ -14,15 +14,12 @@ PRNEWSWIRE_FEEDS: list[str] = [
     "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
     "https://www.prnewswire.com/rss/financial-services-latest-news/mutual-funds-list.rss",
     "https://www.prnewswire.com/rss/financial-services-latest-news/dividends-list.rss",
-    "https://www.prnewswire.com/rss/financial-services-latest-news/conference-call-announcements-list.rss",
-    "https://www.prnewswire.com/rss/financial-services-latest-news/earnings-list.rss",
-    "https://www.prnewswire.com/rss/financial-services-latest-news/stock-offering-list.rss",
 ]
 
 GLOBENEWSWIRE_FEEDS: list[str] = [
-    "https://rss.globenewswire.com/en/RssFeed/industry/30204000-Closed%20End%20Investments/feedTitle/CEF%20Industry",
-    "https://rss.globenewswire.com/en/RssFeed/exchange/NYSE/feedTitle/NYSE%20News",
-    "https://rss.globenewswire.com/en/RssFeed/orgclass/1/feedTitle/Public%20Companies",
+    "https://rss.globenewswire.com/en/RssFeed/subjectcode/12-Dividend%20Reports%20And%20Estimates/feedTitle/Dividend%20Reports%20And%20Estimates",
+    "https://rss.globenewswire.com/en/RssFeed/subjectcode/13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/Earnings%20Releases%20And%20Operating%20Results",
+    "https://rss.globenewswire.com/en/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/feedTitle/Mergers%20And%20Acquisitions",
 ]
 
 
@@ -59,7 +56,7 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
         source_feeds.append(
             SourceFeed(
                 code="yahoo",
-                name="Yahoo Finance RSS",
+                name="Yahoo Finance",
                 base_url="https://feeds.finance.yahoo.com",
                 feed_urls=build_yahoo_feed_urls(symbols, settings.yahoo_chunk_size),
             )
@@ -69,7 +66,7 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
         source_feeds.append(
             SourceFeed(
                 code="prnewswire",
-                name="PR Newswire RSS",
+                name="PR Newswire",
                 base_url="https://www.prnewswire.com",
                 feed_urls=PRNEWSWIRE_FEEDS,
             )
@@ -79,7 +76,7 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
         source_feeds.append(
             SourceFeed(
                 code="globenewswire",
-                name="GlobeNewswire RSS",
+                name="GlobeNewswire",
                 base_url="https://rss.globenewswire.com",
                 feed_urls=GLOBENEWSWIRE_FEEDS,
             )

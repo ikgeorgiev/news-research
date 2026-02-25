@@ -5,8 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { fetchNews, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
-const STATIC_PROVIDERS = ["Yahoo Finance RSS", "PR Newswire RSS", "GlobeNewswire RSS"]
-const STATIC_PROVIDER_SET = new Set(STATIC_PROVIDERS.map((name) => name.toLowerCase()))
+const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire"]
 
 function timeAgo(iso: string): string {
   const now = new Date().getTime()
@@ -28,26 +27,12 @@ export default function Page() {
 
   const [ticker, setTicker] = useState("")
   const [provider, setProvider] = useState("")
-  const [category, setCategory] = useState("")
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
 
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const categoryOptions = useMemo(() => {
-    const values = items
-      .map((item) => item.source.trim())
-      .filter((name) => name && !STATIC_PROVIDER_SET.has(name.toLowerCase()))
-    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b))
-  }, [items])
-
-  useEffect(() => {
-    if (category && !categoryOptions.includes(category)) {
-      setCategory("")
-    }
-  }, [category, categoryOptions])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -64,7 +49,6 @@ export default function Page() {
 
     fetchNews({
       ticker: ticker || undefined,
-      source: category || undefined,
       provider: provider || undefined,
       q: searchQuery || undefined,
       limit: 40,
@@ -81,7 +65,7 @@ export default function Page() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [ticker, provider, category, searchQuery])
+  }, [ticker, provider, searchQuery])
 
   const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -98,7 +82,6 @@ export default function Page() {
     try {
       const data = await fetchNews({
         ticker: ticker || undefined,
-        source: category || undefined,
         provider: provider || undefined,
         q: searchQuery || undefined,
         limit: 40,
@@ -162,18 +145,6 @@ export default function Page() {
               ))}
             </select>
           </label>
-
-          <label>
-            Category
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
-              <option value="">All categories</option>
-              {categoryOptions.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       </section>
 
@@ -188,9 +159,6 @@ export default function Page() {
             <div className="feed-meta">
               <span className="stamp">{timeAgo(item.published_at)}</span>
               <span className="source">{item.provider}</span>
-              {item.source && item.source !== item.provider ? (
-                <span className="source">{item.source}</span>
-              ) : null}
             </div>
 
             <a className="headline" href={item.url} target="_blank" rel="noreferrer">

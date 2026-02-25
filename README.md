@@ -7,7 +7,7 @@ Local-first RSS aggregation platform for closed-end funds.
 - Backend: FastAPI + SQLAlchemy + APScheduler
 - Frontend: Next.js (App Router)
 - DB: PostgreSQL
-- Sources: Yahoo Finance RSS, PRNewswire RSS, GlobeNewswire RSS
+- Sources: Yahoo Finance, PRNewswire, GlobeNewswire
 
 ## Features
 
@@ -16,7 +16,7 @@ Local-first RSS aggregation platform for closed-end funds.
 - URL + title-window dedupe
 - Ticker mapping from context, exchange patterns, and token match
 - Filterable API (`ticker`, `provider`, `source`, `q`, `from`, `to`) with cursor pagination
-- Feed UI with source/ticker/search filters and load-more pagination
+- Feed UI with provider/ticker/search filters and load-more pagination
 
 ## Project Layout
 

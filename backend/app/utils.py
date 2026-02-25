@@ -6,6 +6,7 @@ import json
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from html import unescape
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -21,6 +22,7 @@ TRACKING_PARAM_EXACT = {
     "ncid",
     "ocid",
 }
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
 def sha256_str(value: str) -> str:
@@ -31,6 +33,16 @@ def normalize_title(value: str) -> str:
     normalized = re.sub(r"\s+", " ", (value or "").strip().lower())
     normalized = re.sub(r"[^a-z0-9\s]", "", normalized)
     return normalized
+
+
+def clean_summary_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    text = unescape(str(value))
+    text = HTML_TAG_PATTERN.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
 
 
 def canonicalize_url(url: str) -> str:

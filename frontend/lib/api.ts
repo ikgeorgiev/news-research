@@ -12,7 +12,6 @@ export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse
 
 export async function fetchNews(params: {
   ticker?: string
-  source?: string
   provider?: string
   q?: string
   cursor?: string | null
@@ -23,7 +22,6 @@ export async function fetchNews(params: {
 }): Promise<NewsResponse> {
   const query = new URLSearchParams()
   if (params.ticker) query.set("ticker", params.ticker)
-  if (params.source) query.set("source", params.source)
   if (params.provider) query.set("provider", params.provider)
   if (params.q) query.set("q", params.q)
   if (params.cursor) query.set("cursor", params.cursor)

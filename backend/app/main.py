@@ -25,7 +25,7 @@ from app.schemas import (
 from app.scheduler import IngestionScheduler
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
-from app.utils import decode_cursor, encode_cursor
+from app.utils import clean_summary_text, decode_cursor, encode_cursor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -224,7 +224,7 @@ def list_news(
             url=row.canonical_url,
             source=row.source_name,
             provider=providers_by_article.get(row.id) or row.provider_name,
-            summary=row.summary,
+            summary=clean_summary_text(row.summary),
             published_at=row.published_at,
             tickers=tickers_by_article.get(row.id, []),
             dedupe_group=row.cluster_key,
@@ -262,7 +262,7 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
         url=row.canonical_url,
         source=row.source_name,
         provider=providers_by_article.get(row.id) or row.provider_name,
-        summary=row.summary,
+        summary=clean_summary_text(row.summary),
         published_at=row.published_at,
         tickers=tickers_by_article.get(row.id, []),
         dedupe_group=row.cluster_key,

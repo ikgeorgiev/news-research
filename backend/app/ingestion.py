@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.sources import build_source_feeds, seed_sources
-from app.utils import canonicalize_url, normalize_title, parse_datetime, sha256_str, to_json_safe
+from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
 
 REQUEST_HEADERS = {
     "User-Agent": "cef-news-feed/0.1 (+local)",
@@ -266,7 +266,8 @@ def ingest_feed(
             if not title or not link:
                 continue
 
-            summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
+            raw_summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
+            summary = clean_summary_text(raw_summary)
             published_at = parse_datetime(entry.get("published") or entry.get("updated"))
             if published_at is None:
                 published_at = datetime.now(timezone.utc)
@@ -293,7 +294,7 @@ def ingest_feed(
                 "title": title,
                 "link": link,
                 "published": entry.get("published") or entry.get("updated"),
-                "summary": summary,
+                "summary": raw_summary,
                 "source": entry_source_name,
             }
             db.add(
