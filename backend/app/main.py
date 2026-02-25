@@ -141,6 +141,10 @@ def list_news(
         default=False,
         description="Include articles not mapped to any active ticker",
     ),
+    include_unmapped_from_provider: str | None = Query(
+        default=None,
+        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+    ),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=100),
@@ -150,20 +154,42 @@ def list_news(
 ):
     query = select(Article)
 
+    mapped_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(ArticleTicker.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )
+
     if ticker:
         query = (
             query.join(ArticleTicker, ArticleTicker.article_id == Article.id)
             .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
             .where(Ticker.symbol == ticker.strip().upper())
         )
-    elif not include_unmapped:
-        mapped_exists = (
-            select(1)
-            .select_from(ArticleTicker)
-            .where(ArticleTicker.article_id == Article.id)
-            .correlate(Article)
-            .exists()
-        )
+    elif include_unmapped:
+        pass
+    elif include_unmapped_from_provider:
+        include_name = include_unmapped_from_provider.strip()
+        include_source_row = db.scalar(select(Source).where(func.lower(Source.name) == include_name.lower()))
+        if include_source_row is None:
+            query = query.where(mapped_exists)
+        else:
+            include_provider_exists = (
+                select(1)
+                .select_from(RawFeedItem)
+                .where(
+                    and_(
+                        RawFeedItem.article_id == Article.id,
+                        RawFeedItem.source_id == include_source_row.id,
+                    )
+                )
+                .correlate(Article)
+                .exists()
+            )
+            query = query.where(or_(mapped_exists, and_(~mapped_exists, include_provider_exists)))
+    else:
         query = query.where(mapped_exists)
 
     if source:

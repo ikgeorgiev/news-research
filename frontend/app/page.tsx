@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { fetchNews, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
-const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire"]
+const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 
 function timeAgo(iso: string): string {
   const now = new Date().getTime()
@@ -50,6 +50,7 @@ export default function Page() {
     fetchNews({
       ticker: ticker || undefined,
       provider: provider || undefined,
+      includeUnmappedFromProvider: "Business Wire",
       q: searchQuery || undefined,
       limit: 40,
       signal: controller.signal,
@@ -83,6 +84,7 @@ export default function Page() {
       const data = await fetchNews({
         ticker: ticker || undefined,
         provider: provider || undefined,
+        includeUnmappedFromProvider: "Business Wire",
         q: searchQuery || undefined,
         limit: 40,
         cursor: nextCursor,
@@ -175,7 +177,7 @@ export default function Page() {
                   </span>
                 ))
               ) : (
-                <span className="chip chip-muted">UNMAPPED</span>
+                <span className="chip chip-muted">GENERAL</span>
               )}
             </div>
           </article>

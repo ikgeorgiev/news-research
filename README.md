@@ -7,7 +7,7 @@ Local-first RSS aggregation platform for closed-end funds.
 - Backend: FastAPI + SQLAlchemy + APScheduler
 - Frontend: Next.js (App Router)
 - DB: PostgreSQL
-- Sources: Yahoo Finance, PRNewswire, GlobeNewswire
+- Sources: Yahoo Finance, PRNewswire, GlobeNewswire, Business Wire
 
 ## Features
 
@@ -78,7 +78,8 @@ Set `NEXT_PUBLIC_API_BASE` if backend is on a non-default host/port.
 - `GET /api/v1/admin/ingest/status`
 
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
-Use `include_unmapped=true` to include broad wire stories that are not mapped to your ticker universe.
+Use `include_unmapped=true` to include all unmapped stories.
+Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wire unmapped stories while keeping mapped stories from all providers.
 
 ## Ticker Universe
 
@@ -92,6 +93,6 @@ GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,true
 
 ## Notes
 
-- V1 intentionally excludes account-protected Business Wire feeds.
+- V1 includes the public Business Wire home RSS feed.
 - If a feed fails intermittently, status is tracked in `ingestion_runs`.
 - Default polling interval is 60 seconds.

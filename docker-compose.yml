@@ -26,6 +26,7 @@ services:
       SOURCE_ENABLE_YAHOO: ${SOURCE_ENABLE_YAHOO:-true}
       SOURCE_ENABLE_PRN: ${SOURCE_ENABLE_PRN:-true}
       SOURCE_ENABLE_GN: ${SOURCE_ENABLE_GN:-true}
+      SOURCE_ENABLE_BW: ${SOURCE_ENABLE_BW:-true}
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005,http://127.0.0.1:3005}
     depends_on:

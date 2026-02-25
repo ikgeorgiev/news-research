@@ -22,6 +22,10 @@ GLOBENEWSWIRE_FEEDS: list[str] = [
     "https://rss.globenewswire.com/en/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/feedTitle/Mergers%20And%20Acquisitions",
 ]
 
+BUSINESSWIRE_FEEDS: list[str] = [
+    "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+]
+
 
 @dataclass(slots=True)
 class SourceFeed:
@@ -79,6 +83,16 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 name="GlobeNewswire",
                 base_url="https://rss.globenewswire.com",
                 feed_urls=GLOBENEWSWIRE_FEEDS,
+            )
+        )
+
+    if settings.source_enable_bw:
+        source_feeds.append(
+            SourceFeed(
+                code="businesswire",
+                name="Business Wire",
+                base_url="https://feed.businesswire.com",
+                feed_urls=BUSINESSWIRE_FEEDS,
             )
         )
 

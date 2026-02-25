@@ -13,6 +13,8 @@ export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse
 export async function fetchNews(params: {
   ticker?: string
   provider?: string
+  includeUnmapped?: boolean
+  includeUnmappedFromProvider?: string
   q?: string
   cursor?: string | null
   limit?: number
@@ -23,6 +25,12 @@ export async function fetchNews(params: {
   const query = new URLSearchParams()
   if (params.ticker) query.set("ticker", params.ticker)
   if (params.provider) query.set("provider", params.provider)
+  if (params.includeUnmapped !== undefined) {
+    query.set("include_unmapped", String(params.includeUnmapped))
+  }
+  if (params.includeUnmappedFromProvider) {
+    query.set("include_unmapped_from_provider", params.includeUnmappedFromProvider)
+  }
   if (params.q) query.set("q", params.q)
   if (params.cursor) query.set("cursor", params.cursor)
   if (params.limit) query.set("limit", String(params.limit))

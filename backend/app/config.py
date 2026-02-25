@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     source_enable_yahoo: bool = True
     source_enable_prn: bool = True
     source_enable_gn: bool = True
+    source_enable_bw: bool = True
 
     request_timeout_seconds: int = Field(default=20, ge=5, le=120)
 
