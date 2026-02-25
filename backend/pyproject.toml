@@ -1,0 +1,22 @@
+[project]
+name = "cef-news-backend"
+version = "0.1.0"
+description = "CEF RSS aggregation backend"
+requires-python = ">=3.11"
+
+dependencies = [
+  "fastapi==0.122.0",
+  "uvicorn[standard]==0.38.0",
+  "sqlalchemy==2.0.44",
+  "psycopg[binary]==3.2.12",
+  "pydantic-settings==2.11.0",
+  "requests==2.32.5",
+  "feedparser==6.0.12",
+  "APScheduler==3.11.1",
+  "python-dateutil==2.9.0.post0",
+  "alembic==1.17.2"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

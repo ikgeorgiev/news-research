@@ -1,0 +1,44 @@
+import { NewsResponse, TickerResponse } from "./types"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000"
+
+export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse> {
+  const response = await fetch(`${API_BASE}/api/v1/tickers`, { signal, cache: "no-store" })
+  if (!response.ok) {
+    throw new Error(`Ticker request failed: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function fetchNews(params: {
+  ticker?: string
+  source?: string
+  provider?: string
+  q?: string
+  cursor?: string | null
+  limit?: number
+  from?: string
+  to?: string
+  signal?: AbortSignal
+}): Promise<NewsResponse> {
+  const query = new URLSearchParams()
+  if (params.ticker) query.set("ticker", params.ticker)
+  if (params.source) query.set("source", params.source)
+  if (params.provider) query.set("provider", params.provider)
+  if (params.q) query.set("q", params.q)
+  if (params.cursor) query.set("cursor", params.cursor)
+  if (params.limit) query.set("limit", String(params.limit))
+  if (params.from) query.set("from", params.from)
+  if (params.to) query.set("to", params.to)
+
+  const response = await fetch(`${API_BASE}/api/v1/news?${query.toString()}`, {
+    signal: params.signal,
+    cache: "no-store",
+  })
+
+  if (!response.ok) {
+    throw new Error(`News request failed: ${response.status}`)
+  }
+
+  return response.json()
+}

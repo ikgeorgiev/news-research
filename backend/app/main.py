@@ -1,0 +1,306 @@
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy.orm import Session
+
+from app.config import Settings, get_settings
+from app.database import db_health_check, get_db, get_session_factory, init_db
+from app.ingestion import run_ingestion_cycle
+from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
+from app.schemas import (
+    IngestionRunItem,
+    IngestionRunResponse,
+    NewsItem,
+    NewsListResponse,
+    RunIngestionResponse,
+    TickerItem,
+    TickerListResponse,
+)
+from app.scheduler import IngestionScheduler
+from app.sources import build_source_feeds, seed_sources
+from app.ticker_loader import load_tickers_from_csv
+from app.utils import decode_cursor, encode_cursor
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+scheduler: IngestionScheduler | None = None
+
+
+def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[str]]:
+    if not article_ids:
+        return {}
+    rows = db.execute(
+        select(ArticleTicker.article_id, Ticker.symbol)
+        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+        .where(ArticleTicker.article_id.in_(article_ids))
+        .order_by(ArticleTicker.article_id.asc(), Ticker.symbol.asc())
+    ).all()
+    mapped: dict[int, list[str]] = {}
+    for article_id, symbol in rows:
+        mapped.setdefault(article_id, []).append(symbol)
+    return mapped
+
+
+def _article_providers_map(db: Session, article_ids: list[int]) -> dict[int, str]:
+    if not article_ids:
+        return {}
+    rows = db.execute(
+        select(RawFeedItem.article_id, Source.name)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(RawFeedItem.article_id.in_(article_ids))
+        .order_by(RawFeedItem.article_id.asc(), Source.name.asc())
+    ).all()
+    mapped: dict[int, str] = {}
+    for article_id, source_name in rows:
+        mapped.setdefault(article_id, source_name)
+    return mapped
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global scheduler
+
+    settings = get_settings()
+    init_db()
+
+    with get_session_factory()() as db:
+        source_feeds = build_source_feeds(settings, db)
+        seed_sources(db, source_feeds)
+
+        ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
+        logger.info("Ticker load stats: %s", ticker_stats)
+
+    scheduler = IngestionScheduler(settings, get_session_factory())
+    scheduler.start()
+
+    yield
+
+    if scheduler is not None:
+        scheduler.shutdown()
+
+
+app = FastAPI(title="CEF News Feed API", lifespan=lifespan)
+settings = get_settings()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health():
+    ok = db_health_check()
+    return {
+        "status": "ok" if ok else "degraded",
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get(f"{settings.api_prefix}/tickers", response_model=TickerListResponse)
+def list_tickers(
+    q: str | None = Query(default=None, description="Prefix match on ticker symbol"),
+    db: Session = Depends(get_db),
+):
+    query = select(Ticker).where(Ticker.active.is_(True)).order_by(Ticker.symbol.asc())
+    if q:
+        query = query.where(Ticker.symbol.ilike(f"%{q.strip().upper()}%"))
+
+    rows = db.scalars(query).all()
+    return TickerListResponse(
+        items=[
+            TickerItem(
+                symbol=row.symbol,
+                fund_name=row.fund_name,
+                sponsor=row.sponsor,
+                active=row.active,
+            )
+            for row in rows
+        ],
+        total=len(rows),
+    )
+
+
+@app.get(f"{settings.api_prefix}/news", response_model=NewsListResponse)
+def list_news(
+    ticker: str | None = None,
+    source: str | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    include_unmapped: bool = Query(
+        default=False,
+        description="Include articles not mapped to any active ticker",
+    ),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = None,
+    sort: str = Query(default="latest", pattern="^(latest)$"),
+    db: Session = Depends(get_db),
+):
+    query = select(Article)
+
+    if ticker:
+        query = (
+            query.join(ArticleTicker, ArticleTicker.article_id == Article.id)
+            .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+            .where(Ticker.symbol == ticker.strip().upper())
+        )
+    elif not include_unmapped:
+        mapped_exists = (
+            select(1)
+            .select_from(ArticleTicker)
+            .where(ArticleTicker.article_id == Article.id)
+            .correlate(Article)
+            .exists()
+        )
+        query = query.where(mapped_exists)
+
+    if source:
+        query = query.where(Article.source_name.ilike(f"%{source.strip()}%"))
+
+    if provider:
+        provider_text = provider.strip()
+        source_row = db.scalar(select(Source).where(func.lower(Source.name) == provider_text.lower()))
+        if source_row is not None:
+            provider_exists = (
+                select(1)
+                .select_from(RawFeedItem)
+                .where(
+                    and_(
+                        RawFeedItem.article_id == Article.id,
+                        RawFeedItem.source_id == source_row.id,
+                    )
+                )
+                .correlate(Article)
+                .exists()
+            )
+            query = query.where(provider_exists)
+        else:
+            query = query.where(Article.provider_name.ilike(f"%{provider_text}%"))
+
+    if q:
+        query = query.where(Article.title.ilike(f"%{q.strip()}%"))
+
+    if from_:
+        query = query.where(Article.published_at >= from_)
+
+    if to:
+        query = query.where(Article.published_at <= to)
+
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    if cursor_payload:
+        cursor_published, cursor_id = cursor_payload
+        query = query.where(
+            or_(
+                Article.published_at < cursor_published,
+                and_(Article.published_at == cursor_published, Article.id < cursor_id),
+            )
+        )
+
+    query = query.order_by(Article.published_at.desc().nullslast(), Article.id.desc()).limit(limit + 1)
+
+    rows = db.scalars(query).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    tickers_by_article = _article_tickers_map(db, [row.id for row in rows])
+    providers_by_article = _article_providers_map(db, [row.id for row in rows])
+
+    items = [
+        NewsItem(
+            id=row.id,
+            title=row.title,
+            url=row.canonical_url,
+            source=row.source_name,
+            provider=providers_by_article.get(row.id) or row.provider_name,
+            summary=row.summary,
+            published_at=row.published_at,
+            tickers=tickers_by_article.get(row.id, []),
+            dedupe_group=row.cluster_key,
+        )
+        for row in rows
+    ]
+
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = encode_cursor(last.published_at, last.id)
+
+    return NewsListResponse(
+        items=items,
+        next_cursor=next_cursor,
+        meta={
+            "count": len(items),
+            "limit": limit,
+            "sort": sort,
+        },
+    )
+
+
+@app.get(f"{settings.api_prefix}/news/{{article_id}}", response_model=NewsItem)
+def get_news_item(article_id: int, db: Session = Depends(get_db)):
+    row = db.scalar(select(Article).where(Article.id == article_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    tickers_by_article = _article_tickers_map(db, [row.id])
+    providers_by_article = _article_providers_map(db, [row.id])
+    return NewsItem(
+        id=row.id,
+        title=row.title,
+        url=row.canonical_url,
+        source=row.source_name,
+        provider=providers_by_article.get(row.id) or row.provider_name,
+        summary=row.summary,
+        published_at=row.published_at,
+        tickers=tickers_by_article.get(row.id, []),
+        dedupe_group=row.cluster_key,
+    )
+
+
+@app.post(f"{settings.api_prefix}/admin/ingest/run-once", response_model=RunIngestionResponse)
+def admin_run_ingestion(db: Session = Depends(get_db)):
+    result = run_ingestion_cycle(db, settings)
+    return RunIngestionResponse(
+        total_feeds=int(result["total_feeds"]),
+        total_items_seen=int(result["total_items_seen"]),
+        total_items_inserted=int(result["total_items_inserted"]),
+        failed_feeds=int(result["failed_feeds"]),
+    )
+
+
+@app.get(f"{settings.api_prefix}/admin/ingest/status", response_model=IngestionRunResponse)
+def admin_ingestion_status(limit: int = Query(default=100, ge=1, le=300), db: Session = Depends(get_db)):
+    rows = db.execute(
+        select(IngestionRun, Source.code)
+        .join(Source, Source.id == IngestionRun.source_id)
+        .order_by(IngestionRun.started_at.desc())
+        .limit(limit)
+    ).all()
+
+    items = [
+        IngestionRunItem(
+            id=run.id,
+            source=source_code,
+            feed_url=run.feed_url,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            status=run.status,
+            items_seen=run.items_seen,
+            items_inserted=run.items_inserted,
+            error_text=run.error_text,
+        )
+        for run, source_code in rows
+    ]
+    return IngestionRunResponse(items=items)

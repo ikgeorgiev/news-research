@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+
+# Local env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Research scratch files
+.tmp_*.js
+.tmp_*.html
