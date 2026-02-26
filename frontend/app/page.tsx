@@ -31,6 +31,36 @@ function timeAgo(iso: string): string {
   return `${day}d ago`
 }
 
+function formatDetailedDate(iso: string): string {
+  const d = new Date(iso)
+  const dateStr = d.toDateString()
+  const timeStr = d.toTimeString().split(' ')[0]
+  
+  const now = new Date().getTime()
+  const then = d.getTime()
+  const sec = Math.max(1, Math.floor((now - then) / 1000))
+  let rel = ""
+  
+  if (sec < 60) {
+    rel = `${sec} secs`
+  } else {
+    const min = Math.floor(sec / 60)
+    if (min < 60) {
+      rel = `${min} mins`
+    } else {
+      const hr = Math.floor(min / 60)
+      if (hr < 24) {
+        rel = `${hr} hour${hr !== 1 ? 's' : ''}`
+      } else {
+        const day = Math.floor(hr / 24)
+        rel = `${day} day${day !== 1 ? 's' : ''}`
+      }
+    }
+  }
+
+  return `${dateStr} ${timeStr} (${rel})`
+}
+
 // Simple SVG Icons
 const StarIcon = ({ fill = "none" }: { fill?: string }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -479,13 +509,31 @@ export default function Page() {
                   className={`feed-row`}
                   onClick={() => toggleSummary(item)}
                 >
-                  <div className="stamp">{timeAgo(item.published_at)}</div>
-                  <div className="source" title={item.provider}>{item.provider}</div>
-                  
-                  <div className="headline">
-                    <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => markAsReadAndOpen(item, e)}>
-                      {item.title}
-                    </a>
+                  <div className="main-col">
+                    <div className="headline-content">
+                      <div className="headline">
+                        <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => markAsReadAndOpen(item, e)}>
+                          {item.title}
+                        </a>
+                      </div>
+                    </div>
+                    <div className="metadata-row">
+                      <div className="source-and-tickers">
+                        <span className="source" title={item.provider}>{item.provider}</span>
+                        <div className="ticker-rack">
+                          {item.tickers && item.tickers.length > 0 ? (
+                            item.tickers.map(t => (
+                              <span key={t} className="ticker-pill">{t}</span>
+                            ))
+                          ) : (
+                            <span className="ticker-pill">GENERAL</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="stamp">
+                        {formatDetailedDate(item.published_at)}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="actions">
@@ -506,9 +554,14 @@ export default function Page() {
                   </div>
                 </div>
 
-                {isExpanded && item.summary && (
+                {isExpanded && (
                   <div className="feed-row-details">
-                    {item.summary}
+                    {item.summary && (
+                      <div 
+                        className="summary-text"
+                        dangerouslySetInnerHTML={{ __html: item.summary }} 
+                      />
+                    )}
                   </div>
                 )}
               </article>

@@ -94,7 +94,7 @@ cd backend
 python -m venv .venv
 . .venv/Scripts/activate  # Windows PowerShell
 pip install -r requirements.txt -r requirements-dev.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 ### Frontend
@@ -106,6 +106,39 @@ npm run dev
 ```
 
 Set `NEXT_PUBLIC_API_BASE` if backend is on a non-default host/port.
+
+## Troubleshooting
+
+### Next.js lock error (`Unable to acquire lock ... .next/dev/lock`)
+
+If `dev-frontend.ps1` fails with a lock error, clear the stale lock file:
+
+```powershell
+Remove-Item -Force .\frontend\.next\dev\lock
+.\dev-frontend.ps1
+```
+
+If needed, clear the whole Next dev cache:
+
+```powershell
+cmd /c rmdir /s /q frontend\.next\dev
+.\dev-frontend.ps1
+```
+
+### Port conflicts with other projects
+
+If you already use frontend `3000` or backend `800`/`8000` in another repo, run this project on custom ports:
+
+```powershell
+.\dev-backend.ps1 -Port 8001
+.\dev-frontend.ps1 -Port 3005 -ApiBase http://127.0.0.1:8001
+```
+
+For frontend on `3000` instead:
+
+```powershell
+.\dev-frontend.ps1 -Port 3000 -ApiBase http://127.0.0.1:8001
+```
 
 ## API Endpoints
 

@@ -211,12 +211,34 @@ button:disabled {
 }
 
 .feed-row {
-  display: grid;
-  grid-template-columns: 60px 140px 1fr auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
-  align-items: center;
   padding: 0.85rem 1.5rem;
   cursor: pointer;
+}
+
+.feed-row .main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow: hidden;
+  flex: 1;
+}
+
+.feed-row .metadata-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.feed-row .source-and-tickers {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
 }
 
 .feed-row .stamp {
@@ -226,17 +248,19 @@ button:disabled {
 }
 
 .feed-row .source {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  background: var(--bg-input);
-  display: inline-block;
-  text-align: center;
-  font-weight: 500;
+  font-weight: 400;
+}
+
+.feed-row .headline-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow: hidden;
 }
 
 .feed-row .headline {
@@ -276,11 +300,46 @@ button:disabled {
 }
 
 .feed-row-details {
-  padding: 0 1.5rem 1rem calc(200px + 2.5rem); /* Align with headline block (60px + 140px gap) */
+  padding: 0 1.5rem 1rem 1.5rem; /* Align left edge of the details box */
   color: var(--text-secondary);
   font-size: 0.9rem;
   line-height: 1.5;
-  white-space: pre-wrap;
+  white-space: normal;
+}
+
+/* For HTML in summaries */
+.feed-row-details p {
+  margin: 0 0 0.5rem 0;
+}
+.feed-row-details p:last-child {
+  margin-bottom: 0;
+}
+
+.summary-text {
+  margin-bottom: 0.8rem;
+}
+
+.ticker-rack {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ticker-pill {
+  color: rgba(191, 219, 254, 0.95);
+  background: rgba(30, 64, 175, 0.15);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  height: 18px;
 }
 
 .icon-button {
