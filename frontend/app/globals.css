@@ -201,19 +201,22 @@ button:disabled {
 }
 
 /* Feed Rows */
+.feed-row-wrapper {
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.15s ease;
+}
+
+.feed-row-wrapper:hover {
+  background: var(--bg-hover);
+}
+
 .feed-row {
   display: grid;
   grid-template-columns: 60px 140px 1fr auto;
   gap: 1rem;
   align-items: center;
   padding: 0.85rem 1.5rem;
-  border-bottom: 1px solid var(--border-color);
   cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.feed-row:hover {
-  background: var(--bg-hover);
 }
 
 .feed-row .stamp {
@@ -238,19 +241,26 @@ button:disabled {
 
 .feed-row .headline {
   font-size: 1rem;
-  color: var(--text-solid); /* Unread is pure white */
   font-weight: 600;
-  text-decoration: none;
   line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feed-row .headline a {
+  color: var(--text-solid); /* Unread is pure white */
+  text-decoration: none;
   transition: color 0.15s ease;
 }
 
-.feed-row.read .headline {
+.feed-row-wrapper.read .headline a {
   color: var(--text-secondary); /* Read is dim grey */
   font-weight: 400;
 }
 
-.feed-row .headline:hover {
+.feed-row .headline a:hover {
+  text-decoration: underline;
   color: var(--accent-blue);
 }
 
@@ -261,8 +271,16 @@ button:disabled {
   transition: opacity 0.15s ease;
 }
 
-.feed-row:hover .actions {
+.feed-row-wrapper:hover .actions {
   opacity: 1;
+}
+
+.feed-row-details {
+  padding: 0 1.5rem 1rem calc(200px + 2.5rem); /* Align with headline block (60px + 140px gap) */
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .icon-button {

@@ -70,6 +70,10 @@ export default function Page() {
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState(activeWatchlist?.q || "")
 
+  // View Mode & Expansion state
+  const [viewMode, setViewMode] = useState<"list" | "full">("list")
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+
   // Read/Unread state
   const [readIds, setReadIds] = useState<Set<number>>(new Set())
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set())
@@ -77,6 +81,8 @@ export default function Page() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const [mounted, setMounted] = useState(false)
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -91,8 +97,15 @@ export default function Page() {
       if (storedWatchlists) {
         setCustomWatchlists(JSON.parse(storedWatchlists))
       }
+
+      const storedViewMode = localStorage.getItem("newsViewMode")
+      if (storedViewMode === "list" || storedViewMode === "full") {
+        setViewMode(storedViewMode)
+      }
     } catch (e) {
       console.error("Failed to parse local storage", e)
+    } finally {
+      setMounted(true)
     }
   }, [])
 
@@ -109,6 +122,10 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem("starredNewsIds", JSON.stringify(Array.from(starredIds)))
   }, [starredIds])
+
+  useEffect(() => {
+    localStorage.setItem("newsViewMode", viewMode)
+  }, [viewMode])
 
   // Fetch tickers once
   useEffect(() => {
@@ -238,13 +255,32 @@ export default function Page() {
     })
   }
 
-  const markAsReadAndOpen = (item: NewsItem) => {
+  const markAsReadAndOpen = (item: NewsItem, e: React.MouseEvent) => {
+    e.stopPropagation()
     setReadIds(prev => {
       const next = new Set(prev)
       next.add(item.id)
       return next
     })
     window.open(item.url, "_blank", "noreferrer")
+  }
+
+  const toggleSummary = (item: NewsItem) => {
+    // Mark as read when expanded
+    setReadIds(prev => {
+      const next = new Set(prev)
+      next.add(item.id)
+      return next
+    })
+
+    if (viewMode === "full") return
+
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(item.id)) next.delete(item.id)
+      else next.add(item.id)
+      return next
+    })
   }
 
   const unreadCount = useMemo(() => {
@@ -400,45 +436,81 @@ export default function Page() {
           </select>
         </section>
 
-        <section className="status-strip">
-          <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${items.length} Total`}</span>
-          {error ? <span style={{ color: "#F23645" }}>Error: {error}</span> : <span>Live Data</span>}
+        <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${items.length} Total`}</span>
+            {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
+          </div>
+          
+          {mounted && (
+            <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
+              <button 
+                className={`icon-button ${viewMode === "list" ? "active" : ""}`} 
+                onClick={() => setViewMode("list")}
+                title="List View"
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: viewMode === "list" ? "var(--accent-blue)" : "transparent", color: viewMode === "list" ? "var(--text-solid)" : "var(--text-secondary)" }}
+              >
+                List
+              </button>
+              <button 
+                className={`icon-button ${viewMode === "full" ? "active" : ""}`} 
+                onClick={() => setViewMode("full")}
+                title="Full View"
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: viewMode === "full" ? "var(--accent-blue)" : "transparent", color: viewMode === "full" ? "var(--text-solid)" : "var(--text-secondary)" }}
+              >
+                Full
+              </button>
+            </div>
+          )}
         </section>
 
         <section className="feed-container">
           {items.map((item, index) => {
             const isRead = readIds.has(item.id)
             const isStarred = starredIds.has(item.id)
+            const isExpanded = viewMode === "full" || expandedIds.has(item.id)
             
             return (
               <article 
                 key={`${item.id}-${index}`} 
-                className={`feed-row ${isRead ? "read" : "unread"}`}
-                onClick={() => markAsReadAndOpen(item)}
+                className={`feed-row-wrapper ${isRead ? "read" : "unread"}`}
               >
-                <div className="stamp">{timeAgo(item.published_at)}</div>
-                <div className="source" title={item.provider}>{item.provider}</div>
-                
-                <div className="headline">
-                  {item.title}
+                <div 
+                  className={`feed-row`}
+                  onClick={() => toggleSummary(item)}
+                >
+                  <div className="stamp">{timeAgo(item.published_at)}</div>
+                  <div className="source" title={item.provider}>{item.provider}</div>
+                  
+                  <div className="headline">
+                    <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => markAsReadAndOpen(item, e)}>
+                      {item.title}
+                    </a>
+                  </div>
+
+                  <div className="actions">
+                    <button 
+                      className="icon-button" 
+                      title={isRead ? "Mark as unread" : "Mark as read"}
+                      onClick={(e) => toggleRead(item.id, e)}
+                    >
+                      <CheckIcon />
+                    </button>
+                    <button 
+                      className={`icon-button ${isStarred ? "starred" : ""}`} 
+                      title="Star story"
+                      onClick={(e) => toggleStar(item.id, e)}
+                    >
+                      <StarIcon fill={isStarred ? "currentColor" : "none"} />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="actions">
-                  <button 
-                    className="icon-button" 
-                    title={isRead ? "Mark as unread" : "Mark as read"}
-                    onClick={(e) => toggleRead(item.id, e)}
-                  >
-                    <CheckIcon />
-                  </button>
-                  <button 
-                    className={`icon-button ${isStarred ? "starred" : ""}`} 
-                    title="Star story"
-                    onClick={(e) => toggleStar(item.id, e)}
-                  >
-                    <StarIcon fill={isStarred ? "currentColor" : "none"} />
-                  </button>
-                </div>
+                {isExpanded && item.summary && (
+                  <div className="feed-row-details">
+                    {item.summary}
+                  </div>
+                )}
               </article>
             )
           })}
