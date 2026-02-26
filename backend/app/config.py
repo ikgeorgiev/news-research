@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
 
-    database_url: str = "postgresql+psycopg://cef:cef@db:5432/cef_news"
+    # Local-first default. Docker compose overrides this with the container hostname (`db`).
+    database_url: str = "postgresql+psycopg://cef:cef@localhost:5432/cef_news"
 
     ingest_interval_seconds: int = Field(default=60, ge=30)
     yahoo_chunk_size: int = Field(default=40, ge=5, le=350)

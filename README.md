@@ -46,11 +46,50 @@ docker compose up --build
 
 Default frontend host port is `3005` (`FRONTEND_PORT` in `.env`).
 
-## Local Dev Without Docker
+## Recommended Fast Dev Loop (Docker DB + Local App)
+
+This is the fastest workflow when you are making lots of code changes:
+
+- Keep only PostgreSQL in Docker.
+- Run backend and frontend locally with hot reload.
+- Avoid container rebuilds/restarts for every app edit.
+
+### 1) Start DB only
+
+```powershell
+.\dev-db.ps1 -Wait
+```
+
+### 2) Start backend locally
+
+```powershell
+.\dev-backend.ps1
+```
+
+### 3) Start frontend locally
+
+```powershell
+.\dev-frontend.ps1
+```
+
+### 4) Open app
+
+- UI: http://127.0.0.1:3005
+- API docs: http://127.0.0.1:8001/docs
+
+Script notes:
+
+- `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
+- `dev-backend.ps1` sets local env defaults (`localhost` database, local ticker CSV).
+- `dev-frontend.ps1` sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
+- `dev-backend.ps1` auto-creates/fixes `.venv`, installs deps if `uvicorn` is missing, and creates the target DB if absent.
+- You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
+
+## Manual Local Dev (Without Helper Scripts)
 
 ### Backend
 
-```bash
+```powershell
 cd backend
 python -m venv .venv
 . .venv/Scripts/activate  # Windows PowerShell
@@ -60,7 +99,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 ### Frontend
 
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
