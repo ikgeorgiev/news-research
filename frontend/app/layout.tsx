@@ -1,22 +1,9 @@
 import type { Metadata } from "next"
-import { Bebas_Neue, IBM_Plex_Mono, IBM_Plex_Sans_Condensed } from "next/font/google"
+import { Inter } from "next/font/google"
 import "./globals.css"
 
-const display = Bebas_Neue({
-  weight: "400",
-  variable: "--font-display",
-  subsets: ["latin"],
-})
-
-const body = IBM_Plex_Sans_Condensed({
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-body",
-  subsets: ["latin"],
-})
-
-const mono = IBM_Plex_Mono({
-  weight: ["400", "500", "600"],
-  variable: "--font-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 })
 
@@ -30,7 +17,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${display.variable} ${body.variable} ${mono.variable}`}>{children}</body>
+      <body className={inter.variable}>{children}</body>
     </html>
   )
 }

@@ -207,9 +207,9 @@ export default function Page() {
     <div className="deck-root">
       {/* Sidebar */}
       <aside className="sidebar">
-        <div style={{ padding: "0 1rem", marginBottom: "1.5rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.8rem", color: "var(--accent)" }}>CEF WIRE</h1>
-          <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "monospace" }}>Terminal v1.0</p>
+        <div className="brand-header">
+          <h1>CEF News</h1>
+          <p>MARKET DATA</p>
         </div>
 
         <h2>Watchlists</h2>
@@ -229,25 +229,25 @@ export default function Page() {
       {/* Main Content */}
       <main className="main-content">
         <section className="filter-rack">
-          <form onSubmit={onSearchSubmit} style={{ display: "flex", gap: "0.5rem" }}>
+          <form onSubmit={onSearchSubmit} style={{ display: "flex", gap: "0.5rem", flex: 1 }}>
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Headline scan..."
-              style={{ width: "250px" }}
+              placeholder="Search news..."
+              style={{ width: "300px" }}
             />
-            <button type="submit">Scan</button>
+            <button className="primary" type="submit">Search</button>
           </form>
 
           <select value={ticker} onChange={(event) => setTicker(event.target.value)}>
-            <option value="">All tickers</option>
+            <option value="">All symbols</option>
             {tickers.map((item) => (
               <option key={item.symbol} value={item.symbol}>{item.symbol}</option>
             ))}
           </select>
 
           <select value={provider} onChange={(event) => setProvider(event.target.value)}>
-            <option value="">All providers</option>
+            <option value="">All sources</option>
             {STATIC_PROVIDERS.map((item) => (
               <option key={item} value={item}>{item}</option>
             ))}
@@ -255,8 +255,8 @@ export default function Page() {
         </section>
 
         <section className="status-strip">
-          <span>{loading ? "SCANNING TAPE..." : `${unreadCount} UNREAD / ${items.length} TOTAL`}</span>
-          {error ? <span style={{ color: "red" }}>ERR: {error}</span> : <span>LIVE LOCAL</span>}
+          <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${items.length} Total`}</span>
+          {error ? <span style={{ color: "#F23645" }}>Error: {error}</span> : <span>Live Data</span>}
         </section>
 
         <section className="feed-container">
@@ -298,8 +298,8 @@ export default function Page() {
           })}
 
           <div className="load-more-container">
-            <button disabled={!nextCursor || loadingMore} onClick={loadMore}>
-              {loadingMore ? "LOADING..." : nextCursor ? "LOAD MORE..." : "END OF TAPE"}
+            <button className="primary" disabled={!nextCursor || loadingMore} onClick={loadMore}>
+              {loadingMore ? "Loading..." : nextCursor ? "Load More" : "End of results"}
             </button>
           </div>
         </section>
