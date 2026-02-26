@@ -11,7 +11,7 @@ export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse
 }
 
 export async function fetchNews(params: {
-  ticker?: string
+  tickers?: string[]
   provider?: string
   includeUnmapped?: boolean
   includeUnmappedFromProvider?: string
@@ -23,7 +23,9 @@ export async function fetchNews(params: {
   signal?: AbortSignal
 }): Promise<NewsResponse> {
   const query = new URLSearchParams()
-  if (params.ticker) query.set("ticker", params.ticker)
+  if (params.tickers && params.tickers.length > 0) {
+    query.set("ticker", params.tickers.join(","))
+  }
   if (params.provider) query.set("provider", params.provider)
   if (params.includeUnmapped !== undefined) {
     query.set("include_unmapped", String(params.includeUnmapped))

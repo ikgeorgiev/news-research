@@ -11,13 +11,11 @@ type Watchlist = {
   name: string
   provider?: string
   q?: string
+  tickers?: string[]
 }
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
   { id: "all", name: "All News" },
-  { id: "business_wire", name: "Business Wire CEF News", provider: "Business Wire" },
-  { id: "sec", name: "SEC Filings", q: "SEC" },
-  { id: "distributions", name: "Distributions", q: "distribution" },
 ]
 
 function timeAgo(iso: string): string {
@@ -52,8 +50,19 @@ export default function Page() {
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
   // Watchlists state
+  // Watchlists state
+  const [customWatchlists, setCustomWatchlists] = useState<Watchlist[]>([])
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>("all")
-  const activeWatchlist = DEFAULT_WATCHLISTS.find(w => w.id === activeWatchlistId)
+  
+  const activeWatchlist = useMemo(() => {
+    return DEFAULT_WATCHLISTS.find(w => w.id === activeWatchlistId) || 
+           customWatchlists.find(w => w.id === activeWatchlistId)
+  }, [activeWatchlistId, customWatchlists])
+
+  // Create Watchlist State
+  const [isCreatingWatchlist, setIsCreatingWatchlist] = useState(false)
+  const [newWatchlistName, setNewWatchlistName] = useState("")
+  const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set())
 
   // Search/Filter state
   const [ticker, setTicker] = useState("")
@@ -77,10 +86,20 @@ export default function Page() {
       
       const storedStarred = localStorage.getItem("starredNewsIds")
       if (storedStarred) setStarredIds(new Set(JSON.parse(storedStarred)))
+
+      const storedWatchlists = localStorage.getItem("customWatchlists")
+      if (storedWatchlists) {
+        setCustomWatchlists(JSON.parse(storedWatchlists))
+      }
     } catch (e) {
       console.error("Failed to parse local storage", e)
     }
   }, [])
+
+  // Save custom watchlists
+  useEffect(() => {
+    localStorage.setItem("customWatchlists", JSON.stringify(customWatchlists))
+  }, [customWatchlists])
 
   // Save state to local storage when changed
   useEffect(() => {
@@ -105,6 +124,9 @@ export default function Page() {
     setProvider(activeWatchlist?.provider || "")
     setSearchQuery(activeWatchlist?.q || "")
     setSearchInput(activeWatchlist?.q || "")
+    // Note: custom watchlists specify `tickers` directly on the `activeWatchlist` object.
+    // The dropdown `ticker` is a secondary filter if they also select it from the top dropdown.
+    // In practice, we will combine them in the fetch call.
   }, [activeWatchlist])
 
   // Fetch news when filters change
@@ -113,8 +135,21 @@ export default function Page() {
     setLoading(true)
     setError(null)
 
+    // Combine active watchlist tickers with any individually selected ticker filter
+    let fetchTickers: string[] | undefined = undefined
+    if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
+      fetchTickers = [...activeWatchlist.tickers]
+    }
+    if (ticker) {
+      if (fetchTickers) {
+        if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
+      } else {
+        fetchTickers = [ticker]
+      }
+    }
+
     fetchNews({
-      ticker: ticker || undefined,
+      tickers: fetchTickers,
       provider: provider || undefined,
       includeUnmappedFromProvider: "Business Wire",
       q: searchQuery || undefined,
@@ -133,7 +168,7 @@ export default function Page() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [ticker, provider, searchQuery])
+  }, [ticker, provider, searchQuery, activeWatchlist])
 
   const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -145,9 +180,22 @@ export default function Page() {
 
     setLoadingMore(true)
     setError(null)
+    
+    let fetchTickers: string[] | undefined = undefined
+    if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
+      fetchTickers = [...activeWatchlist.tickers]
+    }
+    if (ticker) {
+      if (fetchTickers) {
+        if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
+      } else {
+        fetchTickers = [ticker]
+      }
+    }
+
     try {
       const data = await fetchNews({
-        ticker: ticker || undefined,
+        tickers: fetchTickers,
         provider: provider || undefined,
         includeUnmappedFromProvider: "Business Wire",
         q: searchQuery || undefined,
@@ -203,6 +251,40 @@ export default function Page() {
     return items.filter(i => !readIds.has(i.id)).length
   }, [items, readIds])
 
+  const handleCreateWatchlist = (e: FormEvent) => {
+    e.preventDefault()
+    if (!newWatchlistName.trim() || selectedTickers.size === 0) return
+
+    const newWl: Watchlist = {
+      id: "cwl_" + Date.now().toString(),
+      name: newWatchlistName.trim(),
+      tickers: Array.from(selectedTickers)
+    }
+
+    setCustomWatchlists(prev => [...prev, newWl])
+    setNewWatchlistName("")
+    setSelectedTickers(new Set())
+    setIsCreatingWatchlist(false)
+    setActiveWatchlistId(newWl.id)
+  }
+
+  const handleDeleteWatchlist = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setCustomWatchlists(prev => prev.filter(w => w.id !== id))
+    if (activeWatchlistId === id) {
+      setActiveWatchlistId("all")
+    }
+  }
+
+  const toggleTickerSelection = (symbol: string) => {
+    setSelectedTickers(prev => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+
   return (
     <div className="deck-root">
       {/* Sidebar */}
@@ -212,18 +294,82 @@ export default function Page() {
           <p>MARKET DATA</p>
         </div>
 
-        <h2>Watchlists</h2>
+        <div 
+          className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
+          onClick={() => setActiveWatchlistId("all")}
+          style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem" }}
+        >
+          <span>All News</span>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Watchlists</h2>
+          {!isCreatingWatchlist && (
+            <button 
+              className="icon-button" 
+              title="New Watchlist"
+              onClick={() => setIsCreatingWatchlist(true)}
+              style={{ padding: "4px", fontSize: "1.2rem" }}
+            >
+              +
+            </button>
+          )}
+        </div>
+        
         <div>
-          {DEFAULT_WATCHLISTS.map(wl => (
+          {customWatchlists.map(wl => (
             <div 
               key={wl.id} 
               className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
               onClick={() => setActiveWatchlistId(wl.id)}
+              style={{ display: "flex", justifyContent: "space-between" }}
             >
               <span>{wl.name}</span>
+              <button 
+                className="icon-button delete-btn" 
+                onClick={(e) => handleDeleteWatchlist(wl.id, e)}
+                title="Delete watchlist"
+                style={{ opacity: 0.6, fontSize: "0.8rem", padding: "2px 6px" }}
+              >
+                ✕
+              </button>
             </div>
           ))}
+          {customWatchlists.length === 0 && !isCreatingWatchlist && (
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", padding: "0 0.5rem" }}>
+              No custom watchlists yet.
+            </p>
+          )}
         </div>
+
+        {isCreatingWatchlist && (
+          <form className="create-watchlist-form" onSubmit={handleCreateWatchlist} style={{ marginTop: "1rem", padding: "0.5rem", background: "var(--bg-layer-2)", borderRadius: "4px" }}>
+            <input 
+              autoFocus
+              placeholder="Watchlist Name" 
+              value={newWatchlistName}
+              onChange={e => setNewWatchlistName(e.target.value)}
+              style={{ width: "100%", marginBottom: "0.5rem" }}
+            />
+            <div className="ticker-selector" style={{ maxHeight: "150px", overflowY: "auto", marginBottom: "0.5rem", border: "1px solid var(--border)", borderRadius: "4px", padding: "4px" }}>
+              {tickers.map(t => (
+                <label key={t.symbol} style={{ display: "block", fontSize: "0.85rem", cursor: "pointer", padding: "2px 0" }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedTickers.has(t.symbol)} 
+                    onChange={() => toggleTickerSelection(t.symbol)} 
+                    style={{ marginRight: "6px" }}
+                  />
+                  {t.symbol}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="submit" className="primary" style={{ flex: 1, padding: "4px" }} disabled={!newWatchlistName.trim() || selectedTickers.size === 0}>Save</button>
+              <button type="button" onClick={() => setIsCreatingWatchlist(false)} style={{ flex: 1, padding: "4px" }}>Cancel</button>
+            </div>
+          </form>
+        )}
       </aside>
 
       {/* Main Content */}

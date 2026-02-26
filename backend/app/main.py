@@ -163,16 +163,30 @@ def list_news(
     )
 
     if ticker:
-        query = (
-            query.join(ArticleTicker, ArticleTicker.article_id == Article.id)
-            .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-            .where(Ticker.symbol == ticker.strip().upper())
-        )
+        ticker_symbols = [t.strip().upper() for t in ticker.split(",") if t.strip()]
+        if ticker_symbols:
+            # Match articles that have AT LEAST ONE of the requested tickers
+            ticker_match_exists = (
+                select(1)
+                .select_from(ArticleTicker)
+                .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+                .where(
+                    and_(
+                        ArticleTicker.article_id == Article.id,
+                        Ticker.symbol.in_(ticker_symbols),
+                    )
+                )
+                .correlate(Article)
+                .exists()
+            )
+            query = query.where(ticker_match_exists)
     elif include_unmapped:
         pass
     elif include_unmapped_from_provider:
         include_name = include_unmapped_from_provider.strip()
-        include_source_row = db.scalar(select(Source).where(func.lower(Source.name) == include_name.lower()))
+        include_source_row = db.scalar(
+            select(Source).where(func.lower(Source.name) == include_name.lower())
+        )
         if include_source_row is None:
             query = query.where(mapped_exists)
         else:
@@ -188,7 +202,9 @@ def list_news(
                 .correlate(Article)
                 .exists()
             )
-            query = query.where(or_(mapped_exists, and_(~mapped_exists, include_provider_exists)))
+            query = query.where(
+                or_(mapped_exists, and_(~mapped_exists, include_provider_exists))
+            )
     else:
         query = query.where(mapped_exists)
 
@@ -197,7 +213,9 @@ def list_news(
 
     if provider:
         provider_text = provider.strip()
-        source_row = db.scalar(select(Source).where(func.lower(Source.name) == provider_text.lower()))
+        source_row = db.scalar(
+            select(Source).where(func.lower(Source.name) == provider_text.lower())
+        )
         if source_row is not None:
             provider_exists = (
                 select(1)
@@ -234,7 +252,9 @@ def list_news(
             )
         )
 
-    query = query.order_by(Article.published_at.desc().nullslast(), Article.id.desc()).limit(limit + 1)
+    query = query.order_by(
+        Article.published_at.desc().nullslast(), Article.id.desc()
+    ).limit(limit + 1)
 
     rows = db.scalars(query).all()
     has_more = len(rows) > limit
@@ -295,7 +315,9 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
     )
 
 
-@app.post(f"{settings.api_prefix}/admin/ingest/run-once", response_model=RunIngestionResponse)
+@app.post(
+    f"{settings.api_prefix}/admin/ingest/run-once", response_model=RunIngestionResponse
+)
 def admin_run_ingestion(db: Session = Depends(get_db)):
     result = run_ingestion_cycle(db, settings)
     return RunIngestionResponse(
@@ -306,8 +328,12 @@ def admin_run_ingestion(db: Session = Depends(get_db)):
     )
 
 
-@app.get(f"{settings.api_prefix}/admin/ingest/status", response_model=IngestionRunResponse)
-def admin_ingestion_status(limit: int = Query(default=100, ge=1, le=300), db: Session = Depends(get_db)):
+@app.get(
+    f"{settings.api_prefix}/admin/ingest/status", response_model=IngestionRunResponse
+)
+def admin_ingestion_status(
+    limit: int = Query(default=100, ge=1, le=300), db: Session = Depends(get_db)
+):
     rows = db.execute(
         select(IngestionRun, Source.code)
         .join(Source, Source.id == IngestionRun.source_id)
