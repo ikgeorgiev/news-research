@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
-from app.ingestion import run_ingestion_cycle
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.schemas import (
     IngestionRunItem,
@@ -328,8 +327,14 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
 @app.post(
     f"{settings.api_prefix}/admin/ingest/run-once", response_model=RunIngestionResponse
 )
-def admin_run_ingestion(db: Session = Depends(get_db)):
-    result = run_ingestion_cycle(db, settings)
+def admin_run_ingestion():
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Ingestion scheduler is not available")
+
+    result = scheduler.run_once()
+    if result is None:
+        raise HTTPException(status_code=409, detail="Ingestion is already running")
+
     return RunIngestionResponse(
         total_feeds=int(result["total_feeds"]),
         total_items_seen=int(result["total_items_seen"]),

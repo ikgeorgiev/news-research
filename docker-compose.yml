@@ -13,38 +13,8 @@ services:
       start_period: 5s
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://cef:cef@db:5432/cef_news}
-      TICKERS_CSV_PATH: ${TICKERS_CSV_PATH:-/app/data/cef_tickers.csv}
-      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-60}
-      YAHOO_CHUNK_SIZE: ${YAHOO_CHUNK_SIZE:-40}
-      SOURCE_ENABLE_YAHOO: ${SOURCE_ENABLE_YAHOO:-true}
-      SOURCE_ENABLE_PRN: ${SOURCE_ENABLE_PRN:-true}
-      SOURCE_ENABLE_GN: ${SOURCE_ENABLE_GN:-true}
-      SOURCE_ENABLE_BW: ${SOURCE_ENABLE_BW:-true}
-      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3005,http://127.0.0.1:3005}
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
-      - "8000:8000"
-
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    environment:
-      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
-    depends_on:
-      - backend
-    ports:
-      - "${FRONTEND_PORT:-3005}:3000"
+      - "${POSTGRES_PORT:-5433}:5432"
 
 volumes:
   postgres_data:

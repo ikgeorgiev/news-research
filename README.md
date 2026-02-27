@@ -80,7 +80,7 @@ This is the fastest workflow when you are making lots of code changes:
 Script notes:
 
 - `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
-- `dev-backend.ps1` sets local env defaults (`localhost` database, local ticker CSV).
+- `dev-backend.ps1` sets local env defaults (`localhost:5433` database, local ticker CSV).
 - `dev-frontend.ps1` sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
 - `dev-backend.ps1` auto-creates/fixes `.venv`, installs deps if `uvicorn` is missing, and creates the target DB if absent.
 - You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
@@ -133,6 +133,8 @@ If you already use frontend `3000` or backend `800`/`8000` in another repo, run 
 .\dev-backend.ps1 -Port 8001
 .\dev-frontend.ps1 -Port 3005 -ApiBase http://127.0.0.1:8001
 ```
+
+If another project is using PostgreSQL `5432`, this repo intentionally uses `5433` for local DB access.
 
 For frontend on `3000` instead:
 

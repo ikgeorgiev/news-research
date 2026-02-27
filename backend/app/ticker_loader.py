@@ -29,9 +29,10 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
     if not symbols:
         return {"loaded": 0, "created": 0, "updated": 0}
 
+    unique_symbols = sorted(set(symbols))
     existing = {
         ticker.symbol: ticker
-        for ticker in db.scalars(select(Ticker).where(Ticker.symbol.in_(symbols))).all()
+        for ticker in db.scalars(select(Ticker).where(Ticker.symbol.in_(unique_symbols))).all()
     }
 
     created = 0
@@ -49,14 +50,15 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
 
         item = existing.get(symbol)
         if item is None:
-            db.add(
-                Ticker(
-                    symbol=symbol,
-                    fund_name=fund_name,
-                    sponsor=sponsor,
-                    active=active,
-                )
+            item = Ticker(
+                symbol=symbol,
+                fund_name=fund_name,
+                sponsor=sponsor,
+                active=active,
             )
+            db.add(item)
+            # Track newly created symbols so duplicates within the same CSV reuse this row.
+            existing[symbol] = item
             created += 1
             continue
 

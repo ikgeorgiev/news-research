@@ -579,8 +579,9 @@ export default function Page() {
                           target="_blank" 
                           rel="noreferrer" 
                           onClick={(e) => markAsReadAndOpen(item, e)}
-                          dangerouslySetInnerHTML={{ __html: item.title }}
-                        />
+                        >
+                          {item.title}
+                        </a>
                       </div>
                     </div>
                     <div className="metadata-row">

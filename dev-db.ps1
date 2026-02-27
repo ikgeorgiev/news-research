@@ -15,6 +15,11 @@ docker compose up -d db
 
 if (-not $Wait) {
     Write-Host "Database start requested. Use -Wait to block until healthy."
+    $portLine = (docker compose port db 5432 2>$null | Select-Object -First 1)
+    if ($portLine -match ":(\d+)\s*$") {
+        $hostPort = $matches[1]
+        Write-Host "Local connection: postgresql+psycopg://cef:cef@localhost:$hostPort/cef_news"
+    }
     exit 0
 }
 
@@ -28,6 +33,11 @@ while ((Get-Date) -lt $deadline) {
     $status = (docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $containerId).Trim()
     if ($status -in @("healthy", "running")) {
         Write-Host "Database is ready ($status)."
+        $portLine = (docker compose port db 5432 2>$null | Select-Object -First 1)
+        if ($portLine -match ":(\d+)\s*$") {
+            $hostPort = $matches[1]
+            Write-Host "Local connection: postgresql+psycopg://cef:cef@localhost:$hostPort/cef_news"
+        }
         exit 0
     }
 

@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint . --no-config-lookup --ignore-pattern .next"
   },
   "dependencies": {
     "next": "^16.1.6",
@@ -17,6 +17,7 @@
     "@types/node": "22.15.30",
     "@types/react": "19.0.8",
     "@types/react-dom": "19.0.3",
+    "eslint": "9.39.1",
     "typescript": "5.8.3"
   }
 }

@@ -321,7 +321,8 @@ def ingest_feed(
             items_seen += 1
 
             raw_title = str(entry.get("title") or "").strip()
-            title = clean_summary_text(raw_title) or raw_title
+            # Never fall back to raw feed title so stored titles remain plain text.
+            title = clean_summary_text(raw_title)
             link = canonicalize_url(str(entry.get("link") or "").strip())
             if not title or not link:
                 continue

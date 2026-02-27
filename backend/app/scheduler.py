@@ -46,28 +46,30 @@ class IngestionScheduler:
             self._scheduler.shutdown(wait=False)
             logger.info("Ingestion scheduler stopped")
 
-    def run_once(self) -> dict[str, int | list[dict[str, int | str | None]]]:
-        with self.session_factory() as db:
-            return run_ingestion_cycle(db, self.settings)
-
-    def _run_job(self) -> None:
+    def run_once(self) -> dict[str, int | list[dict[str, int | str | None]]] | None:
         if not self._lock.acquire(blocking=False):
-            logger.info("Ingestion job skipped because a run is already in progress")
-            return
-
+            return None
         try:
             with self.session_factory() as db:
-                result = run_ingestion_cycle(db, self.settings)
-                logger.info(
-                    "Ingestion cycle complete",
-                    extra={
-                        "total_feeds": result["total_feeds"],
-                        "total_items_seen": result["total_items_seen"],
-                        "total_items_inserted": result["total_items_inserted"],
-                        "failed_feeds": result["failed_feeds"],
-                    },
-                )
-        except Exception:
-            logger.exception("Ingestion cycle failed with unhandled exception")
+                return run_ingestion_cycle(db, self.settings)
         finally:
             self._lock.release()
+
+    def _run_job(self) -> None:
+        try:
+            result = self.run_once()
+            if result is None:
+                logger.info("Ingestion job skipped because a run is already in progress")
+                return
+
+            logger.info(
+                "Ingestion cycle complete",
+                extra={
+                    "total_feeds": result["total_feeds"],
+                    "total_items_seen": result["total_items_seen"],
+                    "total_items_inserted": result["total_items_inserted"],
+                    "failed_feeds": result["failed_feeds"],
+                },
+            )
+        except Exception:
+            logger.exception("Ingestion cycle failed with unhandled exception")
