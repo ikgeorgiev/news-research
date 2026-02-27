@@ -1,4 +1,4 @@
-from app.ingestion import _clamp_label, _extract_entry_tickers
+from app.ingestion import _clamp_label, _extract_entry_tickers, _should_persist_entry
 
 
 def test_extract_tickers_from_context_and_text():
@@ -46,3 +46,18 @@ def test_clamp_label_caps_to_column_width():
     long_text = "X" * 240
     clipped = _clamp_label(long_text)
     assert len(clipped) == 120
+
+
+def test_should_persist_entry_keeps_businesswire_without_tickers():
+    assert _should_persist_entry("businesswire", {}) is True
+
+
+def test_should_persist_entry_drops_non_bw_without_tickers():
+    assert _should_persist_entry("prnewswire", {}) is False
+    assert _should_persist_entry("globenewswire", {}) is False
+    assert _should_persist_entry("yahoo", {}) is False
+
+
+def test_should_persist_entry_keeps_non_bw_with_tickers():
+    hits = {"UTF": ("token", 0.62)}
+    assert _should_persist_entry("prnewswire", hits) is True

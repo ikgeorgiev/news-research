@@ -19,6 +19,7 @@ REQUEST_HEADERS = {
     "User-Agent": "cef-news-feed/0.1 (+local)",
     "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
 }
+GENERAL_SOURCE_CODE = "businesswire"
 
 EXCHANGE_PATTERN = re.compile(r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b")
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
@@ -136,6 +137,11 @@ def _extract_entry_tickers(
         add(upper, "token", 0.62)
 
     return hits
+
+
+def _should_persist_entry(source_code: str, ticker_hits: dict[str, tuple[str, float]]) -> bool:
+    # Persist all Business Wire items (general stream) and ticker-mapped items from other sources.
+    return source_code == GENERAL_SOURCE_CODE or bool(ticker_hits)
 
 
 def _upsert_article(
@@ -328,6 +334,9 @@ def ingest_feed(
 
             provider_name = _clamp_label(source.name)
             entry_source_name = _extract_provider(entry, source_name)
+            ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
+            if not _should_persist_entry(source.code, ticker_hits):
+                continue
 
             article, created = _upsert_article(
                 db,
@@ -341,7 +350,6 @@ def ingest_feed(
             if created:
                 items_inserted += 1
 
-            ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
             _upsert_article_tickers(db, article.id, ticker_hits, symbol_to_id)
 
             payload = {
