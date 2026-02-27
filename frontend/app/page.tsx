@@ -5,6 +5,7 @@ import { fetchNews, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
+const AUTO_REFRESH_MS = 30_000
 
 type Watchlist = {
   id: string
@@ -95,6 +96,11 @@ export default function Page() {
   const [newWatchlistName, setNewWatchlistName] = useState("")
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set())
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ watchlistId: string; x: number; y: number } | null>(null)
+  const [renamingWatchlistId, setRenamingWatchlistId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+
   // Search/Filter state
   const [ticker, setTicker] = useState("")
   const [provider, setProvider] = useState(activeWatchlist?.provider || "")
@@ -168,14 +174,12 @@ export default function Page() {
     return () => controller.abort()
   }, [])
 
-  // Sync Watchlist -> Filters
+  // Sync Watchlist -> Filters (reset all filters when switching watchlists)
   useEffect(() => {
+    setTicker("")
     setProvider(activeWatchlist?.provider || "")
     setSearchQuery(activeWatchlist?.q || "")
     setSearchInput(activeWatchlist?.q || "")
-    // Note: custom watchlists specify `tickers` directly on the `activeWatchlist` object.
-    // The dropdown `ticker` is a secondary filter if they also select it from the top dropdown.
-    // In practice, we will combine them in the fetch call.
   }, [activeWatchlist])
 
   // Fetch global baseline news for unread count
@@ -192,6 +196,48 @@ export default function Page() {
 
     return () => controller.abort()
   }, [refreshTick])
+
+  // Auto-refresh feed while tab is visible.
+  useEffect(() => {
+    if (!mounted) return
+
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const refreshNow = () => setRefreshTick((prev) => prev + 1)
+    const startTimer = () => {
+      if (timer !== null) return
+      timer = setInterval(refreshNow, AUTO_REFRESH_MS)
+    }
+    const stopTimer = () => {
+      if (timer === null) return
+      clearInterval(timer)
+      timer = null
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshNow()
+        startTimer()
+      } else {
+        stopTimer()
+      }
+    }
+
+    const onWindowFocus = () => refreshNow()
+
+    if (document.visibilityState === "visible") {
+      startTimer()
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    window.addEventListener("focus", onWindowFocus)
+
+    return () => {
+      stopTimer()
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+      window.removeEventListener("focus", onWindowFocus)
+    }
+  }, [mounted])
 
   // Fetch news when filters change
   useEffect(() => {
@@ -351,8 +397,7 @@ export default function Page() {
     setActiveWatchlistId(newWl.id)
   }
 
-  const handleDeleteWatchlist = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleDeleteWatchlist = (id: string) => {
     setCustomWatchlists(prev => prev.filter(w => w.id !== id))
     if (activeWatchlistId === id) {
       setActiveWatchlistId("all")
@@ -367,6 +412,72 @@ export default function Page() {
       return next
     })
   }
+
+  // Context menu handlers
+  const handleWatchlistContextMenu = (e: React.MouseEvent, wlId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ watchlistId: wlId, x: e.clientX, y: e.clientY })
+  }
+
+  const closeContextMenu = () => setContextMenu(null)
+
+  const handleMarkAllRead = (wlId: string) => {
+    const wl = customWatchlists.find(w => w.id === wlId)
+    if (!wl) return
+    const matchingIds = globalItems
+      .filter(i => i.tickers?.some(t => (wl.tickers || []).includes(t)))
+      .map(i => i.id)
+    setReadIds(prev => {
+      const next = new Set(prev)
+      matchingIds.forEach(id => next.add(id))
+      return next
+    })
+    closeContextMenu()
+  }
+
+  const handleStartRename = (wlId: string) => {
+    const wl = customWatchlists.find(w => w.id === wlId)
+    if (!wl) return
+    setRenamingWatchlistId(wlId)
+    setRenameValue(wl.name)
+    closeContextMenu()
+  }
+
+  const handleFinishRename = () => {
+    if (renamingWatchlistId && renameValue.trim()) {
+      setCustomWatchlists(prev =>
+        prev.map(w => w.id === renamingWatchlistId ? { ...w, name: renameValue.trim() } : w)
+      )
+    }
+    setRenamingWatchlistId(null)
+    setRenameValue("")
+  }
+
+  const handleContextDelete = (wlId: string) => {
+    handleDeleteWatchlist(wlId)
+    closeContextMenu()
+  }
+
+  const handleUpdateFeeds = () => {
+    setRefreshTick(prev => prev + 1)
+    closeContextMenu()
+  }
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClick = () => closeContextMenu()
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeContextMenu() }
+    document.addEventListener("click", handleClick)
+    document.addEventListener("contextmenu", handleClick)
+    document.addEventListener("keydown", handleKey)
+    return () => {
+      document.removeEventListener("click", handleClick)
+      document.removeEventListener("contextmenu", handleClick)
+      document.removeEventListener("keydown", handleKey)
+    }
+  }, [contextMenu])
 
   return (
     <div className="deck-root">
@@ -422,9 +533,27 @@ export default function Page() {
                 key={wl.id} 
                 className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
                 onClick={() => setActiveWatchlistId(wl.id)}
+                onContextMenu={(e) => handleWatchlistContextMenu(e, wl.id)}
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
               >
-                <span>{wl.name}</span>
+                {renamingWatchlistId === wl.id ? (
+                  <input
+                    autoFocus
+                    className="rename-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={handleFinishRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleFinishRename()
+                      if (e.key === "Escape") { setRenamingWatchlistId(null); setRenameValue("") }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ flex: 1, fontSize: "0.9rem", padding: "2px 4px" }}
+                  />
+                ) : (
+                  <span>{wl.name}</span>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   {wlUnreadCount > 0 && (
                     <span style={{ 
@@ -438,14 +567,6 @@ export default function Page() {
                       {wlUnreadCount}
                     </span>
                   )}
-                  <button 
-                    className="icon-button delete-btn" 
-                    onClick={(e) => handleDeleteWatchlist(wl.id, e)}
-                    title="Delete watchlist"
-                    style={{ opacity: 0.6, fontSize: "0.8rem", padding: "2px 6px" }}
-                  >
-                    ✕
-                  </button>
                 </div>
               </div>
             );
@@ -485,6 +606,30 @@ export default function Page() {
             </div>
           </form>
         )}
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            className="context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
+              Mark All Items as Read
+            </div>
+            <div className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
+              Rename
+            </div>
+            <div className="context-menu-separator" />
+            <div className="context-menu-item delete" onClick={() => handleContextDelete(contextMenu.watchlistId)}>
+              Delete
+            </div>
+            <div className="context-menu-separator" />
+            <div className="context-menu-item" onClick={handleUpdateFeeds}>
+              Update Feeds in Folder
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main Content */}
@@ -517,7 +662,7 @@ export default function Page() {
 
         <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${globalItems.length} Total`}</span>
+            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${globalItems.length} Total`}{items.length !== globalItems.length ? ` • ${items.length} shown` : ""}</span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
           </div>
           
@@ -557,6 +702,12 @@ export default function Page() {
         </section>
 
         <section className="feed-container">
+          {!loading && items.length === 0 && (
+            <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
+              <p style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>No news found</p>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Try adjusting your filters or switching watchlists.</p>
+            </div>
+          )}
           {items.map((item, index) => {
             const isRead = readIds.has(item.id)
             const isStarred = starredIds.has(item.id)

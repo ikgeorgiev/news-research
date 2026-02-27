@@ -368,6 +368,68 @@ button:disabled {
   justify-content: center;
 }
 
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  min-width: 200px;
+  padding: 4px 0;
+  animation: contextMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.context-menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  transition: background-color 0.1s ease;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background: var(--accent-blue);
+  color: var(--text-solid);
+}
+
+.context-menu-item.delete {
+  color: #f23645;
+}
+
+.context-menu-item.delete:hover {
+  background: #f23645;
+  color: var(--text-solid);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+/* Rename Input */
+.rename-input {
+  background: var(--bg-input) !important;
+  border: 1px solid var(--accent-blue) !important;
+  color: var(--text-solid) !important;
+  border-radius: 4px;
+  outline: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

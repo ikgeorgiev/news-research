@@ -147,6 +147,7 @@ def _should_persist_entry(source_code: str, ticker_hits: dict[str, tuple[str, fl
 def _upsert_article(
     db: Session,
     *,
+    source_code: str,
     canonical_url: str,
     title: str,
     summary: str | None,
@@ -182,10 +183,14 @@ def _upsert_article(
         )
 
     article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
+    matched_by_url = article is not None
     created = False
 
-    if article is None:
+    # Business Wire can emit multiple distinct stories with the same headline
+    # and close timestamps. Keep them separate by URL.
+    if article is None and source_code != GENERAL_SOURCE_CODE:
         article = _find_title_window_match()
+        matched_by_url = False
 
     if article is None:
         new_article = Article(
@@ -210,8 +215,10 @@ def _upsert_article(
         except IntegrityError:
             # Another worker inserted the same URL/title-window match first. Re-read and continue.
             article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
-            if article is None:
+            matched_by_url = article is not None
+            if article is None and source_code != GENERAL_SOURCE_CODE:
                 article = _find_title_window_match()
+                matched_by_url = False
             if article is None:
                 raise
 
@@ -224,8 +231,12 @@ def _upsert_article(
         article.provider_name = provider_name
         article.content_hash = content_hash
         article.cluster_key = cluster_key
-        if summary and (not article.summary or len(summary) > len(article.summary)):
-            article.summary = summary
+        if summary:
+            if matched_by_url:
+                # For exact URL matches, trust the feed payload for this URL.
+                article.summary = summary
+            elif not article.summary or len(summary) > len(article.summary):
+                article.summary = summary
         if published_at and article.published_at and published_at > article.published_at:
             article.published_at = published_at
 
@@ -341,6 +352,7 @@ def ingest_feed(
 
             article, created = _upsert_article(
                 db,
+                source_code=source.code,
                 canonical_url=link,
                 title=title,
                 summary=summary,
