@@ -52,15 +52,25 @@ def _article_providers_map(db: Session, article_ids: list[int]) -> dict[int, str
     if not article_ids:
         return {}
     rows = db.execute(
-        select(RawFeedItem.article_id, Source.name)
+        select(
+            RawFeedItem.article_id,
+            Source.name,
+            RawFeedItem.raw_link,
+            Article.canonical_url,
+            RawFeedItem.id,
+        )
         .join(Source, Source.id == RawFeedItem.source_id)
+        .join(Article, Article.id == RawFeedItem.article_id)
         .where(RawFeedItem.article_id.in_(article_ids))
-        .order_by(RawFeedItem.article_id.asc(), Source.name.asc())
+        .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
     ).all()
-    mapped: dict[int, str] = {}
-    for article_id, source_name in rows:
-        mapped.setdefault(article_id, source_name)
-    return mapped
+    matched: dict[int, str] = {}
+    fallback: dict[int, str] = {}
+    for article_id, source_name, raw_link, canonical_url, _raw_id in rows:
+        fallback.setdefault(article_id, source_name)
+        if raw_link and canonical_url and raw_link == canonical_url:
+            matched[article_id] = source_name
+    return {article_id: matched.get(article_id) or fallback.get(article_id, "") for article_id in article_ids}
 
 
 @asynccontextmanager

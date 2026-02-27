@@ -76,6 +76,7 @@ const CheckIcon = () => (
 
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
+  const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
   const [items, setItems] = useState<NewsItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
@@ -99,6 +100,7 @@ export default function Page() {
   const [provider, setProvider] = useState(activeWatchlist?.provider || "")
   const [searchInput, setSearchInput] = useState("")
   const [searchQuery, setSearchQuery] = useState(activeWatchlist?.q || "")
+  const [refreshTick, setRefreshTick] = useState(0)
 
   // View Mode & Expansion state
   const [viewMode, setViewMode] = useState<"list" | "full">("list")
@@ -176,6 +178,21 @@ export default function Page() {
     // In practice, we will combine them in the fetch call.
   }, [activeWatchlist])
 
+  // Fetch global baseline news for unread count
+  useEffect(() => {
+    const controller = new AbortController()
+    // Fetch a baseline of the latest news to calculate global unread counts
+    fetchNews({
+      includeUnmappedFromProvider: "Business Wire",
+      limit: 100, // Fetch a larger chunk for accurate unread calculations
+      signal: controller.signal,
+    })
+      .then((data) => setGlobalItems(data.items))
+      .catch(() => {}) // Ignore errors for background global fetch
+
+    return () => controller.abort()
+  }, [refreshTick])
+
   // Fetch news when filters change
   useEffect(() => {
     const controller = new AbortController()
@@ -215,7 +232,7 @@ export default function Page() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [ticker, provider, searchQuery, activeWatchlist])
+  }, [ticker, provider, searchQuery, activeWatchlist, refreshTick])
 
   const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -314,8 +331,8 @@ export default function Page() {
   }
 
   const unreadCount = useMemo(() => {
-    return items.filter(i => !readIds.has(i.id)).length
-  }, [items, readIds])
+    return globalItems.filter(i => !readIds.has(i.id)).length
+  }, [globalItems, readIds])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()
@@ -363,9 +380,21 @@ export default function Page() {
         <div 
           className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
           onClick={() => setActiveWatchlistId("all")}
-          style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem" }}
+          style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
         >
           <span>All News</span>
+          {unreadCount > 0 && (
+            <span style={{ 
+              background: activeWatchlistId === "all" ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
+              color: activeWatchlistId === "all" ? "white" : "var(--text-secondary)", 
+              fontSize: "0.75rem", 
+              padding: "2px 8px", 
+              borderRadius: "12px", 
+              fontWeight: "normal" 
+            }}>
+              {unreadCount}
+            </span>
+          )}
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -383,24 +412,44 @@ export default function Page() {
         </div>
         
         <div>
-          {customWatchlists.map(wl => (
-            <div 
-              key={wl.id} 
-              className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
-              onClick={() => setActiveWatchlistId(wl.id)}
-              style={{ display: "flex", justifyContent: "space-between" }}
-            >
-              <span>{wl.name}</span>
-              <button 
-                className="icon-button delete-btn" 
-                onClick={(e) => handleDeleteWatchlist(wl.id, e)}
-                title="Delete watchlist"
-                style={{ opacity: 0.6, fontSize: "0.8rem", padding: "2px 6px" }}
+          {customWatchlists.map(wl => {
+            const wlUnreadCount = globalItems.filter(
+              i => !readIds.has(i.id) && i.tickers?.some(t => (wl.tickers || []).includes(t))
+            ).length;
+            
+            return (
+              <div 
+                key={wl.id} 
+                className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
+                onClick={() => setActiveWatchlistId(wl.id)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
               >
-                ✕
-              </button>
-            </div>
-          ))}
+                <span>{wl.name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  {wlUnreadCount > 0 && (
+                    <span style={{ 
+                      background: activeWatchlistId === wl.id ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
+                      color: activeWatchlistId === wl.id ? "white" : "var(--text-secondary)", 
+                      fontSize: "0.75rem", 
+                      padding: "2px 8px", 
+                      borderRadius: "12px", 
+                      fontWeight: "normal" 
+                    }}>
+                      {wlUnreadCount}
+                    </span>
+                  )}
+                  <button 
+                    className="icon-button delete-btn" 
+                    onClick={(e) => handleDeleteWatchlist(wl.id, e)}
+                    title="Delete watchlist"
+                    style={{ opacity: 0.6, fontSize: "0.8rem", padding: "2px 6px" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            );
+          })}
           {customWatchlists.length === 0 && !isCreatingWatchlist && (
             <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", padding: "0 0.5rem" }}>
               No custom watchlists yet.
@@ -468,12 +517,24 @@ export default function Page() {
 
         <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${items.length} Total`}</span>
+            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${globalItems.length} Total`}</span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
           </div>
           
           {mounted && (
-            <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
+            <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+              <button 
+                className="icon-button" 
+                onClick={() => setRefreshTick(refreshTick + 1)}
+                title="Refresh Data"
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: "transparent", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l5.67-1.16" />
+                </svg>
+                Refresh
+              </button>
+              <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
               <button 
                 className={`icon-button ${viewMode === "list" ? "active" : ""}`} 
                 onClick={() => setViewMode("list")}
@@ -491,6 +552,7 @@ export default function Page() {
                 Full
               </button>
             </div>
+          </div>
           )}
         </section>
 
@@ -512,9 +574,13 @@ export default function Page() {
                   <div className="main-col">
                     <div className="headline-content">
                       <div className="headline">
-                        <a href={item.url} target="_blank" rel="noreferrer" onClick={(e) => markAsReadAndOpen(item, e)}>
-                          {item.title}
-                        </a>
+                        <a 
+                          href={item.url} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          onClick={(e) => markAsReadAndOpen(item, e)}
+                          dangerouslySetInnerHTML={{ __html: item.title }}
+                        />
                       </div>
                     </div>
                     <div className="metadata-row">

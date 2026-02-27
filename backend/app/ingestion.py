@@ -6,7 +6,8 @@ from urllib.parse import parse_qs, urlparse
 
 import feedparser
 import requests
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -58,6 +59,23 @@ def _clamp_label(value: str | None, max_len: int = 120) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len]
+
+
+def _hash_hex_to_signed_bigint(value: str) -> int:
+    raw = int(value[:16], 16)
+    if raw >= 2**63:
+        raw -= 2**64
+    return raw
+
+
+def _acquire_dedupe_locks(db: Session, url_hash: str, title_hash: str) -> None:
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+
+    # Acquire in sorted order to avoid deadlock when multiple workers lock same keys.
+    for key in sorted({_hash_hex_to_signed_bigint(url_hash), _hash_hex_to_signed_bigint(title_hash)}):
+        db.execute(select(func.pg_advisory_xact_lock(key)))
 
 
 def _extract_provider(entry: feedparser.FeedParserDict, fallback: str) -> str:
@@ -138,14 +156,13 @@ def _upsert_article(
 
     source_name = _clamp_label(source_name)
     provider_name = _clamp_label(provider_name)
+    _acquire_dedupe_locks(db, url_hash, title_hash)
 
-    article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
-    created = False
+    window_start = published_at - timedelta(hours=48)
+    window_end = published_at + timedelta(hours=48)
 
-    if article is None:
-        window_start = published_at - timedelta(hours=48)
-        window_end = published_at + timedelta(hours=48)
-        article = db.scalar(
+    def _find_title_window_match() -> Article | None:
+        return db.scalar(
             select(Article)
             .where(
                 and_(
@@ -158,8 +175,14 @@ def _upsert_article(
             .limit(1)
         )
 
+    article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
+    created = False
+
     if article is None:
-        article = Article(
+        article = _find_title_window_match()
+
+    if article is None:
+        new_article = Article(
             canonical_url=canonical_url,
             canonical_url_hash=url_hash,
             title=title,
@@ -171,10 +194,25 @@ def _upsert_article(
             title_normalized_hash=title_hash,
             cluster_key=cluster_key,
         )
-        db.add(article)
-        db.flush()
-        created = True
-    else:
+        try:
+            # Savepoint prevents a concurrent uniqueness collision from aborting the feed transaction.
+            with db.begin_nested():
+                db.add(new_article)
+                db.flush()
+            article = new_article
+            created = True
+        except IntegrityError:
+            # Another worker inserted the same URL/title-window match first. Re-read and continue.
+            article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
+            if article is None:
+                article = _find_title_window_match()
+            if article is None:
+                raise
+
+    if article is None:
+        raise RuntimeError("article upsert failed to resolve target row")
+
+    if not created:
         article.title = title
         article.source_name = source_name
         article.provider_name = provider_name
@@ -209,15 +247,30 @@ def _upsert_article_tickers(
 
         row = existing.get(ticker_id)
         if row is None:
-            db.add(
-                ArticleTicker(
-                    article_id=article_id,
-                    ticker_id=ticker_id,
-                    match_type=match_type,
-                    confidence=confidence,
-                )
+            candidate = ArticleTicker(
+                article_id=article_id,
+                ticker_id=ticker_id,
+                match_type=match_type,
+                confidence=confidence,
             )
-            continue
+            try:
+                # Savepoint prevents concurrent uq_article_ticker collisions from aborting feed ingest.
+                with db.begin_nested():
+                    db.add(candidate)
+                    db.flush()
+                row = candidate
+                existing[ticker_id] = row
+            except IntegrityError:
+                row = db.scalar(
+                    select(ArticleTicker).where(
+                        and_(
+                            ArticleTicker.article_id == article_id,
+                            ArticleTicker.ticker_id == ticker_id,
+                        )
+                    )
+                )
+                if row is None:
+                    raise
 
         if confidence > row.confidence:
             row.confidence = confidence
@@ -261,7 +314,8 @@ def ingest_feed(
         for entry in parsed.entries:
             items_seen += 1
 
-            title = str(entry.get("title") or "").strip()
+            raw_title = str(entry.get("title") or "").strip()
+            title = clean_summary_text(raw_title) or raw_title
             link = canonicalize_url(str(entry.get("link") or "").strip())
             if not title or not link:
                 continue
@@ -291,7 +345,7 @@ def ingest_feed(
             _upsert_article_tickers(db, article.id, ticker_hits, symbol_to_id)
 
             payload = {
-                "title": title,
+                "title": raw_title,
                 "link": link,
                 "published": entry.get("published") or entry.get("updated"),
                 "summary": raw_summary,
@@ -303,7 +357,7 @@ def ingest_feed(
                     article_id=article.id,
                     feed_url=feed_url,
                     raw_guid=str(entry.get("id") or entry.get("guid") or "") or None,
-                    raw_title=title,
+                    raw_title=raw_title,
                     raw_link=link,
                     raw_pub_date=published_at,
                     raw_payload_json=to_json_safe(payload),

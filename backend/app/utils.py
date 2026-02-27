@@ -30,8 +30,11 @@ def sha256_str(value: str) -> str:
 
 
 def normalize_title(value: str) -> str:
-    normalized = re.sub(r"\s+", " ", (value or "").strip().lower())
+    # Decode HTML entities first so "&amp;" and "&" normalize to the same token stream.
+    normalized = unescape((value or "")).strip().lower()
+    normalized = re.sub(r"\s+", " ", normalized)
     normalized = re.sub(r"[^a-z0-9\s]", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
 
 

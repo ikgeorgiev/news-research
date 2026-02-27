@@ -11,6 +11,12 @@ def test_normalize_title_reduces_noise():
     assert normalize_title("  Hello,   World!  ") == "hello world"
 
 
+def test_normalize_title_unescapes_html_entities():
+    plain = "Cohen & Steers Infrastructure Fund, Inc. (UTF) Notification of Sources of Distribution Under Section 19(a)"
+    escaped = "Cohen &amp; Steers Infrastructure Fund, Inc. (UTF) Notification of Sources of Distribution Under Section 19(a)"
+    assert normalize_title(plain) == normalize_title(escaped)
+
+
 def test_cursor_roundtrip():
     now = datetime.now(timezone.utc).replace(microsecond=0)
     cursor = encode_cursor(now, 42)
