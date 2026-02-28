@@ -1,29 +1,367 @@
 ticker,fund_name,sponsor,active
-GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,true
-PTY,PIMCO Corporate & Income Opportunity Fund,PIMCO,true
-PDI,PIMCO Dynamic Income Fund,PIMCO,true
-UTF,Cohen & Steers Infrastructure Fund,Cohen & Steers,true
-UTG,Reaves Utility Income Fund,Reaves,true
-RQI,Cohen & Steers Quality Income Realty Fund,Cohen & Steers,true
-RNP,Cohen & Steers REIT and Preferred Income Fund,Cohen & Steers,true
-EOD,Allspring Global Dividend Opportunity Fund,Allspring,true
-EOS,Eaton Vance Enhanced Equity Income Fund II,Morgan Stanley,true
-BME,BlackRock Health Sciences Trust,BlackRock,true
-BMEZ,BlackRock Health Sciences Term Trust,BlackRock,true
-BST,BlackRock Science and Technology Trust,BlackRock,true
-BSTZ,BlackRock Science and Technology Term Trust,BlackRock,true
-AIO,Virtus Artificial Intelligence & Technology Opportunities Fund,Virtus,true
-AWF,AllianceBernstein Global High Income Fund,AllianceBernstein,true
-OXLC,Oxford Lane Capital Corp,Oxford Lane,true
-ECC,Eagle Point Credit Company,Eagle Point,true
-ACP,abrdn Income Credit Strategies Fund,abrdn,true
-CRF,Cornerstone Total Return Fund,Cornerstone,true
-CLM,Cornerstone Strategic Value Fund,Cornerstone,true
-NIE,Virtus AllianzGI Equity & Convertible Income Fund,Virtus,true
-NXP,Nuveen Select Tax-Free Income Portfolio,Nuveen,true
-FLC,Flaherty & Crumrine Total Return Fund,Flaherty & Crumrine,true
-JRI,Nuveen Real Asset Income and Growth Fund,Nuveen,true
-HPI,John Hancock Preferred Income Fund,John Hancock,true
-HPS,John Hancock Preferred Income Fund II,John Hancock,true
-HFRO,Highland Opportunities and Income Fund,NexPoint,true
-USA,Liberty All-Star Equity Fund,Liberty,true
+ACP,abrdn Income Credit Strategies Fund,abrdn,TRUE
+ADX,,,TRUE
+AFB,,,TRUE
+AGD,,,TRUE
+AIO,Virtus Artificial Intelligence & Technology Opportunities Fund,Virtus,TRUE
+AOD,,,TRUE
+ARDC,,,TRUE
+ASA,,,TRUE
+ASG,,,TRUE
+ASGI,,,TRUE
+AVK,,,TRUE
+AWF,AllianceBernstein Global High Income Fund,AllianceBernstein,TRUE
+BBN,,,TRUE
+BCAT,,,TRUE
+BCX,,,TRUE
+BDJ,,,TRUE
+BGB,,,TRUE
+BGH,,,TRUE
+BGR,,,TRUE
+BGT,,,TRUE
+BGX,,,TRUE
+BGY,,,TRUE
+BHK,,,TRUE
+BLW,,,TRUE
+BME,BlackRock Health Sciences Trust,BlackRock,TRUE
+BMEZ,BlackRock Health Sciences Term Trust,BlackRock,TRUE
+BOE,,,TRUE
+BSL,,,TRUE
+BST,BlackRock Science and Technology Trust,BlackRock,TRUE
+BSTZ,BlackRock Science and Technology Term Trust,BlackRock,TRUE
+BTO,,,TRUE
+BTT,,,TRUE
+BTZ,,,TRUE
+BUI,,,TRUE
+BWG,,,TRUE
+BXMX,,,TRUE
+CAF,,,TRUE
+CCD,,,TRUE
+CEE,,,TRUE
+CEF,,,TRUE
+CET,,,TRUE
+CGO,,,TRUE
+CHI,,,TRUE
+CHW,,,TRUE
+CHY,,,TRUE
+CIF,,,TRUE
+CII,,,TRUE
+CIK,,,TRUE
+CLM,Cornerstone Strategic Value Fund,Cornerstone,TRUE
+CMU,,,TRUE
+CRF,Cornerstone Total Return Fund,Cornerstone,TRUE
+CSQ,,,TRUE
+CXE,,,TRUE
+DBL,,,TRUE
+DFP,,,TRUE
+DHF,,,TRUE
+DHY,,,TRUE
+DIAX,,,TRUE
+DLY,,,TRUE
+DMB,,,TRUE
+DMO,,,TRUE
+DNP,,,TRUE
+DPG,,,TRUE
+DSL,,,TRUE
+DSM,,,TRUE
+DSU,,,TRUE
+EAD,,,TRUE
+EARN,,,TRUE
+ECC,Eagle Point Credit Company,Eagle Point,TRUE
+ECF,,,TRUE
+EDD,,,TRUE
+EDF,,,TRUE
+EEA,,,TRUE
+EFR,,,TRUE
+EFT,,,TRUE
+EIC,,,TRUE
+EIM,,,TRUE
+EMD,,,TRUE
+EMF,,,TRUE
+EOD,Allspring Global Dividend Opportunity Fund,Allspring,TRUE
+EOI,,,TRUE
+EOS,Eaton Vance Enhanced Equity Income Fund II,Morgan Stanley,TRUE
+ERC,,,TRUE
+ERH,,,TRUE
+ETB,,,TRUE
+ETG,,,TRUE
+ETJ,,,TRUE
+ETO,,,TRUE
+ETV,,,TRUE
+ETW,,,TRUE
+ETY,,,TRUE
+EVF,,,TRUE
+EVG,,,TRUE
+EVN,,,TRUE
+EVT,,,TRUE
+EVV,,,TRUE
+EXG,,,TRUE
+FCO,,,TRUE
+FCT,,,TRUE
+FFA,,,TRUE
+FFC,,,TRUE
+FINS,,,TRUE
+FLC,Flaherty & Crumrine Total Return Fund,Flaherty & Crumrine,TRUE
+FMN,,,TRUE
+FOF,,,TRUE
+FPF,,,TRUE
+FRA,,,TRUE
+FT,,,TRUE
+FTF,,,TRUE
+FUND,,,TRUE
+GAB,,,TRUE
+GAM,,,TRUE
+GBAB,,,TRUE
+GCV,,,TRUE
+GDO,,,TRUE
+GDV,,,TRUE
+GF,,,TRUE
+GGN,,,TRUE
+GHY,,,TRUE
+GLO,,,TRUE
+GLQ,,,TRUE
+GLV,,,TRUE
+GNT,,,TRUE
+GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,TRUE
+GRX,,,TRUE
+GUT,,,TRUE
+HEQ,,,TRUE
+HFRO,Highland Opportunities and Income Fund,NexPoint,TRUE
+HGLB,,,TRUE
+HIO,,,TRUE
+HIX,,,TRUE
+HPF,,,TRUE
+HPI,John Hancock Preferred Income Fund,John Hancock,TRUE
+HPS,John Hancock Preferred Income Fund II,John Hancock,TRUE
+HQH,,,TRUE
+HQL,,,TRUE
+HTD,,,TRUE
+HYI,,,TRUE
+HYT,,,TRUE
+IAE,,,TRUE
+IDE,,,TRUE
+IFN,,,TRUE
+IGA,,,TRUE
+IGD,,,TRUE
+IGR,,,TRUE
+IHD,,,TRUE
+IIF,,,TRUE
+IIM,,,TRUE
+IQI,,,TRUE
+ISD,,,TRUE
+JCE,,,TRUE
+JFR,,,TRUE
+JGH,,,TRUE
+JHI,,,TRUE
+JLS,,,TRUE
+JOF,,,TRUE
+JPC,,,TRUE
+JQC,,,TRUE
+JRI,Nuveen Real Asset Income and Growth Fund,Nuveen,TRUE
+JRS,,,TRUE
+KIO,,,TRUE
+KTF,,,TRUE
+KYN,,,TRUE
+LDP,,,TRUE
+LEO,,,TRUE
+LGI,,,TRUE
+MCI,,,TRUE
+MCN,,,TRUE
+MCR,,,TRUE
+MEGI,,,TRUE
+MFM,,,TRUE
+MGF,,,TRUE
+MHD,,,TRUE
+MIN,,,TRUE
+MIY,,,TRUE
+MMD,,,TRUE
+MMT,,,TRUE
+MMU,,,TRUE
+MPA,,,TRUE
+MQY,,,TRUE
+MSD,,,TRUE
+MUA,,,TRUE
+MUC,,,TRUE
+MUJ,,,TRUE
+MXF,,,TRUE
+MYI,,,TRUE
+MYN,,,TRUE
+NAC,,,TRUE
+NAD,,,TRUE
+NAN,,,TRUE
+NBB,,,TRUE
+NBH,,,TRUE
+NBXG,,,TRUE
+NCA,,,TRUE
+NDMO,,,TRUE
+NEA,,,TRUE
+NFJ,,,TRUE
+NHS,,,TRUE
+NIE,Virtus AllianzGI Equity & Convertible Income Fund,Virtus,TRUE
+NKX,,,TRUE
+NMCO,,,TRUE
+NML,,,TRUE
+NMZ,,,TRUE
+NPV,,,TRUE
+NQP,,,TRUE
+NRK,,,TRUE
+NRO,,,TRUE
+NUV,,,TRUE
+NUW,,,TRUE
+NVG,,,TRUE
+NXJ,,,TRUE
+NXP,Nuveen Select Tax-Free Income Portfolio,Nuveen,TRUE
+NZF,,,TRUE
+OCCI,,,TRUE
+OIA,,,TRUE
+OPP,,,TRUE
+PAXS,,,TRUE
+PCF,,,TRUE
+PCM,,,TRUE
+PCN,,,TRUE
+PCQ,,,TRUE
+PDI,PIMCO Dynamic Income Fund,PIMCO,TRUE
+PDO,,,TRUE
+PDT,,,TRUE
+PEO,,,TRUE
+PFD,,,TRUE
+PFL,,,TRUE
+PFN,,,TRUE
+PFO,,,TRUE
+PGP,,,TRUE
+PGZ,,,TRUE
+PHK,,,TRUE
+PHYS,,,TRUE
+PIM,,,TRUE
+PML,,,TRUE
+PMM,,,TRUE
+PMO,,,TRUE
+PNI,,,TRUE
+PPT,,,TRUE
+PSF,,,TRUE
+PSLV,,,TRUE
+PTA,,,TRUE
+PTY,PIMCO Corporate & Income Opportunity Fund,PIMCO,TRUE
+QQQX,,,TRUE
+RA,,,TRUE
+RCS,,,TRUE
+RFI,,,TRUE
+RFM,,,TRUE
+RFMZ,,,TRUE
+RGT,,,TRUE
+RIV,,,TRUE
+RLTY,,,TRUE
+RMT,,,TRUE
+RNP,Cohen & Steers REIT and Preferred Income Fund,Cohen & Steers,TRUE
+RQI,Cohen & Steers Quality Income Realty Fund,Cohen & Steers,TRUE
+RVT,,,TRUE
+SBI,,,TRUE
+SDHY,,,TRUE
+SPE,,,TRUE
+SPPP,,,TRUE
+SPXX,,,TRUE
+STK,,,TRUE
+SWZ,,,TRUE
+TDF,,,TRUE
+TEI,,,TRUE
+THQ,,,TRUE
+THW,,,TRUE
+TSI,,,TRUE
+TWN,,,TRUE
+TY,,,TRUE
+TYG,,,TRUE
+USA,Liberty All-Star Equity Fund,Liberty,TRUE
+UTG,Reaves Utility Income Fund,Reaves,TRUE
+VBF,,,TRUE
+VCV,,,TRUE
+VFL,,,TRUE
+VGI,,,TRUE
+VGM,,,TRUE
+VKI,,,TRUE
+VKQ,,,TRUE
+VMO,,,TRUE
+VPV,,,TRUE
+VVR,,,TRUE
+WDI,,,TRUE
+WEA,,,TRUE
+WIA,,,TRUE
+WIW,,,TRUE
+XFLT,,,TRUE
+ZTR,,,TRUE
+ACV,,,TRUE
+AEF,,,TRUE
+AWP,,,TRUE
+BANX,,,TRUE
+BCV,,,TRUE
+BHV,,,TRUE
+BIT,,,TRUE
+BKT,,,TRUE
+BMN,,,TRUE
+BPRE,,,TRUE
+BRW,,,TRUE
+BTX,,,TRUE
+CCIF,,,TRUE
+CEV,,,TRUE
+CFND,,,TRUE
+CPZ,,,TRUE
+CXH,,,TRUE
+DMA,,,TRUE
+DTF,,,TRUE
+DXYZ,,,TRUE
+ECAT,,,TRUE
+EHI,,,TRUE
+EMO,,,TRUE
+EOT,,,TRUE
+ETX,,,TRUE
+FAX,,,TRUE
+FMY,,,TRUE
+FSCO,,,TRUE
+FSSL,,,TRUE
+FTHY,,,TRUE
+GDL,,,TRUE
+GGT,,,TRUE
+GGZ,,,TRUE
+GLU,,,TRUE
+GRF,,,TRUE
+GUG,,,TRUE
+HERZ,,,TRUE
+IAF,,,TRUE
+IGI,,,TRUE
+JHS,,,TRUE
+JMM,,,TRUE
+KF,,,TRUE
+MHF,,,TRUE
+MPV,,,TRUE
+MXE,,,TRUE
+NAZ,,,TRUE
+NCV,,,TRUE
+NCZ,,,TRUE
+NIM,,,TRUE
+NMAI,,,TRUE
+NMI,,,TRUE
+NMS,,,TRUE
+NMT,,,TRUE
+NNY,,,TRUE
+NOM,,,TRUE
+NPCT,,,TRUE
+NPFD,,,TRUE
+NXG,,,TRUE
+OXLC,Oxford Lane Capital Corp,Oxford Lane,TRUE
+PAI,,,TRUE
+PDCC,,,TRUE
+PDX,,,TRUE
+RCG,,,TRUE
+RMI,,,TRUE
+RMM,,,TRUE
+RMMZ,,,TRUE
+RSF,,,TRUE
+SABA,,,TRUE
+SCD,,,TRUE
+SOR,,,TRUE
+SPMC,,,TRUE
+SRV,,,TRUE
+STEW,,,TRUE
+TBLD,,,TRUE
+UTF,Cohen & Steers Infrastructure Fund,Cohen & Steers,TRUE
+VLT,,,TRUE
+VTN,,,TRUE

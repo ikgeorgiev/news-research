@@ -1,0 +1,876 @@
+{
+  "generated_at_utc": "2026-02-28T16:01:41.739371Z",
+  "feeds": [
+    {
+      "url": "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+      "http_status": 200,
+      "content_type": "application/xml",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "language",
+        "link",
+        "links",
+        "published",
+        "published_parsed",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "credit": 14,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "media_content": 14,
+        "media_credit": 14,
+        "media_text": 14,
+        "prn_industry": 20,
+        "prn_subject": 16,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 16,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "credit": 70.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "media_content": 70.0,
+        "media_credit": 70.0,
+        "media_text": 70.0,
+        "prn_industry": 100.0,
+        "prn_subject": 80.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 80.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "title": "TCL Electronics incluido en el Hang Seng Composite LargeCap &amp; MidCap Index y otros índices de prestigio",
+        "title_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "TCL Electronics incluido en el Hang Seng Composite LargeCap &amp; MidCap Index y otros índices de prestigio"
+        },
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html"
+          }
+        ],
+        "link": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html",
+        "id": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html",
+        "guidislink": false,
+        "published": "Sat, 28 Feb 2026 15:09:00 +0000",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=28, tm_hour=15, tm_min=9, tm_sec=0, tm_wday=5, tm_yday=59, tm_isdst=0)",
+        "summary": "<p>-TCL Electronics (01070.HK) incluido en el Hang Seng Composite LargeCap & MidCap Index y otros índices de prestigio El valor y el potencial de crecimiento de la Compañía se reafirman a medida que la posición en el mercado alcanza nuevas alturas HONG KONG, 28 de febrero de 2026...</p>",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p>-TCL Electronics (01070.HK) incluido en el Hang Seng Composite LargeCap & MidCap Index y otros índices de prestigio El valor y el potencial de crecimiento de la Compañía se reafirman a medida que la posición en el mercado alcanza nuevas alturas HONG KONG, 28 de febrero de 2026...</p>"
+        },
+        "media_content": [
+          {
+            "url": "https://mma.prnewswire.com/media/2921987/image_5002270_22124432.jpg?p=publish",
+            "type": "image/jpeg",
+            "width": "144"
+          }
+        ],
+        "media_text": {
+          "type": "html"
+        },
+        "media_credit": [
+          {
+            "role": "publishing company",
+            "content": "PRNewswire"
+          }
+        ],
+        "credit": "PRNewswire",
+        "prn_industry": "MFD",
+        "contributors": [
+          {
+            "name": "TCL Electronics Holdings Limited"
+          }
+        ],
+        "language": "es",
+        "publisher": "PR Newswire Association LLC.",
+        "publisher_detail": {
+          "name": "PR Newswire Association LLC."
+        }
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    },
+    {
+      "url": "https://www.prnewswire.com/rss/financial-services-latest-news/mutual-funds-list.rss",
+      "http_status": 200,
+      "content_type": "application/xml",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "language",
+        "link",
+        "links",
+        "published",
+        "published_parsed",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "credit": 11,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "media_content": 11,
+        "media_credit": 11,
+        "media_text": 11,
+        "prn_industry": 20,
+        "prn_subject": 10,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 10,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "credit": 55.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "media_content": 55.0,
+        "media_credit": 55.0,
+        "media_text": 55.0,
+        "prn_industry": 100.0,
+        "prn_subject": 50.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 50.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "title": "TCL Electronics incluido en el Hang Seng Composite LargeCap &amp; MidCap Index y otros índices de prestigio",
+        "title_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "TCL Electronics incluido en el Hang Seng Composite LargeCap &amp; MidCap Index y otros índices de prestigio"
+        },
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html"
+          }
+        ],
+        "link": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html",
+        "id": "https://www.prnewswire.com/news-releases/tcl-electronics-incluido-en-el-hang-seng-composite-largecap--midcap-index-y-otros-indices-de-prestigio-302700194.html",
+        "guidislink": false,
+        "published": "Sat, 28 Feb 2026 15:09:00 +0000",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=28, tm_hour=15, tm_min=9, tm_sec=0, tm_wday=5, tm_yday=59, tm_isdst=0)",
+        "summary": "<p>-TCL Electronics (01070.HK) incluido en el Hang Seng Composite LargeCap & MidCap Index y otros índices de prestigio El valor y el potencial de crecimiento de la Compañía se reafirman a medida que la posición en el mercado alcanza nuevas alturas HONG KONG, 28 de febrero de 2026...</p>",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p>-TCL Electronics (01070.HK) incluido en el Hang Seng Composite LargeCap & MidCap Index y otros índices de prestigio El valor y el potencial de crecimiento de la Compañía se reafirman a medida que la posición en el mercado alcanza nuevas alturas HONG KONG, 28 de febrero de 2026...</p>"
+        },
+        "media_content": [
+          {
+            "url": "https://mma.prnewswire.com/media/2921987/image_5002270_22124432.jpg?p=publish",
+            "type": "image/jpeg",
+            "width": "144"
+          }
+        ],
+        "media_text": {
+          "type": "html"
+        },
+        "media_credit": [
+          {
+            "role": "publishing company",
+            "content": "PRNewswire"
+          }
+        ],
+        "credit": "PRNewswire",
+        "prn_industry": "MFD",
+        "contributors": [
+          {
+            "name": "TCL Electronics Holdings Limited"
+          }
+        ],
+        "language": "es",
+        "publisher": "PR Newswire Association LLC.",
+        "publisher_detail": {
+          "name": "PR Newswire Association LLC."
+        }
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    },
+    {
+      "url": "https://www.prnewswire.com/rss/financial-services-latest-news/dividends-list.rss",
+      "http_status": 200,
+      "content_type": "application/xml",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "language",
+        "link",
+        "links",
+        "published",
+        "published_parsed",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "credit": 9,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "media_content": 9,
+        "media_credit": 9,
+        "media_text": 9,
+        "prn_industry": 20,
+        "prn_subject": 20,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 20,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "credit": 45.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "media_content": 45.0,
+        "media_credit": 45.0,
+        "media_text": 45.0,
+        "prn_industry": 100.0,
+        "prn_subject": 100.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 100.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "title": "Public Service Company of New Mexico Declares Preferred Dividend",
+        "title_detail": {
+          "type": "text/plain",
+          "language": null,
+          "base": "",
+          "value": "Public Service Company of New Mexico Declares Preferred Dividend"
+        },
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.prnewswire.com/news-releases/public-service-company-of-new-mexico-declares-preferred-dividend-302700049.html"
+          }
+        ],
+        "link": "https://www.prnewswire.com/news-releases/public-service-company-of-new-mexico-declares-preferred-dividend-302700049.html",
+        "id": "https://www.prnewswire.com/news-releases/public-service-company-of-new-mexico-declares-preferred-dividend-302700049.html",
+        "guidislink": false,
+        "published": "Fri, 27 Feb 2026 22:35:00 +0000",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=27, tm_hour=22, tm_min=35, tm_sec=0, tm_wday=4, tm_yday=58, tm_isdst=0)",
+        "summary": "<p>ALBUQUERQUE, N.M., Feb. 27, 2026 /PRNewswire/ -- The Board of Directors of Public Service Company of New Mexico, a subsidiary of TXNM Energy (NYSE: TXNM), declared the regular quarterly dividend of $1.145 per share on the 4.58 percent series of cumulative preferred stock. The preferred...</p>",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p>ALBUQUERQUE, N.M., Feb. 27, 2026 /PRNewswire/ -- The Board of Directors of Public Service Company of New Mexico, a subsidiary of TXNM Energy (NYSE: TXNM), declared the regular quarterly dividend of $1.145 per share on the 4.58 percent series of cumulative preferred stock. The preferred...</p>"
+        },
+        "media_content": [
+          {
+            "url": "https://mma.prnewswire.com/media/2464779/TXNM_Energy_Logo.jpg?p=original",
+            "type": "image/jpeg",
+            "width": "144"
+          }
+        ],
+        "media_text": {
+          "type": "html"
+        },
+        "media_credit": [
+          {
+            "role": "publishing company",
+            "content": "PRNewswire"
+          }
+        ],
+        "credit": "PRNewswire",
+        "prn_industry": "UTI",
+        "prn_subject": "Dividends",
+        "tags": [
+          {
+            "term": "DIV",
+            "scheme": null,
+            "label": null
+          }
+        ],
+        "contributors": [
+          {
+            "name": "TXNM Energy, Inc."
+          }
+        ],
+        "language": "en-US",
+        "publisher": "PR Newswire Association LLC.",
+        "publisher_detail": {
+          "name": "PR Newswire Association LLC."
+        }
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    },
+    {
+      "url": "https://rss.globenewswire.com/en/RssFeed/subjectcode/12-Dividend%20Reports%20And%20Estimates/feedTitle/Dividend%20Reports%20And%20Estimates",
+      "http_status": 200,
+      "content_type": "application/rss+xml; charset=utf-8",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "author",
+        "author_detail",
+        "authors",
+        "link",
+        "links",
+        "publisher",
+        "publisher_detail",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "dc_identifier": 20,
+        "dc_keyword": 8,
+        "dc_modified": 20,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 20,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "dc_identifier": 100.0,
+        "dc_keyword": 40.0,
+        "dc_modified": 100.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 100.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "id": "https://www.globenewswire.com/en/news-release/2026/02/27/3246809/0/es/FEMSA-anuncia-fecha-de-Asambleas-de-Accionistas-y-propuesta-de-pago-de-dividendo.html",
+        "guidislink": true,
+        "link": "https://www.globenewswire.com/en/news-release/2026/02/27/3246809/0/es/FEMSA-anuncia-fecha-de-Asambleas-de-Accionistas-y-propuesta-de-pago-de-dividendo.html",
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.globenewswire.com/en/news-release/2026/02/27/3246809/0/es/FEMSA-anuncia-fecha-de-Asambleas-de-Accionistas-y-propuesta-de-pago-de-dividendo.html"
+          }
+        ],
+        "tags": [
+          {
+            "term": "NYSE:FMX",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "BMV:FEMSAUB.MX",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "BMV:FEMSAUBD.MX",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "US3444191064",
+            "scheme": "https://www.globenewswire.com/rss/ISIN",
+            "label": null
+          },
+          {
+            "term": "MXP320321310",
+            "scheme": "https://www.globenewswire.com/rss/ISIN",
+            "label": null
+          },
+          {
+            "term": "Calendar of Events",
+            "scheme": null,
+            "label": null
+          },
+          {
+            "term": "Dividend Reports and Estimates",
+            "scheme": null,
+            "label": null
+          }
+        ],
+        "title": "FEMSA anuncia fecha de Asambleas de Accionistas y propuesta de pago de dividendo",
+        "title_detail": {
+          "type": "text/plain",
+          "language": null,
+          "base": "",
+          "value": "FEMSA anuncia fecha de Asambleas de Accionistas y propuesta de pago de dividendo"
+        },
+        "summary": "<p align=\"justify\">MONTERREY, M&#233;xico, Feb.  27, 2026  (GLOBE NEWSWIRE) -- Fomento Económico Mexicano, S.A.B. de C.V. (“FEMSA” o la “Compañía”) (NYSE: FMX; BMV: FEMSAUBD, FEMSAUB) anuncia que celebrará su Asamblea Ordinaria Anual de Accionistas, así como una Asamblea Extraordinaria de Accionistas el día 27 de marzo de 2026 en Monterrey, Nuevo León, México (las “Asambleas de Accionistas”). La convocatoria estará disponible en el siguiente link, en los próximos días: <a href=\"https://www.globe...",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p align=\"justify\">MONTERREY, M&#233;xico, Feb.  27, 2026  (GLOBE NEWSWIRE) -- Fomento Económico Mexicano, S.A.B. de C.V. (“FEMSA” o la “Compañía”) (NYSE: FMX; BMV: FEMSAUBD, FEMSAUB) anuncia que celebrará su Asamblea Ordinaria Anual de Accionistas, así como una Asamblea Extraordinaria de Accionistas el día 27 de marzo de 2026 en Monterrey, Nuevo León, México (las “Asambleas de Accionistas”). La convocatoria estará disponible en el siguiente link, en los próximos días: <a href=\"https://www.globenewswire.com/Tracker?data=7RdOi1ZQA9uCGuU5sGD16OItQUgB3gMpI1TbjyppWMW4np1xMG-0I8Wck4DzAPJrYS6jWaZqTL81lLXAf3DUVcRpGc-Suwx6K554AQgUgxGxwFdVOhhMnUlANcbT3N4QoRCvXisEtY16JN1R8oOSHfKP_Tf1bqov6Kra_Xqv2fP1xdXK_TO5IdsOyYLINVVnCRFZPaRJZQywnXZRHMrh4riovSwYjQGqG9xZmBzXaKiWuPPdjCbXIjxHnd08k3okJ8zNIW7ziYcuTYcVhWLx5oBg4bk1IKkZCIPsiSykTQKGl1YdtsN3s0MnBKtJTzT1oRZJhIJj51pI7iZBRAAGpUYP_O_pWXnFo3vkvd486VucTljdenFTBJer6eMbBLzxukIgIR9kN5JtPlpFoI9FaBFkEOTVRZ12lC0ONbVPrd078Pl4mfp2axyJzxyQjxLM\" rel=\"nofollow\" target=\"_blank\" title=\"\">https://femsa.gcs-web.com/es/shareholder-meeting-information</a>.</p>"
+        },
+        "published": "Fri, 27 Feb 2026 21:27 GMT",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=27, tm_hour=21, tm_min=27, tm_sec=0, tm_wday=4, tm_yday=58, tm_isdst=0)",
+        "dc_identifier": "3246809",
+        "language": "es",
+        "publisher": "GlobeNewswire Inc.",
+        "publisher_detail": {
+          "name": "GlobeNewswire Inc."
+        },
+        "contributors": [
+          {
+            "name": "Fomento Economico Mexicano"
+          }
+        ],
+        "dc_modified": "Fri, 27 Feb 2026 21:27 GMT"
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    },
+    {
+      "url": "https://rss.globenewswire.com/en/RssFeed/subjectcode/13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/Earnings%20Releases%20And%20Operating%20Results",
+      "http_status": 200,
+      "content_type": "application/rss+xml; charset=utf-8",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "author",
+        "author_detail",
+        "authors",
+        "link",
+        "links",
+        "publisher",
+        "publisher_detail",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "dc_identifier": 20,
+        "dc_keyword": 3,
+        "dc_modified": 20,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 20,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "dc_identifier": 100.0,
+        "dc_keyword": 15.0,
+        "dc_modified": 100.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 100.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "id": "https://www.globenewswire.com/en/news-release/2026/02/28/3246874/0/en/SQM-Reports-Earnings-for-the-Twelve-Months-Ended-December-31-2025.html",
+        "guidislink": true,
+        "link": "https://www.globenewswire.com/en/news-release/2026/02/28/3246874/0/en/SQM-Reports-Earnings-for-the-Twelve-Months-Ended-December-31-2025.html",
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.globenewswire.com/en/news-release/2026/02/28/3246874/0/en/SQM-Reports-Earnings-for-the-Twelve-Months-Ended-December-31-2025.html"
+          }
+        ],
+        "tags": [
+          {
+            "term": "NYSE:SQM",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "Santiago:SQM-A.SN",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "Santiago:SQM-B.SN",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "US8336351056",
+            "scheme": "https://www.globenewswire.com/rss/ISIN",
+            "label": null
+          },
+          {
+            "term": "Earnings Releases and Operating Results",
+            "scheme": null,
+            "label": null
+          }
+        ],
+        "title": "SQM Reports Earnings for the Twelve Months Ended December 31, 2025",
+        "title_detail": {
+          "type": "text/plain",
+          "language": null,
+          "base": "",
+          "value": "SQM Reports Earnings for the Twelve Months Ended December 31, 2025"
+        },
+        "summary": "<p align=\"justify\">SANTIAGO, Chile, Feb.  27, 2026  (GLOBE NEWSWIRE) --  Sociedad Química y Minera de Chile S.A. (SQM) (NYSE: SQM; Santiago Stock Exchange: SQM-B, SQM-A) reported today <strong>net income for the twelve months ended December 31, 2025, </strong>of US$588.1 million or US$2.06 per share, compared to a loss of US$(404.4) million or US$(1.42) per share reported for the same period last year.</p>",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p align=\"justify\">SANTIAGO, Chile, Feb.  27, 2026  (GLOBE NEWSWIRE) --  Sociedad Química y Minera de Chile S.A. (SQM) (NYSE: SQM; Santiago Stock Exchange: SQM-B, SQM-A) reported today <strong>net income for the twelve months ended December 31, 2025, </strong>of US$588.1 million or US$2.06 per share, compared to a loss of US$(404.4) million or US$(1.42) per share reported for the same period last year.</p>"
+        },
+        "published": "Sat, 28 Feb 2026 03:54 GMT",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=28, tm_hour=3, tm_min=54, tm_sec=0, tm_wday=5, tm_yday=59, tm_isdst=0)",
+        "dc_identifier": "3246874",
+        "language": "en",
+        "publisher": "GlobeNewswire Inc.",
+        "publisher_detail": {
+          "name": "GlobeNewswire Inc."
+        },
+        "contributors": [
+          {
+            "name": "SQM"
+          }
+        ],
+        "dc_modified": "Sat, 28 Feb 2026 03:54 GMT",
+        "dc_keyword": "fertilizers"
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    },
+    {
+      "url": "https://rss.globenewswire.com/en/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/feedTitle/Mergers%20And%20Acquisitions",
+      "http_status": 200,
+      "content_type": "application/rss+xml; charset=utf-8",
+      "fetch_error": null,
+      "bozo": false,
+      "bozo_exception": null,
+      "channel_keys": [
+        "author",
+        "author_detail",
+        "authors",
+        "link",
+        "links",
+        "publisher",
+        "publisher_detail",
+        "subtitle",
+        "subtitle_detail",
+        "title",
+        "title_detail",
+        "updated",
+        "updated_parsed"
+      ],
+      "entry_count": 20,
+      "entry_key_counts": {
+        "contributors": 20,
+        "dc_identifier": 20,
+        "dc_modified": 20,
+        "guidislink": 20,
+        "id": 20,
+        "language": 20,
+        "link": 20,
+        "links": 20,
+        "published": 20,
+        "published_parsed": 20,
+        "publisher": 20,
+        "publisher_detail": 20,
+        "summary": 20,
+        "summary_detail": 20,
+        "tags": 20,
+        "title": 20,
+        "title_detail": 20
+      },
+      "entry_key_presence_pct": {
+        "contributors": 100.0,
+        "dc_identifier": 100.0,
+        "dc_modified": 100.0,
+        "guidislink": 100.0,
+        "id": 100.0,
+        "language": 100.0,
+        "link": 100.0,
+        "links": 100.0,
+        "published": 100.0,
+        "published_parsed": 100.0,
+        "publisher": 100.0,
+        "publisher_detail": 100.0,
+        "summary": 100.0,
+        "summary_detail": 100.0,
+        "tags": 100.0,
+        "title": 100.0,
+        "title_detail": 100.0
+      },
+      "sample_entry": {
+        "id": "https://www.globenewswire.com/en/news-release/2026/02/27/3246812/0/en/FRO-Changes-to-the-Board-Composition.html",
+        "guidislink": true,
+        "link": "https://www.globenewswire.com/en/news-release/2026/02/27/3246812/0/en/FRO-Changes-to-the-Board-Composition.html",
+        "links": [
+          {
+            "rel": "alternate",
+            "type": "text/html",
+            "href": "https://www.globenewswire.com/en/news-release/2026/02/27/3246812/0/en/FRO-Changes-to-the-Board-Composition.html"
+          }
+        ],
+        "tags": [
+          {
+            "term": "Oslo:FRO",
+            "scheme": "https://www.globenewswire.com/rss/stock",
+            "label": null
+          },
+          {
+            "term": "BMG3682E1921",
+            "scheme": "https://www.globenewswire.com/rss/ISIN",
+            "label": null
+          },
+          {
+            "term": "MyWeb",
+            "scheme": null,
+            "label": null
+          },
+          {
+            "term": "Regulatory information",
+            "scheme": null,
+            "label": null
+          },
+          {
+            "term": "Mergers and Acquisitions",
+            "scheme": null,
+            "label": null
+          },
+          {
+            "term": "European Regulatory News",
+            "scheme": null,
+            "label": null
+          }
+        ],
+        "title": "FRO – Changes to the Board Composition",
+        "title_detail": {
+          "type": "text/plain",
+          "language": null,
+          "base": "",
+          "value": "FRO – Changes to the Board Composition"
+        },
+        "summary": "<p align=\"justify\">Frontline plc (“Frontline” or the “Company”) announces that Mr. Ørjan Svanevik has resigned as Director of the Company. The Board would like to thank Mr. Svanevik for his considerable contribution to the Company during his directorship. </p>",
+        "summary_detail": {
+          "type": "text/html",
+          "language": null,
+          "base": "",
+          "value": "<p align=\"justify\">Frontline plc (“Frontline” or the “Company”) announces that Mr. Ørjan Svanevik has resigned as Director of the Company. The Board would like to thank Mr. Svanevik for his considerable contribution to the Company during his directorship. </p>"
+        },
+        "published": "Fri, 27 Feb 2026 21:30 GMT",
+        "published_parsed": "time.struct_time(tm_year=2026, tm_mon=2, tm_mday=27, tm_hour=21, tm_min=30, tm_sec=0, tm_wday=4, tm_yday=58, tm_isdst=0)",
+        "dc_identifier": "3246812",
+        "language": "en",
+        "publisher": "GlobeNewswire Inc.",
+        "publisher_detail": {
+          "name": "GlobeNewswire Inc."
+        },
+        "contributors": [
+          {
+            "name": "Frontline plc."
+          }
+        ],
+        "dc_modified": "Fri, 27 Feb 2026 21:30 GMT"
+      },
+      "ticker_cues": {
+        "exchange_style_matches": [],
+        "paren_symbol_candidates": [],
+        "symbol_fields": [],
+        "fields_checked": [
+          "title",
+          "summary",
+          "description",
+          "tags",
+          "link",
+          "id",
+          "guidislink"
+        ]
+      }
+    }
+  ]
+}

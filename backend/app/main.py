@@ -11,12 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
+from app.ingestion import remap_businesswire_articles
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.schemas import (
+    BusinessWireRemapResponse,
     IngestionRunItem,
     IngestionRunResponse,
     NewsItem,
     NewsListResponse,
+    ReloadTickersResponse,
     RunIngestionResponse,
     TickerItem,
     TickerListResponse,
@@ -371,3 +374,67 @@ def admin_ingestion_status(
         for run, source_code in rows
     ]
     return IngestionRunResponse(items=items)
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/remap/businesswire",
+    response_model=BusinessWireRemapResponse,
+)
+def admin_remap_businesswire(
+    limit: int = Query(default=500, ge=1, le=5000),
+    only_unmapped: bool = Query(
+        default=True,
+        description="Remap only Business Wire articles that currently have no ticker mapping",
+    ),
+    db: Session = Depends(get_db),
+):
+    result = remap_businesswire_articles(
+        db,
+        settings,
+        limit=limit,
+        only_unmapped=only_unmapped,
+    )
+    return BusinessWireRemapResponse(
+        processed=int(result["processed"]),
+        articles_with_hits=int(result["articles_with_hits"]),
+        remapped_articles=int(result["remapped_articles"]),
+        only_unmapped=bool(result["only_unmapped"]),
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/tickers/reload",
+    response_model=ReloadTickersResponse,
+)
+def admin_reload_tickers(
+    remap_unmapped_businesswire: bool = Query(
+        default=True,
+        description="Run Business Wire remap after loading ticker CSV",
+    ),
+    remap_limit: int = Query(default=500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+):
+    ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
+
+    remap_payload: BusinessWireRemapResponse | None = None
+    if remap_unmapped_businesswire:
+        result = remap_businesswire_articles(
+            db,
+            settings,
+            limit=remap_limit,
+            only_unmapped=True,
+        )
+        remap_payload = BusinessWireRemapResponse(
+            processed=int(result["processed"]),
+            articles_with_hits=int(result["articles_with_hits"]),
+            remapped_articles=int(result["remapped_articles"]),
+            only_unmapped=bool(result["only_unmapped"]),
+        )
+
+    return ReloadTickersResponse(
+        loaded=int(ticker_stats["loaded"]),
+        created=int(ticker_stats["created"]),
+        updated=int(ticker_stats["updated"]),
+        unchanged=int(ticker_stats["unchanged"]),
+        remap=remap_payload,
+    )

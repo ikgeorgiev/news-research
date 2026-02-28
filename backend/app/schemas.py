@@ -56,3 +56,18 @@ class RunIngestionResponse(BaseModel):
     total_items_seen: int
     total_items_inserted: int
     failed_feeds: int
+
+
+class BusinessWireRemapResponse(BaseModel):
+    processed: int
+    articles_with_hits: int
+    remapped_articles: int
+    only_unmapped: bool
+
+
+class ReloadTickersResponse(BaseModel):
+    loaded: int
+    created: int
+    updated: int
+    unchanged: int
+    remap: BusinessWireRemapResponse | None = None

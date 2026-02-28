@@ -150,10 +150,20 @@ For frontend on `3000` instead:
 - `GET /api/v1/news/{id}`
 - `POST /api/v1/admin/ingest/run-once`
 - `GET /api/v1/admin/ingest/status`
+- `POST /api/v1/admin/tickers/reload`
+- `POST /api/v1/admin/remap/businesswire`
 
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
 Use `include_unmapped=true` to include all unmapped stories.
 Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wire unmapped stories while keeping mapped stories from all providers.
+
+After editing `data/cef_tickers.csv` while the backend is running, call:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/admin/tickers/reload"
+```
+
+This reloads symbols and remaps recent unmapped Business Wire items so they move out of `GENERAL` when a ticker match is found.
 
 ## Ticker Universe
 

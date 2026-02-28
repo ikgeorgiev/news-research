@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useEffect, useState, useMemo } from "react"
+import { FormEvent, useEffect, useState, useMemo, useRef } from "react"
 import { fetchNews, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
@@ -121,6 +121,11 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null)
   
   const [mounted, setMounted] = useState(false)
+  const feedGenerationRef = useRef(0)
+  const feedContainerRef = useRef<HTMLElement | null>(null)
+  const refreshReasonRef = useRef<"auto" | "manual">("manual")
+  const itemsRef = useRef<NewsItem[]>([])
+  const lastQueryKeyRef = useRef("")
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -151,6 +156,15 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem("customWatchlists", JSON.stringify(customWatchlists))
   }, [customWatchlists])
+
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
+
+  const triggerRefresh = (reason: "auto" | "manual") => {
+    refreshReasonRef.current = reason
+    setRefreshTick((prev) => prev + 1)
+  }
 
   // Save state to local storage when changed
   useEffect(() => {
@@ -203,7 +217,7 @@ export default function Page() {
 
     let timer: ReturnType<typeof setInterval> | null = null
 
-    const refreshNow = () => setRefreshTick((prev) => prev + 1)
+    const refreshNow = () => triggerRefresh("auto")
     const startTimer = () => {
       if (timer !== null) return
       timer = setInterval(refreshNow, AUTO_REFRESH_MS)
@@ -241,8 +255,32 @@ export default function Page() {
 
   // Fetch news when filters change
   useEffect(() => {
+    const queryKey = JSON.stringify({
+      watchlistId: activeWatchlistId,
+      watchlistTickers: [...(activeWatchlist?.tickers || [])].sort(),
+      ticker,
+      provider,
+      searchQuery,
+    })
+    const sameQueryAsPrevious = lastQueryKeyRef.current === queryKey
+    const refreshReason = refreshReasonRef.current
+    refreshReasonRef.current = "manual"
+
+    const feedEl = feedContainerRef.current
+    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
+    const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
+
+    // Avoid jarring feed resets while user is reading older items.
+    if (isAutoRefresh && isReadingDeep) {
+      return
+    }
+
+    lastQueryKeyRef.current = queryKey
     const controller = new AbortController()
-    setLoading(true)
+    const showLoading = !isAutoRefresh
+    if (showLoading) {
+      setLoading(true)
+    }
     setError(null)
 
     // Combine active watchlist tickers with any individually selected ticker filter
@@ -258,24 +296,46 @@ export default function Page() {
       }
     }
 
+    const includeGeneralFromProvider =
+      activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
+        ? "Business Wire"
+        : undefined
+    const requestGeneration = ++feedGenerationRef.current
+
     fetchNews({
       tickers: fetchTickers,
       provider: provider || undefined,
-      includeUnmappedFromProvider: "Business Wire",
+      includeUnmappedFromProvider: includeGeneralFromProvider,
       q: searchQuery || undefined,
       limit: 40,
       signal: controller.signal,
     })
       .then((data) => {
+        if (requestGeneration !== feedGenerationRef.current) return
+        if (isAutoRefresh && itemsRef.current.length > data.items.length) {
+          // Keep previously loaded pages; prepend only genuinely new top stories.
+          setItems((prev) => {
+            const prevIds = new Set(prev.map((item) => item.id))
+            const prepend = data.items.filter((item) => !prevIds.has(item.id))
+            return prepend.length > 0 ? [...prepend, ...prev] : prev
+          })
+          setNextCursor((prev) => prev ?? data.next_cursor)
+          return
+        }
         setItems(data.items)
         setNextCursor(data.next_cursor)
       })
       .catch((err: unknown) => {
+        if (requestGeneration !== feedGenerationRef.current) return
         if (err instanceof DOMException && err.name === "AbortError") return
         const message = err instanceof Error ? err.message : "Failed to load feed"
         setError(message)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (showLoading && requestGeneration === feedGenerationRef.current) {
+          setLoading(false)
+        }
+      })
 
     return () => controller.abort()
   }, [ticker, provider, searchQuery, activeWatchlist, refreshTick])
@@ -290,6 +350,7 @@ export default function Page() {
 
     setLoadingMore(true)
     setError(null)
+    const requestGeneration = feedGenerationRef.current
     
     let fetchTickers: string[] | undefined = undefined
     if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
@@ -304,17 +365,24 @@ export default function Page() {
     }
 
     try {
+      const includeGeneralFromProvider =
+        activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
+          ? "Business Wire"
+          : undefined
+
       const data = await fetchNews({
         tickers: fetchTickers,
         provider: provider || undefined,
-        includeUnmappedFromProvider: "Business Wire",
+        includeUnmappedFromProvider: includeGeneralFromProvider,
         q: searchQuery || undefined,
         limit: 40,
         cursor: nextCursor,
       })
+      if (requestGeneration !== feedGenerationRef.current) return
       setItems((prev) => [...prev, ...data.items])
       setNextCursor(data.next_cursor)
     } catch (err: unknown) {
+      if (requestGeneration !== feedGenerationRef.current) return
       const message = err instanceof Error ? err.message : "Failed to load more"
       setError(message)
     } finally {
@@ -460,7 +528,7 @@ export default function Page() {
   }
 
   const handleUpdateFeeds = () => {
-    setRefreshTick(prev => prev + 1)
+    triggerRefresh("manual")
     closeContextMenu()
   }
 
@@ -670,7 +738,7 @@ export default function Page() {
             <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
               <button 
                 className="icon-button" 
-                onClick={() => setRefreshTick(refreshTick + 1)}
+                onClick={() => triggerRefresh("manual")}
                 title="Refresh Data"
                 style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: "transparent", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
               >
@@ -701,7 +769,7 @@ export default function Page() {
           )}
         </section>
 
-        <section className="feed-container">
+        <section className="feed-container" ref={feedContainerRef}>
           {!loading && items.length === 0 && (
             <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
               <p style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>No news found</p>
@@ -787,7 +855,7 @@ export default function Page() {
           })}
 
           <div className="load-more-container">
-            <button className="primary" disabled={!nextCursor || loadingMore} onClick={loadMore}>
+            <button className="primary" disabled={loading || !nextCursor || loadingMore} onClick={loadMore}>
               {loadingMore ? "Loading..." : nextCursor ? "Load More" : "End of results"}
             </button>
           </div>

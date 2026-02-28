@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import time
 import re
+import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
+from html import unescape
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
 import requests
@@ -13,17 +17,33 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.sources import build_source_feeds, seed_sources
+from app.ticker_loader import load_tickers_from_csv
 from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
 
 REQUEST_HEADERS = {
     "User-Agent": "cef-news-feed/0.1 (+local)",
     "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
 }
+BUSINESSWIRE_PAGE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; cef-news-feed/0.1; +local)",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.1",
+}
 GENERAL_SOURCE_CODE = "businesswire"
+BUSINESSWIRE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
+BUSINESSWIRE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
+BUSINESSWIRE_PAGE_CACHE_MAX_ITEMS = 512
 
 EXCHANGE_PATTERN = re.compile(r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b")
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
+HTML_SCRIPT_STYLE_PATTERN = re.compile(
+    r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL
+)
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+TABLE_CELL_SYMBOL_PATTERN = re.compile(
+    r"<td[^>]*>\s*([A-Z][A-Z0-9\.\-]{0,9})\s*</td>",
+    flags=re.IGNORECASE,
+)
 STOPWORDS = {
     "A",
     "AN",
@@ -53,6 +73,13 @@ STOPWORDS = {
     "USA",
     "WITH",
 }
+# Symbols that are also common finance words should not be inferred via generic token scans.
+# They remain matchable via stronger signals (context, exchange pattern, or parenthesized symbol).
+AMBIGUOUS_TOKEN_SYMBOLS = {
+    "FUND",
+}
+_businesswire_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
+_businesswire_page_cache_lock = threading.Lock()
 
 
 def _clamp_label(value: str | None, max_len: int = 120) -> str:
@@ -99,12 +126,125 @@ def _parse_context_symbols(feed_url: str) -> list[str]:
     return symbols
 
 
+def _canonical_businesswire_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    # Keep path-only URL for stable cache keys and fewer duplicate fetches.
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+
+def _is_businesswire_article_url(url: str) -> bool:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    if scheme not in {"http", "https"} or not hostname:
+        return False
+    return hostname == "businesswire.com" or hostname.endswith(".businesswire.com")
+
+
+def _cache_businesswire_page(url: str, fetched_at: float, html_text: str | None) -> None:
+    with _businesswire_page_cache_lock:
+        _businesswire_page_cache[url] = (fetched_at, html_text)
+        _businesswire_page_cache.move_to_end(url)
+
+        while len(_businesswire_page_cache) > BUSINESSWIRE_PAGE_CACHE_MAX_ITEMS:
+            _businesswire_page_cache.popitem(last=False)
+
+
+def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
+    fetch_url = _canonical_businesswire_article_url(url)
+    if not _is_businesswire_article_url(fetch_url):
+        return None
+
+    now = time.time()
+    with _businesswire_page_cache_lock:
+        cached = _businesswire_page_cache.get(fetch_url)
+        if cached is not None:
+            fetched_at, cached_html = cached
+            ttl_seconds = (
+                BUSINESSWIRE_PAGE_CACHE_TTL_SECONDS
+                if cached_html is not None
+                else BUSINESSWIRE_PAGE_FAILURE_CACHE_TTL_SECONDS
+            )
+            if now - fetched_at <= ttl_seconds:
+                _businesswire_page_cache.move_to_end(fetch_url)
+                return cached_html
+
+    html_text: str | None = None
+    try:
+        response = requests.get(
+            fetch_url,
+            timeout=timeout_seconds,
+            headers=BUSINESSWIRE_PAGE_HEADERS,
+        )
+        if response.ok and response.text:
+            html_text = response.text
+    except Exception:
+        html_text = None
+
+    _cache_businesswire_page(fetch_url, time.time(), html_text)
+    return html_text
+
+
+def _extract_table_cell_symbols_from_html(html_text: str, known_symbols: set[str]) -> set[str]:
+    hits: set[str] = set()
+    for raw_symbol in TABLE_CELL_SYMBOL_PATTERN.findall(html_text):
+        symbol = raw_symbol.upper().strip()
+        if symbol in STOPWORDS:
+            continue
+        if symbol in known_symbols:
+            hits.add(symbol)
+    return hits
+
+
+def _html_to_plain_text(html_text: str) -> str:
+    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
+    text = HTML_TAG_PATTERN.sub(" ", text)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _extract_businesswire_fallback_tickers(
+    title: str,
+    summary: str,
+    link: str,
+    feed_url: str,
+    known_symbols: set[str],
+    timeout_seconds: int,
+) -> dict[str, tuple[str, float]]:
+    html_text = _fetch_businesswire_page_html(link, timeout_seconds)
+    if not html_text:
+        return {}
+
+    # Avoid noisy all-token scan on large pages; rely on explicit exchange/paren patterns.
+    plain_text = _html_to_plain_text(html_text)
+    enriched_summary = " ".join([part for part in [summary, plain_text] if part]).strip()
+    hits = _extract_entry_tickers(
+        title,
+        enriched_summary,
+        link,
+        feed_url,
+        known_symbols,
+        include_token=False,
+    )
+
+    # Extract compact symbols from HTML table cells to catch columns like "Ticker: DSM, LEO".
+    for symbol in _extract_table_cell_symbols_from_html(html_text, known_symbols):
+        existing = hits.get(symbol)
+        if existing is None or 0.84 > existing[1]:
+            hits[symbol] = ("bw_table", 0.84)
+
+    return hits
+
+
 def _extract_entry_tickers(
     title: str,
     summary: str,
     link: str,
     feed_url: str,
     known_symbols: set[str],
+    *,
+    include_token: bool = True,
 ) -> dict[str, tuple[str, float]]:
     hits: dict[str, tuple[str, float]] = {}
 
@@ -130,11 +270,14 @@ def _extract_entry_tickers(
     for symbol in PAREN_SYMBOL_PATTERN.findall(text):
         add(symbol.upper(), "paren", 0.75)
 
-    for symbol in TOKEN_PATTERN.findall(text):
-        upper = symbol.upper()
-        if upper in STOPWORDS:
-            continue
-        add(upper, "token", 0.62)
+    if include_token:
+        for symbol in TOKEN_PATTERN.findall(text):
+            upper = symbol.upper()
+            if upper in STOPWORDS:
+                continue
+            if upper in AMBIGUOUS_TOKEN_SYMBOLS:
+                continue
+            add(upper, "token", 0.62)
 
     return hits
 
@@ -248,14 +391,19 @@ def _upsert_article_tickers(
     article_id: int,
     ticker_hits: dict[str, tuple[str, float]],
     symbol_to_id: dict[str, int],
+    *,
+    existing_rows: dict[int, ArticleTicker] | None = None,
 ) -> None:
     if not ticker_hits:
         return
 
-    existing = {
-        row.ticker_id: row
-        for row in db.scalars(select(ArticleTicker).where(ArticleTicker.article_id == article_id)).all()
-    }
+    if existing_rows is None:
+        existing = {
+            row.ticker_id: row
+            for row in db.scalars(select(ArticleTicker).where(ArticleTicker.article_id == article_id)).all()
+        }
+    else:
+        existing = existing_rows
 
     for symbol, (match_type, confidence) in ticker_hits.items():
         ticker_id = symbol_to_id.get(symbol)
@@ -347,6 +495,15 @@ def ingest_feed(
             provider_name = _clamp_label(source.name)
             entry_source_name = _extract_provider(entry, source_name)
             ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
+            if source.code == GENERAL_SOURCE_CODE and not ticker_hits:
+                ticker_hits = _extract_businesswire_fallback_tickers(
+                    title,
+                    summary or "",
+                    link,
+                    feed_url,
+                    known_symbols,
+                    timeout_seconds,
+                )
             if not _should_persist_entry(source.code, ticker_hits):
                 continue
 
@@ -409,7 +566,11 @@ def ingest_feed(
     }
 
 
-def run_ingestion_cycle(db: Session, settings: Settings) -> dict[str, int | list[dict[str, int | str | None]]]:
+def run_ingestion_cycle(
+    db: Session, settings: Settings
+) -> dict[str, int | dict[str, int | bool] | dict[str, int] | list[dict[str, int | str | None]]]:
+    ticker_sync = load_tickers_from_csv(db, settings.tickers_csv_path)
+
     source_feeds = build_source_feeds(settings, db)
     seed_sources(db, source_feeds)
 
@@ -447,10 +608,129 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> dict[str, int | list
             if result["status"] != "success":
                 failed += 1
 
+    remap_stats: dict[str, int | bool] | None = None
+    ticker_changed = int(ticker_sync.get("created", 0)) > 0 or int(ticker_sync.get("updated", 0)) > 0
+    if ticker_changed:
+        remap_stats = remap_businesswire_articles(
+            db,
+            settings,
+            limit=500,
+            only_unmapped=True,
+        )
+
     return {
         "total_feeds": len(per_feed),
         "total_items_seen": total_seen,
         "total_items_inserted": total_inserted,
         "failed_feeds": failed,
+        "ticker_sync": ticker_sync,
+        "businesswire_remap": remap_stats or {
+            "processed": 0,
+            "articles_with_hits": 0,
+            "remapped_articles": 0,
+            "only_unmapped": True,
+        },
         "feeds": per_feed,
+    }
+
+
+def remap_businesswire_articles(
+    db: Session,
+    settings: Settings,
+    *,
+    limit: int = 500,
+    only_unmapped: bool = True,
+) -> dict[str, int | bool]:
+    ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
+    symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
+    known_symbols = set(symbol_to_id.keys())
+
+    mapped_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(ArticleTicker.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )
+    businesswire_exists = (
+        select(1)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(
+            and_(
+                RawFeedItem.article_id == Article.id,
+                Source.code == GENERAL_SOURCE_CODE,
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
+
+    query = select(Article).where(businesswire_exists)
+    if only_unmapped:
+        query = query.where(~mapped_exists)
+
+    rows = db.scalars(
+        query.order_by(Article.published_at.desc().nullslast(), Article.id.desc()).limit(limit)
+    ).all()
+    article_ids = [row.id for row in rows]
+    ticker_rows_by_article: dict[int, dict[int, ArticleTicker]] = {article_id: {} for article_id in article_ids}
+    if article_ids:
+        existing_rows = db.scalars(
+            select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
+        ).all()
+        for ticker_row in existing_rows:
+            ticker_rows_by_article.setdefault(ticker_row.article_id, {})[ticker_row.ticker_id] = ticker_row
+
+    processed = 0
+    articles_with_hits = 0
+    remapped_articles = 0
+
+    for row in rows:
+        processed += 1
+        summary = row.summary or ""
+        ticker_hits = _extract_entry_tickers(
+            row.title,
+            summary,
+            row.canonical_url,
+            "",
+            known_symbols,
+        )
+        if not ticker_hits:
+            ticker_hits = _extract_businesswire_fallback_tickers(
+                row.title,
+                summary,
+                row.canonical_url,
+                "",
+                known_symbols,
+                settings.request_timeout_seconds,
+            )
+        if not ticker_hits:
+            continue
+
+        articles_with_hits += 1
+        existing_for_article = ticker_rows_by_article.setdefault(row.id, {})
+        new_ids = {
+            symbol_to_id[symbol]
+            for symbol in ticker_hits.keys()
+            if symbol in symbol_to_id and symbol_to_id[symbol] not in existing_for_article
+        }
+        if new_ids:
+            remapped_articles += 1
+
+        _upsert_article_tickers(
+            db,
+            row.id,
+            ticker_hits,
+            symbol_to_id,
+            existing_rows=existing_for_article,
+        )
+
+    db.commit()
+
+    return {
+        "processed": processed,
+        "articles_with_hits": articles_with_hits,
+        "remapped_articles": remapped_articles,
+        "only_unmapped": only_unmapped,
     }
