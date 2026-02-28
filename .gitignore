@@ -17,3 +17,4 @@ Thumbs.db
 # Research scratch files
 .tmp_*.js
 .tmp_*.html
+.tmp/
