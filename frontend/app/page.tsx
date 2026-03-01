@@ -75,6 +75,19 @@ const CheckIcon = () => (
   </svg>
 )
 
+function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
+  const merged: NewsItem[] = []
+  const seen = new Set<number>()
+  for (const group of groups) {
+    for (const item of group) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      merged.push(item)
+    }
+  }
+  return merged
+}
+
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
@@ -428,7 +441,11 @@ export default function Page() {
         cursor: nextCursor,
       })
       if (requestGeneration !== feedGenerationRef.current) return
-      setItems((prev) => [...prev, ...data.items])
+      setItems((prev) => {
+        const prevIds = new Set(prev.map((item) => item.id))
+        const append = data.items.filter((item) => !prevIds.has(item.id))
+        return append.length > 0 ? [...prev, ...append] : prev
+      })
       setNextCursor(data.next_cursor)
     } catch (err: unknown) {
       if (requestGeneration !== feedGenerationRef.current) return
@@ -503,9 +520,14 @@ export default function Page() {
     })
   }
 
+  const trackedUnreadItems = useMemo(
+    () => mergeUniqueNewsItems(items, pendingNewItems, globalItems),
+    [items, pendingNewItems, globalItems]
+  )
+
   const unreadCount = useMemo(() => {
-    return globalItems.filter((item) => !readIds.has(item.id)).length
-  }, [globalItems, readIds])
+    return trackedUnreadItems.filter((item) => !readIds.has(item.id)).length
+  }, [trackedUnreadItems, readIds])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()
@@ -552,11 +574,11 @@ export default function Page() {
   const handleMarkAllRead = (wlId: string) => {
     let matchingIds: number[]
     if (wlId === "all") {
-      matchingIds = globalItems.map(i => i.id)
+      matchingIds = trackedUnreadItems.map(i => i.id)
     } else {
       const wl = customWatchlists.find(w => w.id === wlId)
       if (!wl) return
-      matchingIds = globalItems
+      matchingIds = trackedUnreadItems
         .filter(i => i.tickers?.some(t => (wl.tickers || []).includes(t)))
         .map(i => i.id)
     }
@@ -657,7 +679,7 @@ export default function Page() {
         
         <div>
           {customWatchlists.map(wl => {
-            const wlUnreadCount = globalItems.filter(
+            const wlUnreadCount = trackedUnreadItems.filter(
               i => !readIds.has(i.id) && i.tickers?.some(t => (wl.tickers || []).includes(t))
             ).length;
             
@@ -802,7 +824,7 @@ export default function Page() {
             <span>
               {loading
                 ? "Refreshing..."
-                : `${unreadCount} Unread (latest ${globalItems.length}) / ${totalCount} Total`}
+                : `${unreadCount} Unread (${trackedUnreadItems.length} tracked) / ${totalCount} Total`}
               {items.length !== totalCount ? ` • ${items.length} shown` : ""}
             </span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
