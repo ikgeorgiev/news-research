@@ -297,7 +297,7 @@ def _upsert_article(
     published_at: datetime,
     source_name: str,
     provider_name: str,
-) -> tuple[Article, bool]:
+) -> tuple[Article, bool, bool]:
     url_hash = sha256_str(canonical_url)
     title_hash = sha256_str(normalize_title(title))
     summary_norm = normalize_title(summary or "")
@@ -383,7 +383,7 @@ def _upsert_article(
         if published_at and article.published_at and published_at > article.published_at:
             article.published_at = published_at
 
-    return article, created
+    return article, created, matched_by_url
 
 
 def _upsert_article_tickers(
@@ -393,8 +393,9 @@ def _upsert_article_tickers(
     symbol_to_id: dict[str, int],
     *,
     existing_rows: dict[int, ArticleTicker] | None = None,
+    prune_missing: bool = False,
 ) -> None:
-    if not ticker_hits:
+    if not ticker_hits and not prune_missing:
         return
 
     if existing_rows is None:
@@ -405,10 +406,12 @@ def _upsert_article_tickers(
     else:
         existing = existing_rows
 
+    resolved_ticker_ids: set[int] = set()
     for symbol, (match_type, confidence) in ticker_hits.items():
         ticker_id = symbol_to_id.get(symbol)
         if ticker_id is None:
             continue
+        resolved_ticker_ids.add(ticker_id)
 
         row = existing.get(ticker_id)
         if row is None:
@@ -440,6 +443,14 @@ def _upsert_article_tickers(
         if confidence > row.confidence:
             row.confidence = confidence
             row.match_type = match_type
+
+    if prune_missing:
+        # For exact URL matches we can trust current extraction and remove stale mappings.
+        for ticker_id, row in list(existing.items()):
+            if ticker_id in resolved_ticker_ids:
+                continue
+            db.delete(row)
+            existing.pop(ticker_id, None)
 
 
 def ingest_feed(
@@ -504,10 +515,20 @@ def ingest_feed(
                     known_symbols,
                     timeout_seconds,
                 )
-            if not _should_persist_entry(source.code, ticker_hits):
+
+            allow_existing_unmapped = False
+            if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
+                existing_article_id = db.scalar(
+                    select(Article.id)
+                    .where(Article.canonical_url_hash == sha256_str(link))
+                    .limit(1)
+                )
+                allow_existing_unmapped = existing_article_id is not None
+
+            if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
                 continue
 
-            article, created = _upsert_article(
+            article, created, matched_by_url = _upsert_article(
                 db,
                 source_code=source.code,
                 canonical_url=link,
@@ -520,7 +541,13 @@ def ingest_feed(
             if created:
                 items_inserted += 1
 
-            _upsert_article_tickers(db, article.id, ticker_hits, symbol_to_id)
+            _upsert_article_tickers(
+                db,
+                article.id,
+                ticker_hits,
+                symbol_to_id,
+                prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
+            )
 
             payload = {
                 "title": raw_title,

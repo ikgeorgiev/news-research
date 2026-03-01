@@ -72,7 +72,8 @@ def _article_providers_map(db: Session, article_ids: list[int]) -> dict[int, str
     for article_id, source_name, raw_link, canonical_url, _raw_id in rows:
         fallback.setdefault(article_id, source_name)
         if raw_link and canonical_url and raw_link == canonical_url:
-            matched[article_id] = source_name
+            # Rows are ordered newest-first, so keep the first canonical match.
+            matched.setdefault(article_id, source_name)
     return {article_id: matched.get(article_id) or fallback.get(article_id, "") for article_id in article_ids}
 
 
@@ -221,19 +222,32 @@ def _build_news_query(
             select(Source).where(func.lower(Source.name) == provider_text.lower())
         )
         if source_row is not None:
-            provider_exists = (
-                select(1)
-                .select_from(RawFeedItem)
+            # Align provider filtering with the provider label shown in the feed:
+            # prefer source for canonical-url raw item, else latest raw item source.
+            canonical_source_id = (
+                select(RawFeedItem.source_id)
                 .where(
                     and_(
                         RawFeedItem.article_id == Article.id,
-                        RawFeedItem.source_id == source_row.id,
+                        RawFeedItem.raw_link == Article.canonical_url,
                     )
                 )
+                .order_by(RawFeedItem.id.desc())
+                .limit(1)
                 .correlate(Article)
-                .exists()
+                .scalar_subquery()
             )
-            query = query.where(provider_exists)
+            latest_source_id = (
+                select(RawFeedItem.source_id)
+                .where(RawFeedItem.article_id == Article.id)
+                .order_by(RawFeedItem.id.desc())
+                .limit(1)
+                .correlate(Article)
+                .scalar_subquery()
+            )
+            query = query.where(
+                func.coalesce(canonical_source_id, latest_source_id) == source_row.id
+            )
         else:
             query = query.where(Article.provider_name.ilike(f"%{provider_text}%"))
 
