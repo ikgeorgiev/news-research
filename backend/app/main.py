@@ -18,6 +18,7 @@ from app.schemas import (
     IngestionRunItem,
     IngestionRunResponse,
     NewsCountResponse,
+    NewsIdsResponse,
     NewsItem,
     NewsListResponse,
     ReloadTickersResponse,
@@ -294,6 +295,41 @@ def count_news(
     )
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     return NewsCountResponse(total=total or 0)
+
+
+@app.get(f"{settings.api_prefix}/news/ids", response_model=NewsIdsResponse)
+def list_news_ids(
+    ticker: str | None = None,
+    source: str | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    include_unmapped: bool = Query(
+        default=False,
+        description="Include articles not mapped to any active ticker",
+    ),
+    include_unmapped_from_provider: str | None = Query(
+        default=None,
+        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+    ),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    query = _build_news_query(
+        db,
+        ticker=ticker,
+        source=source,
+        provider=provider,
+        q=q,
+        include_unmapped=include_unmapped,
+        include_unmapped_from_provider=include_unmapped_from_provider,
+        from_=from_,
+        to=to,
+    )
+    # Select only IDs — lightweight single-scan query for bulk operations.
+    id_query = query.with_only_columns(Article.id)
+    ids = list(db.scalars(id_query).all())
+    return NewsIdsResponse(ids=ids)
 
 
 @app.get(f"{settings.api_prefix}/news", response_model=NewsListResponse)

@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useState, useMemo, useRef } from "react"
-import { fetchNews, fetchNewsCount, fetchTickers } from "@/lib/api"
+import { fetchNews, fetchNewsCount, fetchNewsIds, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
@@ -525,9 +525,23 @@ export default function Page() {
     [items, pendingNewItems, globalItems]
   )
 
+  // Count read IDs verified against our tracked window, plus reads beyond the
+  // tracked window (e.g. from bulk "Mark All Read" via the /news/ids endpoint).
+  // Untracked reads are capped at the number of articles beyond the window to
+  // avoid stale localStorage IDs inflating the count.
   const unreadCount = useMemo(() => {
-    return trackedUnreadItems.filter((item) => !readIds.has(item.id)).length
-  }, [trackedUnreadItems, readIds])
+    let validReadCount = 0
+    for (const item of trackedUnreadItems) {
+      if (readIds.has(item.id)) validReadCount++
+    }
+    if (totalCount > 0) {
+      const untrackedReads = readIds.size - validReadCount
+      const untrackedArticles = Math.max(0, totalCount - trackedUnreadItems.length)
+      const totalReads = validReadCount + Math.min(untrackedReads, untrackedArticles)
+      return Math.max(0, totalCount - totalReads)
+    }
+    return trackedUnreadItems.length - validReadCount
+  }, [trackedUnreadItems, readIds, totalCount])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()
@@ -572,22 +586,55 @@ export default function Page() {
   const closeContextMenu = () => setContextMenu(null)
 
   const handleMarkAllRead = (wlId: string) => {
-    let matchingIds: number[]
-    if (wlId === "all") {
-      matchingIds = trackedUnreadItems.map(i => i.id)
-    } else {
-      const wl = customWatchlists.find(w => w.id === wlId)
-      if (!wl) return
-      matchingIds = trackedUnreadItems
-        .filter(i => i.tickers?.some(t => (wl.tickers || []).includes(t)))
-        .map(i => i.id)
-    }
-    setReadIds(prev => {
-      const next = new Set(prev)
-      matchingIds.forEach(id => next.add(id))
-      return next
-    })
     closeContextMenu()
+
+    if (wlId === "all") {
+      // Fetch ALL article IDs from the backend so we mark everything read,
+      // including articles beyond the current Load More window.
+      fetchNewsIds({ includeUnmappedFromProvider: "Business Wire" })
+        .then((data) => {
+          setReadIds(prev => {
+            const next = new Set(prev)
+            data.ids.forEach(id => next.add(id))
+            return next
+          })
+        })
+        .catch(() => {
+          // Fallback: mark only tracked items if the fetch fails.
+          setReadIds(prev => {
+            const next = new Set(prev)
+            trackedUnreadItems.forEach(i => next.add(i.id))
+            return next
+          })
+        })
+      return
+    }
+
+    const wl = customWatchlists.find(w => w.id === wlId)
+    if (!wl) return
+    // For watchlists, fetch IDs filtered by the watchlist tickers.
+    const wlTickers = wl.tickers || []
+    if (wlTickers.length > 0) {
+      fetchNewsIds({ tickers: wlTickers })
+        .then((data) => {
+          setReadIds(prev => {
+            const next = new Set(prev)
+            data.ids.forEach(id => next.add(id))
+            return next
+          })
+        })
+        .catch(() => {
+          // Fallback: mark only tracked items matching this watchlist.
+          const matchingIds = trackedUnreadItems
+            .filter(i => i.tickers?.some(t => wlTickers.includes(t)))
+            .map(i => i.id)
+          setReadIds(prev => {
+            const next = new Set(prev)
+            matchingIds.forEach(id => next.add(id))
+            return next
+          })
+        })
+    }
   }
 
   const handleStartRename = (wlId: string) => {
@@ -824,7 +871,7 @@ export default function Page() {
             <span>
               {loading
                 ? "Refreshing..."
-                : `${unreadCount} Unread (${trackedUnreadItems.length} tracked) / ${totalCount} Total`}
+                : `${unreadCount} Unread / ${totalCount} Total`}
               {items.length !== totalCount ? ` • ${items.length} shown` : ""}
             </span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}

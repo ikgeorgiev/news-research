@@ -24,6 +24,10 @@ export type NewsCountResponse = {
   total: number
 }
 
+export type NewsIdsResponse = {
+  ids: number[]
+}
+
 export type TickerItem = {
   symbol: string
   fund_name: string | null

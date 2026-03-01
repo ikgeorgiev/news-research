@@ -27,6 +27,10 @@ class NewsCountResponse(BaseModel):
     total: int
 
 
+class NewsIdsResponse(BaseModel):
+    ids: list[int]
+
+
 class TickerItem(BaseModel):
     symbol: str
     fund_name: str | None

@@ -1,0 +1,295 @@
+{
+  "generated_at_utc": "2026-02-28T21:15:10Z",
+  "active_symbols": 366,
+  "yahoo_chunk_size": 40,
+  "yahoo_feed_urls": 10,
+  "entries_seen": 200,
+  "entries_skipped_missing_title_or_link": 0,
+  "dropped_no_ticker_total": 65,
+  "dropped_no_ticker_unique": 47,
+  "fetch_errors": [],
+  "dropped_entries_unique": [
+    {
+      "title": "Distribution Dates and Amounts Announced for Certain BlackRock Closed-End Funds",
+      "link": "https://finance.yahoo.com/news/distribution-dates-amounts-announced-certain-213100156.html?.tsrc=rss",
+      "published": "Fri, 27 Feb 2026 21:31:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "Saba Capital's desire for control 'risks overshadowing positive impact', says Investec",
+      "link": "https://www.proactiveinvestors.com/companies/news/1087993/saba-capital-s-desire-for-control-risks-overshadowing-positive-impact-says-investec-1087993.html?.tsrc=rss",
+      "published": "Thu, 26 Feb 2026 14:27:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "ALLIANCEBERNSTEIN CLOSED-END FUNDS ANNOUNCE DISTRIBUTION RATES",
+      "link": "https://finance.yahoo.com/news/alliancebernstein-closed-end-funds-announce-210600554.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 21:06:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "The Only Healthcare Stock I Would Buy and Never Sell Is Medtronic",
+      "link": "https://www.fool.com/investing/2026/02/21/only-healthcare-stock-i-would-buy-and-never-sell?.tsrc=rss",
+      "published": "Sat, 21 Feb 2026 15:05:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "3 Undiscovered Gems In The US Market With Solid Potential",
+      "link": "https://finance.yahoo.com/news/3-undiscovered-gems-us-market-173330326.html?.tsrc=rss",
+      "published": "Wed, 18 Feb 2026 17:33:30 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "Exploring 3 Undiscovered Gems In The US Market",
+      "link": "https://finance.yahoo.com/news/exploring-3-undiscovered-gems-us-173317476.html?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 17:33:17 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "Discovering US Market's Undiscovered Gems In February 2026",
+      "link": "https://finance.yahoo.com/news/discovering-us-markets-undiscovered-gems-113324668.html?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 11:33:24 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "3 Undiscovered Gems In The US Market",
+      "link": "https://finance.yahoo.com/news/3-undiscovered-gems-us-market-173309873.html?.tsrc=rss",
+      "published": "Mon, 16 Feb 2026 17:33:09 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "US Market's Undiscovered Gems Featuring 3 Promising Small Caps",
+      "link": "https://finance.yahoo.com/news/us-markets-undiscovered-gems-featuring-113250616.html?.tsrc=rss",
+      "published": "Mon, 16 Feb 2026 11:32:50 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "Liberty All-Star® Growth Fund, Inc. January 2026 Monthly Update",
+      "link": "https://finance.yahoo.com/news/liberty-star-growth-fund-inc-005800175.html?.tsrc=rss",
+      "published": "Sat, 14 Feb 2026 00:58:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=ACP,ACV,ADX,AEF,AFB,AGD,AIO,AOD,ARDC,ASA,ASG,ASGI,AVK,AWF,AWP,BANX,BBN,BCAT,BCV,BCX,BDJ,BGB,BGH,BGR,BGT,BGX,BGY,BHK,BHV,BIT,BKT,BLW,BME,BMEZ,BMN,BOE,BPRE,BRW,BSL,BST&region=US&lang=en-US"
+    },
+    {
+      "title": "Franklin Templeton Announces Availability of 19(a) Notices for Certain Closed-End Funds",
+      "link": "https://finance.yahoo.com/news/franklin-templeton-announces-availability-19-130000312.html?.tsrc=rss",
+      "published": "Fri, 27 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "Tortoise Investment Management Buys $3 Million of BlackRock Municipal Target Term Trust",
+      "link": "https://www.fool.com/coverage/filings/2026/02/26/tortoise-investment-management-buys-138-536-shares-blackrock-municipal-target-term-trust?.tsrc=rss",
+      "published": "Thu, 26 Feb 2026 13:40:32 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "MFS Releases Closed-End Fund Income Distribution Sources for Certain Funds",
+      "link": "https://finance.yahoo.com/news/mfs-releases-closed-end-fund-211500558.html?.tsrc=rss",
+      "published": "Tue, 24 Feb 2026 21:15:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "Franklin Templeton Announces Distributions for Certain Closed-End Funds Pursuant to their Managed Distribution Policy for the Months of March, April and May 2026",
+      "link": "https://finance.yahoo.com/news/franklin-templeton-announces-distributions-certain-130000807.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "BNY Mellon Investment Adviser, Inc. Announces Portfolio Manager Changes for Municipal Bond Closed-End Funds",
+      "link": "https://finance.yahoo.com/news/bny-mellon-investment-adviser-inc-164800247.html?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 16:48:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "How to Buy Gold and Silver at a Discount, if You’re Brave Enough",
+      "link": "https://finance.yahoo.com/m/3a3a327a-2bf7-3294-9b04-58b14b6622b9/how-to-buy-gold-and-silver-at.html?.tsrc=rss",
+      "published": "Tue, 03 Feb 2026 16:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BSTZ,BTO,BTT,BTX,BTZ,BUI,BWG,BXMX,CAF,CCD,CCIF,CEE,CEF,CET,CEV,CFND,CGO,CHI,CHW,CHY,CIF,CII,CIK,CLM,CMU,CPZ,CRF,CSQ,CXE,CXH,DBL,DFP,DHF,DHY,DIAX,DLY,DMA,DMB,DMO,DNP&region=US&lang=en-US"
+    },
+    {
+      "title": "Eaton Vance Closed-End Funds Release Estimated Sources of Distributions",
+      "link": "https://finance.yahoo.com/news/eaton-vance-closed-end-funds-210000621.html?.tsrc=rss",
+      "published": "Fri, 27 Feb 2026 21:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=DPG,DSL,DSM,DSU,DTF,DXYZ,EAD,EARN,ECAT,ECC,ECF,EDD,EDF,EEA,EFR,EFT,EHI,EIC,EIM,EMD,EMF,EMO,EOD,EOI,EOS,EOT,ERC,ERH,ETB,ETG,ETJ,ETO,ETV,ETW,ETX,ETY,EVF,EVG,EVN,EVT&region=US&lang=en-US"
+    },
+    {
+      "title": "BNY Mellon Municipal Bond Closed-End Funds Declare Distributions",
+      "link": "https://finance.yahoo.com/news/bny-mellon-municipal-bond-closed-211300809.html?.tsrc=rss",
+      "published": "Thu, 26 Feb 2026 21:13:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=DPG,DSL,DSM,DSU,DTF,DXYZ,EAD,EARN,ECAT,ECC,ECF,EDD,EDF,EEA,EFR,EFT,EHI,EIC,EIM,EMD,EMF,EMO,EOD,EOI,EOS,EOT,ERC,ERH,ETB,ETG,ETJ,ETO,ETV,ETW,ETX,ETY,EVF,EVG,EVN,EVT&region=US&lang=en-US"
+    },
+    {
+      "title": "Hudson Sustainable Group Secures $28.5 Million Strategic Financing for Heritage Energy Holdings",
+      "link": "https://finance.yahoo.com/news/hudson-sustainable-group-secures-28-140000339.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 14:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=DPG,DSL,DSM,DSU,DTF,DXYZ,EAD,EARN,ECAT,ECC,ECF,EDD,EDF,EEA,EFR,EFT,EHI,EIC,EIM,EMD,EMF,EMO,EOD,EOI,EOS,EOT,ERC,ERH,ETB,ETG,ETJ,ETO,ETV,ETW,ETX,ETY,EVF,EVG,EVN,EVT&region=US&lang=en-US"
+    },
+    {
+      "title": "Franklin Templeton Announces Distributions for Certain Closed-End Funds for the Months of March, April and May 2026",
+      "link": "https://finance.yahoo.com/news/franklin-templeton-announces-distributions-certain-130000100.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=DPG,DSL,DSM,DSU,DTF,DXYZ,EAD,EARN,ECAT,ECC,ECF,EDD,EDF,EEA,EFR,EFT,EHI,EIC,EIM,EMD,EMF,EMO,EOD,EOI,EOS,EOT,ERC,ERH,ETB,ETG,ETJ,ETO,ETV,ETW,ETX,ETY,EVF,EVG,EVN,EVT&region=US&lang=en-US"
+    },
+    {
+      "title": "Eagle Point Credit Company Inc. Q4 2025 Earnings Call Summary",
+      "link": "https://app.moby.co/home/research/tools/earningsCalendar/earnings-eagle-point-credit-company-inc-q4-2025-earnings-call-summary?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 17:31:59 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=DPG,DSL,DSM,DSU,DTF,DXYZ,EAD,EARN,ECAT,ECC,ECF,EDD,EDF,EEA,EFR,EFT,EHI,EIC,EIM,EMD,EMF,EMO,EOD,EOI,EOS,EOT,ERC,ERH,ETB,ETG,ETJ,ETO,ETV,ETW,ETX,ETY,EVF,EVG,EVN,EVT&region=US&lang=en-US"
+    },
+    {
+      "title": "JOHN HANCOCK CLOSED-END FUNDS RELEASE EARNINGS DATA",
+      "link": "https://finance.yahoo.com/news/john-hancock-closed-end-funds-211300512.html?.tsrc=rss",
+      "published": "Thu, 12 Feb 2026 21:13:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "Recommended Cash Acquisition of Schroders plc by Nuveen, LLC",
+      "link": "https://finance.yahoo.com/news/recommended-cash-acquisition-schroders-plc-075000147.html?.tsrc=rss",
+      "published": "Thu, 12 Feb 2026 07:50:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "These $5 Stocks and ETFs Are Paying Huge Yields to 12%, but There’s a Catch",
+      "link": "https://247wallst.com/investing/2026/02/05/these-5-stocks-and-etfs-are-paying-huge-yields-to-15-but-theres-a-catch?.tsrc=rss",
+      "published": "Thu, 05 Feb 2026 12:40:19 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "Guggenheim Investments Announces February 2026 Closed-End Fund Distributions",
+      "link": "https://finance.yahoo.com/news/guggenheim-investments-announces-february-2026-214500801.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 21:45:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "JOHN HANCOCK CLOSED-END FUNDS DECLARE MONTHLY DISTRIBUTIONS",
+      "link": "https://finance.yahoo.com/news/john-hancock-closed-end-funds-211200318.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 21:12:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "Invesco Closed-End Funds Declare Dividends",
+      "link": "https://finance.yahoo.com/news/invesco-closed-end-funds-declare-170000226.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 17:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GUG,GUT,HEQ,HERZ,HFRO,HGLB,HIO,HIX,HPF,HPI,HPS,HQH,HQL,HTD,HYI,HYT,IAE,IAF,IDE,IFN,IGA,IGD,IGI,IGR,IHD,IIF,IIM,IQI,ISD,JCE,JFR,JGH,JHI,JHS,JLS,JMM,JOF,JPC,JQC,JRI&region=US&lang=en-US"
+    },
+    {
+      "title": "MFS Announces Closed-End Fund Distributions",
+      "link": "https://finance.yahoo.com/news/mfs-announces-closed-end-fund-211500470.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 21:15:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=JRS,KF,KIO,KTF,KYN,LDP,LEO,LGI,MCI,MCN,MCR,MEGI,MFM,MGF,MHD,MHF,MIN,MIY,MMD,MMT,MMU,MPA,MPV,MQY,MSD,MUA,MUC,MUJ,MXE,MXF,MYI,MYN,NAC,NAD,NAN,NAZ,NBB,NBH,NBXG,NCA&region=US&lang=en-US"
+    },
+    {
+      "title": "Kayne Anderson Energy Infrastructure Fund Announces Distribution of $0.085 per Share for February 2026",
+      "link": "https://finance.yahoo.com/news/kayne-anderson-energy-infrastructure-fund-125000359.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 12:50:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=JRS,KF,KIO,KTF,KYN,LDP,LEO,LGI,MCI,MCN,MCR,MEGI,MFM,MGF,MHD,MHF,MIN,MIY,MMD,MMT,MMU,MPA,MPV,MQY,MSD,MUA,MUC,MUJ,MXE,MXF,MYI,MYN,NAC,NAD,NAN,NAZ,NBB,NBH,NBXG,NCA&region=US&lang=en-US"
+    },
+    {
+      "title": "Tom McCabe Joins XA Investments as Director of Regional Sales",
+      "link": "https://finance.yahoo.com/news/tom-mccabe-joins-xa-investments-160000966.html?.tsrc=rss",
+      "published": "Tue, 27 Jan 2026 16:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=JRS,KF,KIO,KTF,KYN,LDP,LEO,LGI,MCI,MCN,MCR,MEGI,MFM,MGF,MHD,MHF,MIN,MIY,MMD,MMT,MMU,MPA,MPV,MQY,MSD,MUA,MUC,MUJ,MXE,MXF,MYI,MYN,NAC,NAD,NAN,NAZ,NBB,NBH,NBXG,NCA&region=US&lang=en-US"
+    },
+    {
+      "title": "Franklin Templeton Announces Distributions for Certain Closed-End Funds for the Months of March, April and May 2026",
+      "link": "https://finance.yahoo.com/news/franklin-templeton-announces-distributions-certain-130000973.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NCV,NCZ,NDMO,NEA,NFJ,NHS,NIE,NIM,NKX,NMAI,NMCO,NMI,NML,NMS,NMT,NMZ,NNY,NOM,NPCT,NPFD,NPV,NQP,NRK,NRO,NUV,NUW,NVG,NXG,NXJ,NXP,NZF,OCCI,OIA,OPP,OXLC,PAI,PAXS,PCF,PCM,PCN&region=US&lang=en-US"
+    },
+    {
+      "title": "This Robinhood Stock Has a Trailing 48% Dividend Yield. Is It Too Good to Be True?",
+      "link": "https://www.fool.com/investing/2026/02/06/this-robinhood-stock-has-a-trailing-48-dividend-yi?.tsrc=rss",
+      "published": "Fri, 06 Feb 2026 10:30:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NCV,NCZ,NDMO,NEA,NFJ,NHS,NIE,NIM,NKX,NMAI,NMCO,NMI,NML,NMS,NMT,NMZ,NNY,NOM,NPCT,NPFD,NPV,NQP,NRK,NRO,NUV,NUW,NVG,NXG,NXJ,NXP,NZF,OCCI,OIA,OPP,OXLC,PAI,PAXS,PCF,PCM,PCN&region=US&lang=en-US"
+    },
+    {
+      "title": "PIMCO Closed-End Funds Declare Monthly Common Share Distributions",
+      "link": "https://finance.yahoo.com/news/pimco-closed-end-funds-declare-223200853.html?.tsrc=rss",
+      "published": "Mon, 02 Feb 2026 22:32:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NCV,NCZ,NDMO,NEA,NFJ,NHS,NIE,NIM,NKX,NMAI,NMCO,NMI,NML,NMS,NMT,NMZ,NNY,NOM,NPCT,NPFD,NPV,NQP,NRK,NRO,NUV,NUW,NVG,NXG,NXJ,NXP,NZF,OCCI,OIA,OPP,OXLC,PAI,PAXS,PCF,PCM,PCN&region=US&lang=en-US"
+    },
+    {
+      "title": "RiverNorth Opportunities Fund, Inc. and RiverNorth/DoubleLine Strategic Opportunity Fund, Inc. Announce Preferred Dividends",
+      "link": "https://finance.yahoo.com/news/rivernorth-opportunities-fund-inc-rivernorth-213000528.html?.tsrc=rss",
+      "published": "Fri, 16 Jan 2026 21:30:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NCV,NCZ,NDMO,NEA,NFJ,NHS,NIE,NIM,NKX,NMAI,NMCO,NMI,NML,NMS,NMT,NMZ,NNY,NOM,NPCT,NPFD,NPV,NQP,NRK,NRO,NUV,NUW,NVG,NXG,NXJ,NXP,NZF,OCCI,OIA,OPP,OXLC,PAI,PAXS,PCF,PCM,PCN&region=US&lang=en-US"
+    },
+    {
+      "title": "Best-Performing ETFs of Last Week",
+      "link": "https://finance.yahoo.com/news/best-performing-etfs-last-week-130000229.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=PCQ,PDCC,PDI,PDO,PDT,PDX,PEO,PFD,PFL,PFN,PFO,PGP,PGZ,PHK,PHYS,PIM,PML,PMM,PMO,PNI,PPT,PSF,PSLV,PTA,PTY,QQQX,RA,RCG,RCS,RFI,RFM,RFMZ,RGT,RIV,RLTY,RMI,RMM,RMMZ,RMT,RNP&region=US&lang=en-US"
+    },
+    {
+      "title": "Arnold Van Den Berg's Strategic Moves: MarketAxess Holdings Inc. Takes Center Stage",
+      "link": "https://finance.yahoo.com/news/arnold-van-den-bergs-strategic-170028487.html?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 17:00:28 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=PCQ,PDCC,PDI,PDO,PDT,PDX,PEO,PFD,PFL,PFN,PFO,PGP,PGZ,PHK,PHYS,PIM,PML,PMM,PMO,PNI,PPT,PSF,PSLV,PTA,PTY,QQQX,RA,RCG,RCS,RFI,RFM,RFMZ,RGT,RIV,RLTY,RMI,RMM,RMMZ,RMT,RNP&region=US&lang=en-US"
+    },
+    {
+      "title": "First Pacific Advisors' Strategic Moves: Spotlight on Becton Dickinson & Co",
+      "link": "https://finance.yahoo.com/news/first-pacific-advisors-strategic-moves-200334678.html?.tsrc=rss",
+      "published": "Tue, 17 Feb 2026 20:03:34 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "Liberty All-Star® Equity Fund January 2026 Monthly Update",
+      "link": "https://finance.yahoo.com/news/liberty-star-equity-fund-january-002600676.html?.tsrc=rss",
+      "published": "Sat, 14 Feb 2026 00:26:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "TR-1 Notification",
+      "link": "https://finance.yahoo.com/news/tr-1-notification-000000640.html?.tsrc=rss",
+      "published": "Thu, 12 Feb 2026 00:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "Sector Update: Financial Stocks Decline Late Afternoon",
+      "link": "https://finance.yahoo.com/news/sector-financial-stocks-decline-afternoon-205210528.html?.tsrc=rss",
+      "published": "Wed, 11 Feb 2026 20:52:10 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "Sector Update: Financial Stocks Fall Wednesday Afternoon",
+      "link": "https://finance.yahoo.com/news/sector-financial-stocks-fall-wednesday-190039142.html?.tsrc=rss",
+      "published": "Wed, 11 Feb 2026 19:00:39 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "Sound Point Meridian Capital Q3 2026 Earnings Call",
+      "link": "https://www.fool.com/earnings/call-transcripts/2026/02/11/sound-point-meridian-capital-q3-2026-earnings-call?.tsrc=rss",
+      "published": "Wed, 11 Feb 2026 17:09:24 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=RQI,RSF,RVT,SABA,SBI,SCD,SDHY,SOR,SPE,SPMC,SPPP,SPXX,SRV,STEW,STK,SWZ,TBLD,TDF,TEI,THQ,THW,TSI,TWN,TY,TYG,USA,UTF,UTG,VBF,VCV,VFL,VGI,VGM,VKI,VKQ,VLT,VMO,VPV,VTN,VVR&region=US&lang=en-US"
+    },
+    {
+      "title": "Franklin Templeton Announces Distributions for Certain Closed-End Funds Pursuant to their Managed Distribution Policy for the Months of March, April and May 2026",
+      "link": "https://finance.yahoo.com/news/franklin-templeton-announces-distributions-certain-130000510.html?.tsrc=rss",
+      "published": "Mon, 23 Feb 2026 13:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=WDI,WEA,WIA,WIW,XFLT,ZTR&region=US&lang=en-US"
+    },
+    {
+      "title": "XA Investments Reports Record Growth in 2025 in its Fourth Quarter 2025 Market Update",
+      "link": "https://finance.yahoo.com/news/xa-investments-reports-record-growth-172500354.html?.tsrc=rss",
+      "published": "Thu, 15 Jan 2026 17:25:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=WDI,WEA,WIA,WIW,XFLT,ZTR&region=US&lang=en-US"
+    },
+    {
+      "title": "XA Investments Launches INTVL-C, an Extension to Its Interval Fund Index Suite Focused on Alternative Credit Interval & Tender Offer Funds",
+      "link": "https://finance.yahoo.com/news/xa-investments-launches-intvl-c-160000065.html?.tsrc=rss",
+      "published": "Thu, 08 Jan 2026 16:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=WDI,WEA,WIA,WIW,XFLT,ZTR&region=US&lang=en-US"
+    },
+    {
+      "title": "XA Investments Interval Fund (OCTIX) Now Available for Purchase on Charles Schwab",
+      "link": "https://finance.yahoo.com/news/xa-investments-interval-fund-octix-170000711.html?.tsrc=rss",
+      "published": "Tue, 06 Jan 2026 17:00:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=WDI,WEA,WIA,WIW,XFLT,ZTR&region=US&lang=en-US"
+    },
+    {
+      "title": "XA Investments Announces INTVL-C, Expanding Its Interval Fund Index Suite with an Alternative Credit Benchmark",
+      "link": "https://finance.yahoo.com/news/xa-investments-announces-intvl-c-203000918.html?.tsrc=rss",
+      "published": "Mon, 29 Dec 2025 20:30:00 +0000",
+      "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=WDI,WEA,WIA,WIW,XFLT,ZTR&region=US&lang=en-US"
+    }
+  ]
+}
