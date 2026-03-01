@@ -23,6 +23,10 @@ class NewsListResponse(BaseModel):
     meta: dict[str, int | str | None]
 
 
+class NewsCountResponse(BaseModel):
+    total: int
+
+
 class TickerItem(BaseModel):
     symbol: str
     fund_name: str | None

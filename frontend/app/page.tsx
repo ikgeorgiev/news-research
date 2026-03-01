@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useState, useMemo, useRef } from "react"
-import { fetchNews, fetchTickers } from "@/lib/api"
+import { fetchNews, fetchNewsCount, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
@@ -78,6 +78,7 @@ const CheckIcon = () => (
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
+  const [totalCount, setTotalCount] = useState(0)
   const [items, setItems] = useState<NewsItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
@@ -213,6 +214,18 @@ export default function Page() {
     return () => controller.abort()
   }, [refreshTick])
 
+  // Fetch lightweight total count from dedicated endpoint
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchNewsCount({
+      includeUnmappedFromProvider: "Business Wire",
+      signal: controller.signal,
+    })
+      .then((data) => setTotalCount(data.total))
+      .catch(() => {}) // Ignore errors for background count fetch
+    return () => controller.abort()
+  }, [refreshTick])
+
   // Auto-refresh feed while tab is visible.
   useEffect(() => {
     if (!mounted) return
@@ -291,9 +304,10 @@ export default function Page() {
         : undefined
 
     // When user is scrolled deep, fetch in the background and buffer new items
-    // instead of updating the feed directly.
+    // instead of updating the feed directly.  We snapshot the current generation
+    // WITHOUT incrementing it so that an in-flight loadMore is not invalidated.
     if (isAutoRefresh && isReadingDeep) {
-      const bgGeneration = ++feedGenerationRef.current
+      const bgGeneration = feedGenerationRef.current
       const controller = new AbortController()
       fetchNews({
         tickers: fetchTickers,
@@ -304,7 +318,7 @@ export default function Page() {
         signal: controller.signal,
       })
         .then((data) => {
-          // Discard if a newer request (filter change, manual refresh) superseded us.
+          // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
           const currentIds = new Set(itemsRef.current.map((i) => i.id))
           const newOnes = data.items.filter((i) => !currentIds.has(i.id))
@@ -490,8 +504,8 @@ export default function Page() {
   }
 
   const unreadCount = useMemo(() => {
-    return globalItems.filter(i => !readIds.has(i.id)).length
-  }, [globalItems, readIds])
+    return Math.max(0, totalCount - readIds.size)
+  }, [totalCount, readIds])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()
@@ -775,7 +789,7 @@ export default function Page() {
 
         <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${globalItems.length} Total`}{items.length !== globalItems.length ? ` • ${items.length} shown` : ""}</span>
+            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${totalCount} Total`}{items.length !== totalCount ? ` • ${items.length} shown` : ""}</span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
           </div>
           

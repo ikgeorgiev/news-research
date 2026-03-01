@@ -20,6 +20,10 @@ export type NewsResponse = {
   }
 }
 
+export type NewsCountResponse = {
+  total: number
+}
+
 export type TickerItem = {
   symbol: string
   fund_name: string | null

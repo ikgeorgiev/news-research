@@ -17,6 +17,7 @@ from app.schemas import (
     BusinessWireRemapResponse,
     IngestionRunItem,
     IngestionRunResponse,
+    NewsCountResponse,
     NewsItem,
     NewsListResponse,
     ReloadTickersResponse,
@@ -143,27 +144,19 @@ def list_tickers(
     )
 
 
-@app.get(f"{settings.api_prefix}/news", response_model=NewsListResponse)
-def list_news(
+def _build_news_query(
+    db: Session,
+    *,
     ticker: str | None = None,
     source: str | None = None,
     provider: str | None = None,
     q: str | None = None,
-    include_unmapped: bool = Query(
-        default=False,
-        description="Include articles not mapped to any active ticker",
-    ),
-    include_unmapped_from_provider: str | None = Query(
-        default=None,
-        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
-    ),
-    from_: datetime | None = Query(default=None, alias="from"),
+    include_unmapped: bool = False,
+    include_unmapped_from_provider: str | None = None,
+    from_: datetime | None = None,
     to: datetime | None = None,
-    limit: int = Query(default=50, ge=1, le=100),
-    cursor: str | None = None,
-    sort: str = Query(default="latest", pattern="^(latest)$"),
-    db: Session = Depends(get_db),
 ):
+    """Build a filtered Article query (without ordering, cursor, or limit)."""
     query = select(Article)
 
     mapped_exists = (
@@ -177,7 +170,6 @@ def list_news(
     if ticker:
         ticker_symbols = [t.strip().upper() for t in ticker.split(",") if t.strip()]
         if ticker_symbols:
-            # Match articles that have AT LEAST ONE of the requested tickers
             ticker_match_exists = (
                 select(1)
                 .select_from(ArticleTicker)
@@ -253,6 +245,75 @@ def list_news(
 
     if to:
         query = query.where(Article.published_at <= to)
+
+    return query
+
+
+@app.get(f"{settings.api_prefix}/news/count", response_model=NewsCountResponse)
+def count_news(
+    ticker: str | None = None,
+    source: str | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    include_unmapped: bool = Query(
+        default=False,
+        description="Include articles not mapped to any active ticker",
+    ),
+    include_unmapped_from_provider: str | None = Query(
+        default=None,
+        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+    ),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    query = _build_news_query(
+        db,
+        ticker=ticker,
+        source=source,
+        provider=provider,
+        q=q,
+        include_unmapped=include_unmapped,
+        include_unmapped_from_provider=include_unmapped_from_provider,
+        from_=from_,
+        to=to,
+    )
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    return NewsCountResponse(total=total or 0)
+
+
+@app.get(f"{settings.api_prefix}/news", response_model=NewsListResponse)
+def list_news(
+    ticker: str | None = None,
+    source: str | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    include_unmapped: bool = Query(
+        default=False,
+        description="Include articles not mapped to any active ticker",
+    ),
+    include_unmapped_from_provider: str | None = Query(
+        default=None,
+        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+    ),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = None,
+    sort: str = Query(default="latest", pattern="^(latest)$"),
+    db: Session = Depends(get_db),
+):
+    query = _build_news_query(
+        db,
+        ticker=ticker,
+        source=source,
+        provider=provider,
+        q=q,
+        include_unmapped=include_unmapped,
+        include_unmapped_from_provider=include_unmapped_from_provider,
+        from_=from_,
+        to=to,
+    )
 
     cursor_payload = decode_cursor(cursor) if cursor else None
     if cursor_payload:
