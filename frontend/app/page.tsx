@@ -504,8 +504,8 @@ export default function Page() {
   }
 
   const unreadCount = useMemo(() => {
-    return Math.max(0, totalCount - readIds.size)
-  }, [totalCount, readIds])
+    return globalItems.filter((item) => !readIds.has(item.id)).length
+  }, [globalItems, readIds])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()
@@ -550,11 +550,16 @@ export default function Page() {
   const closeContextMenu = () => setContextMenu(null)
 
   const handleMarkAllRead = (wlId: string) => {
-    const wl = customWatchlists.find(w => w.id === wlId)
-    if (!wl) return
-    const matchingIds = globalItems
-      .filter(i => i.tickers?.some(t => (wl.tickers || []).includes(t)))
-      .map(i => i.id)
+    let matchingIds: number[]
+    if (wlId === "all") {
+      matchingIds = globalItems.map(i => i.id)
+    } else {
+      const wl = customWatchlists.find(w => w.id === wlId)
+      if (!wl) return
+      matchingIds = globalItems
+        .filter(i => i.tickers?.some(t => (wl.tickers || []).includes(t)))
+        .map(i => i.id)
+    }
     setReadIds(prev => {
       const next = new Set(prev)
       matchingIds.forEach(id => next.add(id))
@@ -615,9 +620,10 @@ export default function Page() {
           <p>MARKET DATA</p>
         </div>
 
-        <div 
+        <div
           className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
           onClick={() => setActiveWatchlistId("all")}
+          onContextMenu={(e) => handleWatchlistContextMenu(e, "all")}
           style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
         >
           <span>All News</span>
@@ -744,13 +750,17 @@ export default function Page() {
             <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
               Mark All Items as Read
             </div>
-            <div className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
-              Rename
-            </div>
-            <div className="context-menu-separator" />
-            <div className="context-menu-item delete" onClick={() => handleContextDelete(contextMenu.watchlistId)}>
-              Delete
-            </div>
+            {contextMenu.watchlistId !== "all" && (
+              <>
+                <div className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
+                  Rename
+                </div>
+                <div className="context-menu-separator" />
+                <div className="context-menu-item delete" onClick={() => handleContextDelete(contextMenu.watchlistId)}>
+                  Delete
+                </div>
+              </>
+            )}
             <div className="context-menu-separator" />
             <div className="context-menu-item" onClick={handleUpdateFeeds}>
               Update Feeds in Folder
@@ -789,7 +799,12 @@ export default function Page() {
 
         <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-            <span>{loading ? "Refreshing..." : `${unreadCount} Unread / ${totalCount} Total`}{items.length !== totalCount ? ` • ${items.length} shown` : ""}</span>
+            <span>
+              {loading
+                ? "Refreshing..."
+                : `${unreadCount} Unread (latest ${globalItems.length}) / ${totalCount} Total`}
+              {items.length !== totalCount ? ` • ${items.length} shown` : ""}
+            </span>
             {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
           </div>
           
