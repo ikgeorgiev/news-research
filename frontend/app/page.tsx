@@ -116,6 +116,8 @@ export default function Page() {
   const [readIds, setReadIds] = useState<Set<number>>(new Set())
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set())
 
+  const [pendingNewItems, setPendingNewItems] = useState<NewsItem[]>([])
+
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -270,19 +272,6 @@ export default function Page() {
     const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
     const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
 
-    // Avoid jarring feed resets while user is reading older items.
-    if (isAutoRefresh && isReadingDeep) {
-      return
-    }
-
-    lastQueryKeyRef.current = queryKey
-    const controller = new AbortController()
-    const showLoading = !isAutoRefresh
-    if (showLoading) {
-      setLoading(true)
-    }
-    setError(null)
-
     // Combine active watchlist tickers with any individually selected ticker filter
     let fetchTickers: string[] | undefined = undefined
     if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
@@ -300,6 +289,50 @@ export default function Page() {
       activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
         ? "Business Wire"
         : undefined
+
+    // When user is scrolled deep, fetch in the background and buffer new items
+    // instead of updating the feed directly.
+    if (isAutoRefresh && isReadingDeep) {
+      const bgGeneration = ++feedGenerationRef.current
+      const controller = new AbortController()
+      fetchNews({
+        tickers: fetchTickers,
+        provider: provider || undefined,
+        includeUnmappedFromProvider: includeGeneralFromProvider,
+        q: searchQuery || undefined,
+        limit: 40,
+        signal: controller.signal,
+      })
+        .then((data) => {
+          // Discard if a newer request (filter change, manual refresh) superseded us.
+          if (bgGeneration !== feedGenerationRef.current) return
+          const currentIds = new Set(itemsRef.current.map((i) => i.id))
+          const newOnes = data.items.filter((i) => !currentIds.has(i.id))
+          if (newOnes.length > 0) {
+            setPendingNewItems((prev) => {
+              const pendingIds = new Set(prev.map((i) => i.id))
+              const freshOnes = newOnes.filter((i) => !pendingIds.has(i.id))
+              return freshOnes.length > 0 ? [...freshOnes, ...prev] : prev
+            })
+          }
+        })
+        .catch(() => {}) // Silently ignore background fetch errors
+      return () => controller.abort()
+    }
+
+    // Query changed (filter/watchlist switch) — discard stale pending items immediately.
+    if (!sameQueryAsPrevious) {
+      setPendingNewItems([])
+    }
+
+    lastQueryKeyRef.current = queryKey
+    const controller = new AbortController()
+    const showLoading = !isAutoRefresh
+    if (showLoading) {
+      setLoading(true)
+    }
+    setError(null)
+
     const requestGeneration = ++feedGenerationRef.current
 
     fetchNews({
@@ -312,6 +345,8 @@ export default function Page() {
     })
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
+        // Refresh succeeded — safe to clear pending banner.
+        setPendingNewItems([])
         if (isAutoRefresh && itemsRef.current.length > data.items.length) {
           // Keep previously loaded pages; prepend only genuinely new top stories.
           setItems((prev) => {
@@ -388,6 +423,16 @@ export default function Page() {
     } finally {
       setLoadingMore(false)
     }
+  }
+
+  const loadPendingArticles = () => {
+    setItems((prev) => {
+      const prevIds = new Set(prev.map((i) => i.id))
+      const newOnes = pendingNewItems.filter((i) => !prevIds.has(i.id))
+      return newOnes.length > 0 ? [...newOnes, ...prev] : prev
+    })
+    setPendingNewItems([])
+    feedContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   const toggleRead = (id: number, e?: React.MouseEvent) => {
@@ -770,6 +815,11 @@ export default function Page() {
         </section>
 
         <section className="feed-container" ref={feedContainerRef}>
+          {pendingNewItems.length > 0 && (
+            <div className="new-articles-banner" onClick={loadPendingArticles}>
+              {pendingNewItems.length} new article{pendingNewItems.length !== 1 ? "s" : ""} available — click to load
+            </div>
+          )}
           {!loading && items.length === 0 && (
             <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
               <p style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>No news found</p>
