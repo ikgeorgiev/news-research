@@ -29,6 +29,7 @@ class NewsCountResponse(BaseModel):
 
 class NewsIdsResponse(BaseModel):
     ids: list[int]
+    next_cursor: str | None = None
 
 
 class TickerItem(BaseModel):

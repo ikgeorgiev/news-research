@@ -119,10 +119,12 @@ def seed_sources(db: Session, source_feeds: list[SourceFeed]) -> None:
             )
             changed = True
         else:
-            current.name = source.name
-            current.base_url = source.base_url
-            current.enabled = True
-            changed = True
+            if current.name != source.name:
+                current.name = source.name
+                changed = True
+            if current.base_url != source.base_url:
+                current.base_url = source.base_url
+                changed = True
 
     if changed:
         db.commit()

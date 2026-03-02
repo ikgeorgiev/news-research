@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -20,6 +21,20 @@ class IngestionScheduler:
         self.session_factory = session_factory
         self._scheduler = BackgroundScheduler(timezone="UTC")
         self._lock = threading.Lock()
+
+    def _acquire_global_lock(self, db: Session) -> bool:
+        bind = db.get_bind()
+        if bind is None or bind.dialect.name != "postgresql":
+            return True
+        return bool(
+            db.scalar(select(func.pg_try_advisory_lock(self.settings.ingestion_advisory_lock_key)))
+        )
+
+    def _release_global_lock(self, db: Session) -> None:
+        bind = db.get_bind()
+        if bind is None or bind.dialect.name != "postgresql":
+            return
+        db.scalar(select(func.pg_advisory_unlock(self.settings.ingestion_advisory_lock_key)))
 
     def start(self) -> None:
         if not self.settings.scheduler_enabled:
@@ -51,7 +66,16 @@ class IngestionScheduler:
             return None
         try:
             with self.session_factory() as db:
-                return run_ingestion_cycle(db, self.settings)
+                acquired_global_lock = self._acquire_global_lock(db)
+                if not acquired_global_lock:
+                    return None
+                try:
+                    return run_ingestion_cycle(db, self.settings)
+                finally:
+                    try:
+                        self._release_global_lock(db)
+                    except Exception:
+                        logger.exception("Failed to release ingestion advisory lock")
         finally:
             self._lock.release()
 

@@ -1,9 +1,10 @@
 import { NewsCountResponse, NewsIdsResponse, NewsResponse, TickerResponse } from "./types"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000"
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").trim().replace(/\/+$/, "")
+const buildApiUrl = (path: string): string => (API_BASE ? `${API_BASE}${path}` : path)
 
 export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse> {
-  const response = await fetch(`${API_BASE}/api/v1/tickers`, { signal, cache: "no-store" })
+  const response = await fetch(buildApiUrl("/api/v1/tickers"), { signal, cache: "no-store" })
   if (!response.ok) {
     throw new Error(`Ticker request failed: ${response.status}`)
   }
@@ -39,7 +40,7 @@ export async function fetchNews(params: {
   if (params.from) query.set("from", params.from)
   if (params.to) query.set("to", params.to)
 
-  const response = await fetch(`${API_BASE}/api/v1/news?${query.toString()}`, {
+  const response = await fetch(buildApiUrl(`/api/v1/news?${query.toString()}`), {
     signal: params.signal,
     cache: "no-store",
   })
@@ -68,7 +69,7 @@ export async function fetchNewsCount(params: {
   }
   if (params.q) query.set("q", params.q)
 
-  const response = await fetch(`${API_BASE}/api/v1/news/count?${query.toString()}`, {
+  const response = await fetch(buildApiUrl(`/api/v1/news/count?${query.toString()}`), {
     signal: params.signal,
     cache: "no-store",
   })
@@ -85,6 +86,8 @@ export async function fetchNewsIds(params: {
   provider?: string
   includeUnmappedFromProvider?: string
   q?: string
+  cursor?: string
+  limit?: number
   signal?: AbortSignal
 }): Promise<NewsIdsResponse> {
   const query = new URLSearchParams()
@@ -96,8 +99,10 @@ export async function fetchNewsIds(params: {
     query.set("include_unmapped_from_provider", params.includeUnmappedFromProvider)
   }
   if (params.q) query.set("q", params.q)
+  if (params.cursor) query.set("cursor", params.cursor)
+  if (params.limit) query.set("limit", String(params.limit))
 
-  const response = await fetch(`${API_BASE}/api/v1/news/ids?${query.toString()}`, {
+  const response = await fetch(buildApiUrl(`/api/v1/news/ids?${query.toString()}`), {
     signal: params.signal,
     cache: "no-store",
   })

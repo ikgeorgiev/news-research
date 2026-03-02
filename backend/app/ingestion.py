@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import random
 import time
 import re
 import threading
@@ -11,7 +13,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
 import requests
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, delete, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,8 @@ from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
+
+logger = logging.getLogger(__name__)
 
 REQUEST_HEADERS = {
     "User-Agent": "cef-news-feed/0.1 (+local)",
@@ -138,6 +142,146 @@ def _acquire_dedupe_locks(db: Session, url_hash: str, title_hash: str) -> None:
     # Acquire in sorted order to avoid deadlock when multiple workers lock same keys.
     for key in sorted({_hash_hex_to_signed_bigint(url_hash), _hash_hex_to_signed_bigint(title_hash)}):
         db.execute(select(func.pg_advisory_xact_lock(key)))
+
+
+def _fetch_feed_with_retries(
+    *,
+    feed_url: str,
+    timeout_seconds: int,
+    max_attempts: int,
+    backoff_seconds: float,
+    backoff_jitter_seconds: float,
+) -> requests.Response:
+    last_error: requests.RequestException | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(feed_url, timeout=timeout_seconds, headers=REQUEST_HEADERS)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt >= max_attempts:
+                raise
+
+            sleep_seconds = (backoff_seconds * (2 ** (attempt - 1))) + random.uniform(
+                0.0, max(0.0, backoff_jitter_seconds)
+            )
+            logger.warning(
+                "Feed request attempt %s/%s failed for %s: %s",
+                attempt,
+                max_attempts,
+                feed_url,
+                exc,
+            )
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("feed fetch retry loop exited unexpectedly")
+
+
+def _raw_item_already_recorded(
+    db: Session,
+    *,
+    source_id: int,
+    raw_guid: str | None,
+    raw_link: str | None,
+    raw_pub_date: datetime | None,
+) -> bool:
+    if raw_guid:
+        existing_id = db.scalar(
+            select(RawFeedItem.id)
+            .where(and_(RawFeedItem.source_id == source_id, RawFeedItem.raw_guid == raw_guid))
+            .limit(1)
+        )
+        if existing_id is not None:
+            return True
+
+    if raw_link and raw_pub_date is not None:
+        existing_id = db.scalar(
+            select(RawFeedItem.id)
+            .where(
+                and_(
+                    RawFeedItem.source_id == source_id,
+                    RawFeedItem.raw_link == raw_link,
+                    RawFeedItem.raw_pub_date == raw_pub_date,
+                )
+            )
+            .limit(1)
+        )
+        if existing_id is not None:
+            return True
+
+    return False
+
+
+def reconcile_stale_ingestion_runs(
+    db: Session,
+    *,
+    stale_after_seconds: int,
+    now: datetime | None = None,
+) -> int:
+    if stale_after_seconds <= 0:
+        return 0
+
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - timedelta(seconds=stale_after_seconds)
+    stale_runs = db.scalars(
+        select(IngestionRun).where(
+            and_(
+                IngestionRun.status == "running",
+                IngestionRun.finished_at.is_(None),
+                IngestionRun.started_at <= cutoff,
+            )
+        )
+    ).all()
+    if not stale_runs:
+        return 0
+
+    reason = f"Marked failed after exceeding stale run timeout ({stale_after_seconds}s)."
+    for run in stale_runs:
+        run.status = "failed"
+        run.finished_at = current_time
+        if not (run.error_text or "").strip():
+            run.error_text = reason
+    db.commit()
+    return len(stale_runs)
+
+
+def prune_raw_feed_items(
+    db: Session,
+    *,
+    retention_days: int,
+    batch_size: int,
+    max_batches: int,
+    now: datetime | None = None,
+) -> int:
+    if retention_days <= 0 or batch_size <= 0 or max_batches <= 0:
+        return 0
+
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - timedelta(days=retention_days)
+    total_deleted = 0
+
+    for _ in range(max_batches):
+        stale_ids = db.scalars(
+            select(RawFeedItem.id)
+            .where(RawFeedItem.fetched_at < cutoff)
+            .order_by(RawFeedItem.id.asc())
+            .limit(batch_size)
+        ).all()
+        if not stale_ids:
+            break
+
+        db.execute(delete(RawFeedItem).where(RawFeedItem.id.in_(stale_ids)))
+        db.commit()
+        total_deleted += len(stale_ids)
+
+        if len(stale_ids) < batch_size:
+            break
+
+    return total_deleted
 
 
 def _extract_provider(entry: feedparser.FeedParserDict, fallback: str) -> str:
@@ -495,6 +639,9 @@ def ingest_feed(
     known_symbols: set[str],
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
+    fetch_max_attempts: int = 3,
+    fetch_backoff_seconds: float = 1.0,
+    fetch_backoff_jitter_seconds: float = 0.3,
 ) -> IngestFeedResult:
     run = IngestionRun(
         source_id=source.id,
@@ -508,12 +655,19 @@ def ingest_feed(
 
     items_seen = 0
     items_inserted = 0
+    committed_items_inserted = 0
     status = "success"
     error_text: str | None = None
+    entry_errors = 0
 
     try:
-        response = requests.get(feed_url, timeout=timeout_seconds, headers=REQUEST_HEADERS)
-        response.raise_for_status()
+        response = _fetch_feed_with_retries(
+            feed_url=feed_url,
+            timeout_seconds=timeout_seconds,
+            max_attempts=fetch_max_attempts,
+            backoff_seconds=fetch_backoff_seconds,
+            backoff_jitter_seconds=fetch_backoff_jitter_seconds,
+        )
         parsed = feedparser.parse(response.content)
 
         source_name = source.name
@@ -523,96 +677,117 @@ def ingest_feed(
 
         for entry in parsed.entries:
             items_seen += 1
+            try:
+                # Isolate malformed entries so one bad payload does not roll back the full feed run.
+                with db.begin_nested():
+                    raw_title = str(entry.get("title") or "").strip()
+                    # Never fall back to raw feed title so stored titles remain plain text.
+                    title = clean_summary_text(raw_title)
+                    link = canonicalize_url(str(entry.get("link") or "").strip())
+                    if not title or not link:
+                        continue
 
-            raw_title = str(entry.get("title") or "").strip()
-            # Never fall back to raw feed title so stored titles remain plain text.
-            title = clean_summary_text(raw_title)
-            link = canonicalize_url(str(entry.get("link") or "").strip())
-            if not title or not link:
+                    raw_summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
+                    summary = clean_summary_text(raw_summary)
+                    published_at = parse_datetime(entry.get("published") or entry.get("updated"))
+                    if published_at is None:
+                        published_at = datetime.now(timezone.utc)
+
+                    provider_name = _clamp_label(source.name)
+                    entry_source_name = _extract_provider(entry, source_name)
+                    ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
+                    if source.code == GENERAL_SOURCE_CODE and not ticker_hits:
+                        ticker_hits = _extract_businesswire_fallback_tickers(
+                            title,
+                            summary or "",
+                            link,
+                            feed_url,
+                            known_symbols,
+                            timeout_seconds,
+                        )
+
+                    allow_existing_unmapped = False
+                    if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
+                        existing_article_id = db.scalar(
+                            select(Article.id)
+                            .where(Article.canonical_url_hash == sha256_str(link))
+                            .limit(1)
+                        )
+                        allow_existing_unmapped = existing_article_id is not None
+
+                    if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
+                        continue
+
+                    article, created, matched_by_url = _upsert_article(
+                        db,
+                        source_code=source.code,
+                        canonical_url=link,
+                        title=title,
+                        summary=summary,
+                        published_at=published_at,
+                        source_name=source_name,
+                        provider_name=provider_name,
+                    )
+                    if created:
+                        items_inserted += 1
+
+                    _upsert_article_tickers(
+                        db,
+                        article.id,
+                        ticker_hits,
+                        symbol_to_id,
+                        prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
+                    )
+
+                    payload = {
+                        "title": raw_title,
+                        "link": link,
+                        "published": entry.get("published") or entry.get("updated"),
+                        "summary": raw_summary,
+                        "source": entry_source_name,
+                    }
+                    raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
+                    if _raw_item_already_recorded(
+                        db,
+                        source_id=source.id,
+                        raw_guid=raw_guid,
+                        raw_link=link,
+                        raw_pub_date=published_at,
+                    ):
+                        continue
+                    db.add(
+                        RawFeedItem(
+                            source_id=source.id,
+                            article_id=article.id,
+                            feed_url=feed_url,
+                            raw_guid=raw_guid,
+                            raw_title=raw_title,
+                            raw_link=link,
+                            raw_pub_date=published_at,
+                            raw_payload_json=to_json_safe(payload),
+                        )
+                    )
+            except Exception as entry_exc:
+                entry_errors += 1
+                error_text = (
+                    f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
+                )
                 continue
-
-            raw_summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
-            summary = clean_summary_text(raw_summary)
-            published_at = parse_datetime(entry.get("published") or entry.get("updated"))
-            if published_at is None:
-                published_at = datetime.now(timezone.utc)
-
-            provider_name = _clamp_label(source.name)
-            entry_source_name = _extract_provider(entry, source_name)
-            ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
-            if source.code == GENERAL_SOURCE_CODE and not ticker_hits:
-                ticker_hits = _extract_businesswire_fallback_tickers(
-                    title,
-                    summary or "",
-                    link,
-                    feed_url,
-                    known_symbols,
-                    timeout_seconds,
-                )
-
-            allow_existing_unmapped = False
-            if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
-                existing_article_id = db.scalar(
-                    select(Article.id)
-                    .where(Article.canonical_url_hash == sha256_str(link))
-                    .limit(1)
-                )
-                allow_existing_unmapped = existing_article_id is not None
-
-            if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
-                continue
-
-            article, created, matched_by_url = _upsert_article(
-                db,
-                source_code=source.code,
-                canonical_url=link,
-                title=title,
-                summary=summary,
-                published_at=published_at,
-                source_name=source_name,
-                provider_name=provider_name,
-            )
-            if created:
-                items_inserted += 1
-
-            _upsert_article_tickers(
-                db,
-                article.id,
-                ticker_hits,
-                symbol_to_id,
-                prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
-            )
-
-            payload = {
-                "title": raw_title,
-                "link": link,
-                "published": entry.get("published") or entry.get("updated"),
-                "summary": raw_summary,
-                "source": entry_source_name,
-            }
-            db.add(
-                RawFeedItem(
-                    source_id=source.id,
-                    article_id=article.id,
-                    feed_url=feed_url,
-                    raw_guid=str(entry.get("id") or entry.get("guid") or "") or None,
-                    raw_title=raw_title,
-                    raw_link=link,
-                    raw_pub_date=published_at,
-                    raw_payload_json=to_json_safe(payload),
-                )
-            )
 
         db.commit()
+        committed_items_inserted = items_inserted
+        if entry_errors > 0 and error_text is None:
+            error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}."
 
     except Exception as exc:
         db.rollback()
         status = "failed"
         error_text = str(exc)
+        committed_items_inserted = 0
 
     run.status = status
     run.items_seen = items_seen
-    run.items_inserted = items_inserted
+    run.items_inserted = committed_items_inserted
     run.error_text = error_text
     run.finished_at = datetime.now(timezone.utc)
     db.commit()
@@ -622,7 +797,7 @@ def ingest_feed(
         "feed_url": feed_url,
         "status": status,
         "items_seen": items_seen,
-        "items_inserted": items_inserted,
+        "items_inserted": committed_items_inserted,
         "error": error_text,
     }
 
@@ -630,6 +805,13 @@ def ingest_feed(
 def run_ingestion_cycle(
     db: Session, settings: Settings
 ) -> IngestionCycleResult:
+    stale_runs_fixed = reconcile_stale_ingestion_runs(
+        db,
+        stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
+    )
+    if stale_runs_fixed:
+        logger.warning("Marked %s stale ingestion runs as failed", stale_runs_fixed)
+
     raw_ticker_sync = load_tickers_from_csv(db, settings.tickers_csv_path)
     ticker_sync: TickerSyncStats = {
         "loaded": int(raw_ticker_sync.get("loaded", 0) or 0),
@@ -643,7 +825,14 @@ def run_ingestion_cycle(
 
     source_map = {
         source.code: source
-        for source in db.scalars(select(Source).where(Source.code.in_([item.code for item in source_feeds]))).all()
+        for source in db.scalars(
+            select(Source).where(
+                and_(
+                    Source.code.in_([item.code for item in source_feeds]),
+                    Source.enabled.is_(True),
+                )
+            )
+        ).all()
     }
 
     ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
@@ -668,6 +857,9 @@ def run_ingestion_cycle(
                 known_symbols=known_symbols,
                 symbol_to_id=symbol_to_id,
                 timeout_seconds=settings.request_timeout_seconds,
+                fetch_max_attempts=settings.feed_fetch_max_attempts,
+                fetch_backoff_seconds=settings.feed_fetch_backoff_seconds,
+                fetch_backoff_jitter_seconds=settings.feed_fetch_backoff_jitter_seconds,
             )
             per_feed.append(result)
             total_seen += result["items_seen"]
@@ -684,6 +876,15 @@ def run_ingestion_cycle(
             limit=500,
             only_unmapped=True,
         )
+
+    pruned_raw_items = prune_raw_feed_items(
+        db,
+        retention_days=settings.raw_feed_retention_days,
+        batch_size=settings.raw_feed_prune_batch_size,
+        max_batches=settings.raw_feed_prune_max_batches,
+    )
+    if pruned_raw_items:
+        logger.info("Pruned %s raw feed items older than %s days", pruned_raw_items, settings.raw_feed_retention_days)
 
     default_remap: BusinessWireRemapStats = {
         "processed": 0,

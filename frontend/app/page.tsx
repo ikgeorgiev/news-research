@@ -1,11 +1,15 @@
 "use client"
 
-import { FormEvent, useEffect, useState, useMemo, useRef } from "react"
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react"
 import { fetchNews, fetchNewsCount, fetchNewsIds, fetchTickers } from "@/lib/api"
 import { NewsItem, TickerItem } from "@/lib/types"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
+const AUTO_REFRESH_DEDUPE_MS = 2_000
+const MAX_PERSISTED_READ_IDS = 20_000
+const MAX_PERSISTED_STARRED_IDS = 10_000
+const NEWS_IDS_PAGE_SIZE = 1000
 
 type Watchlist = {
   id: string
@@ -19,17 +23,39 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
   { id: "all", name: "All News" },
 ]
 
-function timeAgo(iso: string): string {
-  const now = new Date().getTime()
-  const then = new Date(iso).getTime()
-  const sec = Math.max(1, Math.floor((now - then) / 1000))
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  const day = Math.floor(hr / 24)
-  return `${day}d ago`
+function trimIdSet(input: Set<number>, maxSize: number): Set<number> {
+  if (input.size <= maxSize) return input
+  const trimmed = Array.from(input).slice(input.size - maxSize)
+  return new Set(trimmed)
+}
+
+function toSafeExternalUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString()
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function persistJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (err) {
+    console.warn(`Failed to persist ${key} to localStorage`, err)
+  }
+}
+
+function persistValue(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch (err) {
+    console.warn(`Failed to persist ${key} to localStorage`, err)
+  }
 }
 
 function formatDetailedDate(iso: string | null | undefined): string {
@@ -144,15 +170,28 @@ export default function Page() {
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
   const itemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
+  const lastAutoRefreshAtRef = useRef(0)
 
   // Load state from local storage on mount
   useEffect(() => {
     try {
       const storedRead = localStorage.getItem("readNewsIds")
-      if (storedRead) setReadIds(new Set(JSON.parse(storedRead)))
+      if (storedRead) {
+        const parsed = JSON.parse(storedRead)
+        if (Array.isArray(parsed)) {
+          const validIds = parsed.filter((id): id is number => Number.isInteger(id))
+          setReadIds(trimIdSet(new Set(validIds), MAX_PERSISTED_READ_IDS))
+        }
+      }
       
       const storedStarred = localStorage.getItem("starredNewsIds")
-      if (storedStarred) setStarredIds(new Set(JSON.parse(storedStarred)))
+      if (storedStarred) {
+        const parsed = JSON.parse(storedStarred)
+        if (Array.isArray(parsed)) {
+          const validIds = parsed.filter((id): id is number => Number.isInteger(id))
+          setStarredIds(trimIdSet(new Set(validIds), MAX_PERSISTED_STARRED_IDS))
+        }
+      }
 
       const storedWatchlists = localStorage.getItem("customWatchlists")
       if (storedWatchlists) {
@@ -172,7 +211,7 @@ export default function Page() {
 
   // Save custom watchlists
   useEffect(() => {
-    localStorage.setItem("customWatchlists", JSON.stringify(customWatchlists))
+    persistJson("customWatchlists", customWatchlists)
   }, [customWatchlists])
 
   useEffect(() => {
@@ -186,15 +225,15 @@ export default function Page() {
 
   // Save state to local storage when changed
   useEffect(() => {
-    localStorage.setItem("readNewsIds", JSON.stringify(Array.from(readIds)))
+    persistJson("readNewsIds", Array.from(readIds))
   }, [readIds])
 
   useEffect(() => {
-    localStorage.setItem("starredNewsIds", JSON.stringify(Array.from(starredIds)))
+    persistJson("starredNewsIds", Array.from(starredIds))
   }, [starredIds])
 
   useEffect(() => {
-    localStorage.setItem("newsViewMode", viewMode)
+    persistValue("newsViewMode", viewMode)
   }, [viewMode])
 
   // Fetch tickers once
@@ -247,7 +286,14 @@ export default function Page() {
 
     let timer: ReturnType<typeof setInterval> | null = null
 
-    const refreshNow = () => triggerRefresh("auto")
+    const refreshNow = () => {
+      const now = Date.now()
+      if (now - lastAutoRefreshAtRef.current < AUTO_REFRESH_DEDUPE_MS) {
+        return
+      }
+      lastAutoRefreshAtRef.current = now
+      triggerRefresh("auto")
+    }
     const startTimer = () => {
       if (timer !== null) return
       timer = setInterval(refreshNow, AUTO_REFRESH_MS)
@@ -468,7 +514,7 @@ export default function Page() {
     feedContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const toggleRead = (id: number, e?: React.MouseEvent) => {
+  const toggleRead = (id: number, e?: MouseEvent) => {
     if (e) {
       e.stopPropagation()
       e.preventDefault()
@@ -477,11 +523,11 @@ export default function Page() {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
-      return next
+      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
     })
   }
 
-  const toggleStar = (id: number, e?: React.MouseEvent) => {
+  const toggleStar = (id: number, e?: MouseEvent) => {
     if (e) {
       e.stopPropagation()
       e.preventDefault()
@@ -490,18 +536,22 @@ export default function Page() {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
-      return next
+      return trimIdSet(next, MAX_PERSISTED_STARRED_IDS)
     })
   }
 
-  const markAsReadAndOpen = (item: NewsItem, e: React.MouseEvent) => {
+  const markAsReadAndOpen = (item: NewsItem, e: MouseEvent) => {
     e.stopPropagation()
+    const safeUrl = toSafeExternalUrl(item.url)
+    if (!safeUrl) {
+      e.preventDefault()
+      return
+    }
     setReadIds(prev => {
       const next = new Set(prev)
       next.add(item.id)
-      return next
+      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
     })
-    window.open(item.url, "_blank", "noreferrer")
   }
 
   const toggleSummary = (item: NewsItem) => {
@@ -509,7 +559,7 @@ export default function Page() {
     setReadIds(prev => {
       const next = new Set(prev)
       next.add(item.id)
-      return next
+      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
     })
 
     if (viewMode === "full") return
@@ -579,7 +629,7 @@ export default function Page() {
   }
 
   // Context menu handlers
-  const handleWatchlistContextMenu = (e: React.MouseEvent, wlId: string) => {
+  const handleWatchlistContextMenu = (e: MouseEvent, wlId: string) => {
     e.preventDefault()
     e.stopPropagation()
     setContextMenu({ watchlistId: wlId, x: e.clientX, y: e.clientY })
@@ -587,26 +637,44 @@ export default function Page() {
 
   const closeContextMenu = () => setContextMenu(null)
 
+  const markReadByQuery = async (params: {
+    tickers?: string[]
+    includeUnmappedFromProvider?: string
+  }) => {
+    let cursor: string | undefined = undefined
+    for (;;) {
+      const data = await fetchNewsIds({
+        ...params,
+        limit: NEWS_IDS_PAGE_SIZE,
+        cursor,
+      })
+      if (data.ids.length > 0) {
+        setReadIds(prev => {
+          const next = new Set(prev)
+          data.ids.forEach(id => next.add(id))
+          return trimIdSet(next, MAX_PERSISTED_READ_IDS)
+        })
+      }
+      if (!data.next_cursor || data.ids.length === 0) {
+        break
+      }
+      cursor = data.next_cursor
+    }
+  }
+
   const handleMarkAllRead = (wlId: string) => {
     closeContextMenu()
 
     if (wlId === "all") {
       // Fetch ALL article IDs from the backend so we mark everything read,
       // including articles beyond the current Load More window.
-      fetchNewsIds({ includeUnmappedFromProvider: "Business Wire" })
-        .then((data) => {
-          setReadIds(prev => {
-            const next = new Set(prev)
-            data.ids.forEach(id => next.add(id))
-            return next
-          })
-        })
+      markReadByQuery({ includeUnmappedFromProvider: "Business Wire" })
         .catch(() => {
           // Fallback: mark only tracked items if the fetch fails.
           setReadIds(prev => {
             const next = new Set(prev)
             trackedUnreadItems.forEach(i => next.add(i.id))
-            return next
+            return trimIdSet(next, MAX_PERSISTED_READ_IDS)
           })
         })
       return
@@ -617,14 +685,7 @@ export default function Page() {
     // For watchlists, fetch IDs filtered by the watchlist tickers.
     const wlTickers = wl.tickers || []
     if (wlTickers.length > 0) {
-      fetchNewsIds({ tickers: wlTickers })
-        .then((data) => {
-          setReadIds(prev => {
-            const next = new Set(prev)
-            data.ids.forEach(id => next.add(id))
-            return next
-          })
-        })
+      markReadByQuery({ tickers: wlTickers })
         .catch(() => {
           // Fallback: mark only tracked items matching this watchlist.
           const matchingIds = trackedUnreadItems
@@ -633,7 +694,7 @@ export default function Page() {
           setReadIds(prev => {
             const next = new Set(prev)
             matchingIds.forEach(id => next.add(id))
-            return next
+            return trimIdSet(next, MAX_PERSISTED_READ_IDS)
           })
         })
     }
@@ -926,14 +987,15 @@ export default function Page() {
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Try adjusting your filters or switching watchlists.</p>
             </div>
           )}
-          {items.map((item, index) => {
+          {items.map((item) => {
             const isRead = readIds.has(item.id)
             const isStarred = starredIds.has(item.id)
             const isExpanded = viewMode === "full" || expandedIds.has(item.id)
-            
+            const safeItemUrl = toSafeExternalUrl(item.url)
+             
             return (
               <article 
-                key={`${item.id}-${index}`} 
+                key={item.id} 
                 className={`feed-row-wrapper ${isRead ? "read" : "unread"}`}
               >
                 <div 
@@ -944,9 +1006,10 @@ export default function Page() {
                     <div className="headline-content">
                       <div className="headline">
                         <a 
-                          href={item.url} 
+                          href={safeItemUrl ?? "#"}
                           target="_blank" 
                           rel="noreferrer" 
+                          aria-disabled={!safeItemUrl}
                           onClick={(e) => markAsReadAndOpen(item, e)}
                         >
                           {item.title}
@@ -993,10 +1056,7 @@ export default function Page() {
                 {isExpanded && (
                   <div className="feed-row-details">
                     {item.summary && (
-                      <div 
-                        className="summary-text"
-                        dangerouslySetInnerHTML={{ __html: item.summary }} 
-                      />
+                      <div className="summary-text">{item.summary}</div>
                     )}
                   </div>
                 )}

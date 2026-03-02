@@ -156,14 +156,24 @@ For frontend on `3000` instead:
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
 Use `include_unmapped=true` to include all unmapped stories.
 Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wire unmapped stories while keeping mapped stories from all providers.
+`GET /api/v1/news/ids` supports cursor pagination with `limit` and `cursor`.
+
+Admin endpoints require the `X-API-Key` header and `ADMIN_API_KEY` to be configured.
 
 After editing `data/cef_tickers.csv` while the backend is running, call:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/admin/tickers/reload"
+curl -X POST "http://localhost:8000/api/v1/admin/tickers/reload" \
+  -H "X-API-Key: ${ADMIN_API_KEY}"
 ```
 
 This reloads symbols and remaps recent unmapped Business Wire items so they move out of `GENERAL` when a ticker match is found.
+
+Ingestion reliability controls are configurable via env vars:
+
+- `INGESTION_STALE_RUN_TIMEOUT_SECONDS` marks stale `running` jobs as failed.
+- `FEED_FETCH_MAX_ATTEMPTS` / `FEED_FETCH_BACKOFF_SECONDS` / `FEED_FETCH_BACKOFF_JITTER_SECONDS` control feed retry behavior.
+- `RAW_FEED_RETENTION_DAYS` / `RAW_FEED_PRUNE_BATCH_SIZE` / `RAW_FEED_PRUNE_MAX_BATCHES` bound raw feed table growth.
 
 ## Ticker Universe
 

@@ -15,6 +15,10 @@ REQUIRED_COLUMNS = {"ticker"}
 _ticker_reload_lock = threading.Lock()
 
 
+def _normalize_row(row: dict[str, str | None]) -> dict[str, str | None]:
+    return {str(key).strip().lower(): value for key, value in row.items()}
+
+
 def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
     with _ticker_reload_lock:
         path = Path(csv_path)
@@ -27,7 +31,7 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
             if not REQUIRED_COLUMNS.issubset(columns):
                 raise ValueError(f"Missing required columns in {csv_path}: {REQUIRED_COLUMNS}")
 
-            rows = list(reader)
+            rows = [_normalize_row(row) for row in reader]
 
         symbols = [row.get("ticker", "").strip().upper() for row in rows if row.get("ticker")]
         if not symbols:

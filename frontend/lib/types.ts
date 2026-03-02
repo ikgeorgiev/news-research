@@ -26,6 +26,7 @@ export type NewsCountResponse = {
 
 export type NewsIdsResponse = {
   ids: number[]
+  next_cursor: string | null
 }
 
 export type TickerItem = {

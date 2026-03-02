@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
-from app.ingestion import remap_businesswire_articles
+from app.ingestion import reconcile_stale_ingestion_runs, remap_businesswire_articles
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.schemas import (
     BusinessWireRemapResponse,
@@ -35,6 +36,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 scheduler: IngestionScheduler | None = None
+MAX_NEWS_IDS_PAGE_SIZE = 5000
 
 
 def _published_at_for_response(row: Article) -> datetime:
@@ -96,6 +98,12 @@ async def lifespan(app: FastAPI):
 
         ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
         logger.info("Ticker load stats: %s", ticker_stats)
+        stale_runs_fixed = reconcile_stale_ingestion_runs(
+            db,
+            stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
+        )
+        if stale_runs_fixed:
+            logger.warning("Marked %s stale ingestion runs as failed at startup", stale_runs_fixed)
 
     scheduler = IngestionScheduler(settings, get_session_factory())
     scheduler.start()
@@ -118,9 +126,27 @@ app.add_middleware(
 )
 
 
+def require_admin_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+    expected_key = (settings.admin_api_key or "").strip()
+    if not expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin API key is not configured",
+        )
+    if x_api_key is None or not secrets.compare_digest(x_api_key, expected_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin API key",
+        )
+
+
 @app.get("/health")
 def health():
-    ok = db_health_check()
+    try:
+        ok = db_health_check()
+    except Exception:
+        logger.exception("Database health check failed")
+        ok = False
     return {
         "status": "ok" if ok else "degraded",
         "time": datetime.now(timezone.utc).isoformat(),
@@ -168,6 +194,7 @@ def _build_news_query(
 ):
     """Build a filtered Article query (without ordering, cursor, or limit)."""
     query = select(Article)
+    publish_sort_key = func.coalesce(Article.published_at, Article.created_at)
 
     mapped_exists = (
         select(1)
@@ -179,7 +206,9 @@ def _build_news_query(
 
     if ticker:
         ticker_symbols = [t.strip().upper() for t in ticker.split(",") if t.strip()]
-        if ticker_symbols:
+        if not ticker_symbols:
+            query = query.where(mapped_exists)
+        else:
             ticker_match_exists = (
                 select(1)
                 .select_from(ArticleTicker)
@@ -264,10 +293,10 @@ def _build_news_query(
         query = query.where(Article.title.ilike(f"%{q.strip()}%"))
 
     if from_:
-        query = query.where(Article.published_at >= from_)
+        query = query.where(publish_sort_key >= from_)
 
     if to:
-        query = query.where(Article.published_at <= to)
+        query = query.where(publish_sort_key <= to)
 
     return query
 
@@ -321,6 +350,8 @@ def list_news_ids(
     ),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
+    limit: int = Query(default=MAX_NEWS_IDS_PAGE_SIZE, ge=1, le=MAX_NEWS_IDS_PAGE_SIZE),
+    cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
     query = _build_news_query(
@@ -334,10 +365,31 @@ def list_news_ids(
         from_=from_,
         to=to,
     )
-    # Select only IDs — lightweight single-scan query for bulk operations.
-    id_query = query.with_only_columns(Article.id)
-    ids = list(db.scalars(id_query).all())
-    return NewsIdsResponse(ids=ids)
+    sort_key = func.coalesce(Article.published_at, Article.created_at)
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    if cursor_payload:
+        cursor_published, cursor_id = cursor_payload
+        query = query.where(
+            or_(
+                sort_key < cursor_published,
+                and_(sort_key == cursor_published, Article.id < cursor_id),
+            )
+        )
+
+    id_query = (
+        query.with_only_columns(Article.id, sort_key.label("sort_ts"))
+        .order_by(sort_key.desc(), Article.id.desc())
+        .limit(limit + 1)
+    )
+    rows = db.execute(id_query).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    ids = [article_id for article_id, _sort_ts in rows]
+    next_cursor = None
+    if has_more and rows:
+        last_id, last_sort_ts = rows[-1]
+        next_cursor = encode_cursor(last_sort_ts, last_id)
+    return NewsIdsResponse(ids=ids, next_cursor=next_cursor)
 
 
 @app.get(f"{settings.api_prefix}/news", response_model=NewsListResponse)
@@ -358,7 +410,6 @@ def list_news(
     to: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = None,
-    sort: str = Query(default="latest", pattern="^(latest)$"),
     db: Session = Depends(get_db),
 ):
     query = _build_news_query(
@@ -372,20 +423,19 @@ def list_news(
         from_=from_,
         to=to,
     )
+    sort_key = func.coalesce(Article.published_at, Article.created_at)
 
     cursor_payload = decode_cursor(cursor) if cursor else None
     if cursor_payload:
         cursor_published, cursor_id = cursor_payload
         query = query.where(
             or_(
-                Article.published_at < cursor_published,
-                and_(Article.published_at == cursor_published, Article.id < cursor_id),
+                sort_key < cursor_published,
+                and_(sort_key == cursor_published, Article.id < cursor_id),
             )
         )
 
-    query = query.order_by(
-        Article.published_at.desc().nullslast(), Article.id.desc()
-    ).limit(limit + 1)
+    query = query.order_by(sort_key.desc(), Article.id.desc()).limit(limit + 1)
 
     rows = db.scalars(query).all()
     has_more = len(rows) > limit
@@ -420,7 +470,7 @@ def list_news(
         meta={
             "count": len(items),
             "limit": limit,
-            "sort": sort,
+            "sort": "latest",
         },
     )
 
@@ -447,7 +497,9 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
 
 
 @app.post(
-    f"{settings.api_prefix}/admin/ingest/run-once", response_model=RunIngestionResponse
+    f"{settings.api_prefix}/admin/ingest/run-once",
+    response_model=RunIngestionResponse,
+    dependencies=[Depends(require_admin_api_key)],
 )
 def admin_run_ingestion():
     if scheduler is None:
@@ -466,7 +518,9 @@ def admin_run_ingestion():
 
 
 @app.get(
-    f"{settings.api_prefix}/admin/ingest/status", response_model=IngestionRunResponse
+    f"{settings.api_prefix}/admin/ingest/status",
+    response_model=IngestionRunResponse,
+    dependencies=[Depends(require_admin_api_key)],
 )
 def admin_ingestion_status(
     limit: int = Query(default=100, ge=1, le=300), db: Session = Depends(get_db)
@@ -498,6 +552,7 @@ def admin_ingestion_status(
 @app.post(
     f"{settings.api_prefix}/admin/remap/businesswire",
     response_model=BusinessWireRemapResponse,
+    dependencies=[Depends(require_admin_api_key)],
 )
 def admin_remap_businesswire(
     limit: int = Query(default=500, ge=1, le=5000),
@@ -524,6 +579,7 @@ def admin_remap_businesswire(
 @app.post(
     f"{settings.api_prefix}/admin/tickers/reload",
     response_model=ReloadTickersResponse,
+    dependencies=[Depends(require_admin_api_key)],
 )
 def admin_reload_tickers(
     remap_unmapped_businesswire: bool = Query(
