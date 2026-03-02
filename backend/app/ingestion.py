@@ -6,11 +6,12 @@ import threading
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from html import unescape
+from typing import TypedDict
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
 import requests
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -80,6 +81,39 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
 }
 _businesswire_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
 _businesswire_page_cache_lock = threading.Lock()
+
+
+class TickerSyncStats(TypedDict):
+    loaded: int
+    created: int
+    updated: int
+    unchanged: int
+
+
+class IngestFeedResult(TypedDict):
+    source: str
+    feed_url: str
+    status: str
+    items_seen: int
+    items_inserted: int
+    error: str | None
+
+
+class BusinessWireRemapStats(TypedDict):
+    processed: int
+    articles_with_hits: int
+    remapped_articles: int
+    only_unmapped: bool
+
+
+class IngestionCycleResult(TypedDict):
+    total_feeds: int
+    total_items_seen: int
+    total_items_inserted: int
+    failed_feeds: int
+    ticker_sync: TickerSyncStats
+    businesswire_remap: BusinessWireRemapStats
+    feeds: list[IngestFeedResult]
 
 
 def _clamp_label(value: str | None, max_len: int = 120) -> str:
@@ -380,7 +414,7 @@ def _upsert_article(
                 article.summary = summary
             elif not article.summary or len(summary) > len(article.summary):
                 article.summary = summary
-        if published_at and article.published_at and published_at > article.published_at:
+        if article.published_at is None or published_at > article.published_at:
             article.published_at = published_at
 
     return article, created, matched_by_url
@@ -461,7 +495,7 @@ def ingest_feed(
     known_symbols: set[str],
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
-) -> dict[str, int | str | None]:
+) -> IngestFeedResult:
     run = IngestionRun(
         source_id=source.id,
         feed_url=feed_url,
@@ -595,8 +629,14 @@ def ingest_feed(
 
 def run_ingestion_cycle(
     db: Session, settings: Settings
-) -> dict[str, int | dict[str, int | bool] | dict[str, int] | list[dict[str, int | str | None]]]:
-    ticker_sync = load_tickers_from_csv(db, settings.tickers_csv_path)
+) -> IngestionCycleResult:
+    raw_ticker_sync = load_tickers_from_csv(db, settings.tickers_csv_path)
+    ticker_sync: TickerSyncStats = {
+        "loaded": int(raw_ticker_sync.get("loaded", 0) or 0),
+        "created": int(raw_ticker_sync.get("created", 0) or 0),
+        "updated": int(raw_ticker_sync.get("updated", 0) or 0),
+        "unchanged": int(raw_ticker_sync.get("unchanged", 0) or 0),
+    }
 
     source_feeds = build_source_feeds(settings, db)
     seed_sources(db, source_feeds)
@@ -610,7 +650,7 @@ def run_ingestion_cycle(
     symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
     known_symbols = set(symbol_to_id.keys())
 
-    per_feed: list[dict[str, int | str | None]] = []
+    per_feed: list[IngestFeedResult] = []
     total_seen = 0
     total_inserted = 0
     failed = 0
@@ -630,13 +670,13 @@ def run_ingestion_cycle(
                 timeout_seconds=settings.request_timeout_seconds,
             )
             per_feed.append(result)
-            total_seen += int(result["items_seen"])
-            total_inserted += int(result["items_inserted"])
+            total_seen += result["items_seen"]
+            total_inserted += result["items_inserted"]
             if result["status"] != "success":
                 failed += 1
 
-    remap_stats: dict[str, int | bool] | None = None
-    ticker_changed = int(ticker_sync.get("created", 0)) > 0 or int(ticker_sync.get("updated", 0)) > 0
+    remap_stats: BusinessWireRemapStats | None = None
+    ticker_changed = ticker_sync["created"] > 0 or ticker_sync["updated"] > 0
     if ticker_changed:
         remap_stats = remap_businesswire_articles(
             db,
@@ -645,18 +685,19 @@ def run_ingestion_cycle(
             only_unmapped=True,
         )
 
+    default_remap: BusinessWireRemapStats = {
+        "processed": 0,
+        "articles_with_hits": 0,
+        "remapped_articles": 0,
+        "only_unmapped": True,
+    }
     return {
         "total_feeds": len(per_feed),
         "total_items_seen": total_seen,
         "total_items_inserted": total_inserted,
         "failed_feeds": failed,
         "ticker_sync": ticker_sync,
-        "businesswire_remap": remap_stats or {
-            "processed": 0,
-            "articles_with_hits": 0,
-            "remapped_articles": 0,
-            "only_unmapped": True,
-        },
+        "businesswire_remap": remap_stats or default_remap,
         "feeds": per_feed,
     }
 
@@ -667,7 +708,7 @@ def remap_businesswire_articles(
     *,
     limit: int = 500,
     only_unmapped: bool = True,
-) -> dict[str, int | bool]:
+) -> BusinessWireRemapStats:
     ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
     symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
     known_symbols = set(symbol_to_id.keys())

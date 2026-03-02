@@ -9,7 +9,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.ingestion import run_ingestion_cycle
+from app.ingestion import IngestionCycleResult, run_ingestion_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class IngestionScheduler:
             self._scheduler.shutdown(wait=False)
             logger.info("Ingestion scheduler stopped")
 
-    def run_once(self) -> dict[str, int | list[dict[str, int | str | None]]] | None:
+    def run_once(self) -> IngestionCycleResult | None:
         if not self._lock.acquire(blocking=False):
             return None
         try:

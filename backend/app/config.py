@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_prefix: str = "/api/v1"
 
-    backend_host: str = "0.0.0.0"
+    backend_host: str = "127.0.0.1"
     backend_port: int = 8000
 
     # Local-first default. Docker compose overrides this with the container hostname (`db`).

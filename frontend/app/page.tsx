@@ -32,8 +32,10 @@ function timeAgo(iso: string): string {
   return `${day}d ago`
 }
 
-function formatDetailedDate(iso: string): string {
+function formatDetailedDate(iso: string | null | undefined): string {
+  if (!iso) return "Unknown"
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "Unknown"
   const dateStr = d.toDateString()
   const timeStr = d.toTimeString().split(' ')[0]
   

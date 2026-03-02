@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
 from app.ingestion import remap_businesswire_articles
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
@@ -35,6 +35,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 scheduler: IngestionScheduler | None = None
+
+
+def _published_at_for_response(row: Article) -> datetime:
+    """Protect API serialization/cursoring from legacy rows with null published_at."""
+    return row.published_at or row.created_at
 
 
 def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[str]]:
@@ -125,13 +130,16 @@ def health():
 @app.get(f"{settings.api_prefix}/tickers", response_model=TickerListResponse)
 def list_tickers(
     q: str | None = Query(default=None, description="Prefix match on ticker symbol"),
+    limit: int = Query(default=5000, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     query = select(Ticker).where(Ticker.active.is_(True)).order_by(Ticker.symbol.asc())
     if q:
         query = query.where(Ticker.symbol.ilike(f"%{q.strip().upper()}%"))
 
-    rows = db.scalars(query).all()
+    total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
+    rows = db.scalars(query.limit(limit).offset(offset)).all()
     return TickerListResponse(
         items=[
             TickerItem(
@@ -142,7 +150,7 @@ def list_tickers(
             )
             for row in rows
         ],
-        total=len(rows),
+        total=total,
     )
 
 
@@ -394,7 +402,7 @@ def list_news(
             source=row.source_name,
             provider=providers_by_article.get(row.id) or row.provider_name,
             summary=clean_summary_text(row.summary),
-            published_at=row.published_at,
+            published_at=_published_at_for_response(row),
             tickers=tickers_by_article.get(row.id, []),
             dedupe_group=row.cluster_key,
         )
@@ -404,7 +412,7 @@ def list_news(
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
-        next_cursor = encode_cursor(last.published_at, last.id)
+        next_cursor = encode_cursor(_published_at_for_response(last), last.id)
 
     return NewsListResponse(
         items=items,
@@ -432,7 +440,7 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
         source=row.source_name,
         provider=providers_by_article.get(row.id) or row.provider_name,
         summary=clean_summary_text(row.summary),
-        published_at=row.published_at,
+        published_at=_published_at_for_response(row),
         tickers=tickers_by_article.get(row.id, []),
         dedupe_group=row.cluster_key,
     )
