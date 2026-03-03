@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     feed_fetch_max_attempts: int = Field(default=3, ge=1, le=10)
     feed_fetch_backoff_seconds: float = Field(default=1.0, ge=0.0, le=30.0)
     feed_fetch_backoff_jitter_seconds: float = Field(default=0.3, ge=0.0, le=10.0)
+    feed_failure_backoff_base_seconds: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=3600.0,
+        description="Base delay for per-feed exponential failure backoff.",
+    )
+    feed_failure_backoff_max_seconds: float = Field(
+        default=600.0,
+        ge=0.0,
+        le=86400.0,
+        description="Maximum delay for per-feed exponential failure backoff.",
+    )
     raw_feed_retention_days: int = Field(default=30, ge=1, le=3650)
     raw_feed_prune_batch_size: int = Field(default=5000, ge=100, le=50000)
     raw_feed_prune_max_batches: int = Field(default=5, ge=1, le=100)

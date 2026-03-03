@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.database import get_engine
 from app.ingestion import IngestionCycleResult, run_ingestion_cycle
+from app.monitoring import record_ingestion_failure, record_ingestion_skip, record_ingestion_success
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,19 @@ class IngestionScheduler:
             logger.info("Ingestion scheduler stopped")
 
     def run_once(self) -> IngestionCycleResult | None:
+        started_at = time.perf_counter()
         if not self._lock.acquire(blocking=False):
             logger.info("Ingestion job skipped: another run is already in progress (in-process lock)")
+            record_ingestion_skip("inprocess_lock")
             return None
         try:
-            return self._run_with_global_lock()
+            result = self._run_with_global_lock()
+            if result is not None:
+                record_ingestion_success(result, time.perf_counter() - started_at)
+            return result
+        except Exception:
+            record_ingestion_failure(time.perf_counter() - started_at)
+            raise
         finally:
             self._lock.release()
 
@@ -82,6 +92,7 @@ class IngestionScheduler:
             lock_conn.commit()
             if not acquired:
                 logger.info("Ingestion job skipped: advisory lock is held by another instance")
+                record_ingestion_skip("advisory_lock")
                 return None
             try:
                 with self.session_factory() as db:

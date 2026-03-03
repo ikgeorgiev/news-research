@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Header, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
 from app.ingestion import PAGE_FETCH_CONFIGS, reconcile_stale_ingestion_runs, remap_businesswire_articles, remap_source_articles
+from app.monitoring import observe_http_request, render_metrics
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.schemas import (
     BusinessWireRemapResponse,
@@ -127,6 +129,21 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration_seconds = time.perf_counter() - started_at
+        route = request.scope.get("route")
+        path_template = getattr(route, "path", request.url.path)
+        observe_http_request(request.method, path_template, status_code, duration_seconds)
+
+
 def require_admin_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
     expected_key = (settings.admin_api_key or "").strip()
     if not expected_key:
@@ -152,6 +169,12 @@ def health():
         "status": "ok" if ok else "degraded",
         "time": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
 
 
 @app.get(f"{settings.api_prefix}/tickers", response_model=TickerListResponse)

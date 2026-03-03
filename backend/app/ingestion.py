@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import TypedDict
@@ -21,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
+from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
@@ -40,7 +41,6 @@ GENERAL_SOURCE_CODE = "businesswire"
 SOURCE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
 SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
 SOURCE_PAGE_CACHE_MAX_ITEMS = 1024
-FEED_HTTP_CACHE_MAX_ITEMS = 2048
 
 EXCHANGE_PATTERN = re.compile(r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b")
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
@@ -90,8 +90,6 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
 }
 _source_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
 _source_page_cache_lock = threading.Lock()
-_feed_http_cache: OrderedDict[str, tuple[str | None, str | None]] = OrderedDict()
-_feed_http_cache_lock = threading.Lock()
 _tickers_csv_mtime_cache: dict[str, float] = {}
 _tickers_csv_mtime_cache_lock = threading.Lock()
 _last_raw_feed_prune_monotonic: float | None = None
@@ -190,6 +188,31 @@ def _fetch_feed_with_retries(
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.get(feed_url, timeout=timeout_seconds, headers=headers)
+            status_code = int(getattr(response, "status_code", 200) or 200)
+            if status_code == 429:
+                retry_after = _parse_retry_after_seconds(
+                    getattr(getattr(response, "headers", None), "get", lambda _k: None)("Retry-After")
+                )
+                if attempt >= max_attempts:
+                    response.raise_for_status()
+                sleep_seconds = (
+                    retry_after
+                    if retry_after is not None
+                    else (backoff_seconds * (2 ** (attempt - 1))) + random.uniform(
+                        0.0, max(0.0, backoff_jitter_seconds)
+                    )
+                )
+                logger.warning(
+                    "Feed request attempt %s/%s got 429 for %s; retry_after=%s sleep=%.3fs",
+                    attempt,
+                    max_attempts,
+                    feed_url,
+                    retry_after,
+                    sleep_seconds,
+                )
+                if sleep_seconds > 0:
+                    time.sleep(sleep_seconds)
+                continue
             response.raise_for_status()
             return response
         except requests.RequestException as exc:
@@ -215,36 +238,110 @@ def _fetch_feed_with_retries(
     raise RuntimeError("feed fetch retry loop exited unexpectedly")
 
 
-def _get_feed_conditional_headers(feed_url: str) -> dict[str, str]:
-    with _feed_http_cache_lock:
-        cached = _feed_http_cache.get(feed_url)
-        if cached is None:
-            return {}
-        etag, last_modified = cached
+def _parse_retry_after_seconds(header_value: str | None) -> float | None:
+    if header_value is None:
+        return None
+    value = str(header_value).strip()
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except Exception:
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (retry_at.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds())
 
+
+def _to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _get_or_create_feed_poll_state(db: Session, feed_url: str) -> FeedPollState:
+    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1))
+    if state is not None:
+        return state
+
+    candidate = FeedPollState(feed_url=feed_url)
+    try:
+        # Savepoint keeps concurrent workers from aborting ingest on unique collisions.
+        with db.begin_nested():
+            db.add(candidate)
+            db.flush()
+        return candidate
+    except IntegrityError:
+        state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1))
+        if state is None:
+            raise
+        return state
+
+
+def _get_feed_conditional_headers(feed_state: FeedPollState | None) -> dict[str, str]:
+    if feed_state is None:
+        return {}
     headers: dict[str, str] = {}
-    if etag:
-        headers["If-None-Match"] = etag
-    if last_modified:
-        headers["If-Modified-Since"] = last_modified
+    if feed_state.etag:
+        headers["If-None-Match"] = feed_state.etag
+    if feed_state.last_modified:
+        headers["If-Modified-Since"] = feed_state.last_modified
     return headers
 
 
-def _update_feed_http_cache(feed_url: str, response: requests.Response) -> None:
+def _update_feed_http_cache(feed_state: FeedPollState, response: requests.Response) -> None:
     # Keep this defensive: unit tests use fake response objects that may not have headers/status_code.
     headers = getattr(response, "headers", None)
     if headers is None or not hasattr(headers, "get"):
         return
     etag = headers.get("ETag")
     last_modified = headers.get("Last-Modified")
-    if not etag and not last_modified:
-        return
+    if etag:
+        feed_state.etag = str(etag)
+    if last_modified:
+        feed_state.last_modified = str(last_modified)
 
-    with _feed_http_cache_lock:
-        _feed_http_cache[feed_url] = (str(etag) if etag else None, str(last_modified) if last_modified else None)
-        _feed_http_cache.move_to_end(feed_url)
-        while len(_feed_http_cache) > FEED_HTTP_CACHE_MAX_ITEMS:
-            _feed_http_cache.popitem(last=False)
+
+def _compute_feed_failure_backoff_seconds(
+    failure_count: int,
+    *,
+    base_seconds: float,
+    max_seconds: float,
+) -> float:
+    base = max(0.0, float(base_seconds))
+    cap = max(0.0, float(max_seconds))
+    if base <= 0.0 or cap <= 0.0:
+        return 0.0
+    exponent = max(0, int(failure_count) - 1)
+    return min(base * (2 ** exponent), cap)
+
+
+def _mark_feed_failure_backoff(
+    feed_state: FeedPollState,
+    *,
+    now_utc: datetime,
+    base_seconds: float,
+    max_seconds: float,
+) -> None:
+    next_failure_count = max(0, int(feed_state.failure_count or 0)) + 1
+    delay_seconds = _compute_feed_failure_backoff_seconds(
+        next_failure_count,
+        base_seconds=base_seconds,
+        max_seconds=max_seconds,
+    )
+    feed_state.failure_count = next_failure_count
+    feed_state.last_failure_at = now_utc
+    feed_state.backoff_until = now_utc + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now_utc
+
+
+def _reset_feed_failure_backoff(feed_state: FeedPollState) -> None:
+    feed_state.failure_count = 0
+    feed_state.last_failure_at = None
+    feed_state.backoff_until = None
 
 
 def _should_run_raw_feed_prune(interval_seconds: int) -> bool:
@@ -830,6 +927,8 @@ def ingest_feed(
     fetch_backoff_seconds: float = 1.0,
     fetch_backoff_jitter_seconds: float = 0.3,
     enable_conditional_get: bool = True,
+    failure_backoff_base_seconds: float = 30.0,
+    failure_backoff_max_seconds: float = 600.0,
 ) -> IngestFeedResult:
     run = IngestionRun(
         source_id=source.id,
@@ -847,189 +946,206 @@ def ingest_feed(
     status = "success"
     error_text: str | None = None
     entry_errors = 0
+    feed_state = _get_or_create_feed_poll_state(db, feed_url)
 
     try:
-        conditional_headers = _get_feed_conditional_headers(feed_url) if enable_conditional_get else {}
-        response = _fetch_feed_with_retries(
-            feed_url=feed_url,
-            timeout_seconds=timeout_seconds,
-            max_attempts=fetch_max_attempts,
-            backoff_seconds=fetch_backoff_seconds,
-            backoff_jitter_seconds=fetch_backoff_jitter_seconds,
-            extra_headers=conditional_headers,
-        )
-        _update_feed_http_cache(feed_url, response)
-
-        status_code = int(getattr(response, "status_code", 200) or 200)
-        if status_code == 304:
-            # Feed content has not changed since the last run; skip parse + DB work.
+        now_utc = datetime.now(timezone.utc)
+        backoff_until = feed_state.backoff_until
+        if backoff_until is not None and _to_utc(backoff_until) > now_utc:
+            status = "skipped_backoff"
+            error_text = f"Feed is in backoff until {_to_utc(backoff_until).isoformat()}"
             committed_items_inserted = 0
         else:
-            parsed = feedparser.parse(response.content)
+            conditional_headers = _get_feed_conditional_headers(feed_state) if enable_conditional_get else {}
+            response = _fetch_feed_with_retries(
+                feed_url=feed_url,
+                timeout_seconds=timeout_seconds,
+                max_attempts=fetch_max_attempts,
+                backoff_seconds=fetch_backoff_seconds,
+                backoff_jitter_seconds=fetch_backoff_jitter_seconds,
+                extra_headers=conditional_headers,
+            )
+            _update_feed_http_cache(feed_state, response)
+            _reset_feed_failure_backoff(feed_state)
 
-            source_name = source.name
-            feed_title = parsed.feed.get("title") if isinstance(parsed.feed, dict) else None
-            if source.code != "yahoo" and feed_title:
-                source_name = _clamp_label(str(feed_title))
+            status_code = int(getattr(response, "status_code", 200) or 200)
+            if status_code == 304:
+                # Feed content has not changed since the last run; skip parse + DB work.
+                committed_items_inserted = 0
+            else:
+                parsed = feedparser.parse(response.content)
 
-            entries = list(getattr(parsed, "entries", []) or [])
-            items_seen = len(entries)
+                source_name = source.name
+                feed_title = parsed.feed.get("title") if isinstance(parsed.feed, dict) else None
+                if source.code != "yahoo" and feed_title:
+                    source_name = _clamp_label(str(feed_title))
 
-            # Feed-level dedupe prefetch: keeps ingest fast even when raw_feed_items grows large.
-            now_utc = datetime.now(timezone.utc)
-            prepared_entries: list[PreparedFeedEntry] = []
-            for entry in entries:
-                raw_title = str(entry.get("title") or "").strip()
-                # Never fall back to raw feed title so stored titles remain plain text.
-                title = clean_summary_text(raw_title)
-                link = canonicalize_url(str(entry.get("link") or "").strip())
-                if not title or not link:
-                    continue
+                entries = list(getattr(parsed, "entries", []) or [])
+                items_seen = len(entries)
 
-                published_at = parse_datetime(entry.get("published") or entry.get("updated")) or now_utc
-                raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
-                prepared_entries.append(
-                    PreparedFeedEntry(
-                        entry=entry,
-                        raw_title=raw_title,
-                        title=title,
-                        link=link,
-                        published_at=published_at,
-                        raw_guid=raw_guid,
+                # Feed-level dedupe prefetch: keeps ingest fast even when raw_feed_items grows large.
+                now_utc = datetime.now(timezone.utc)
+                prepared_entries: list[PreparedFeedEntry] = []
+                for entry in entries:
+                    raw_title = str(entry.get("title") or "").strip()
+                    # Never fall back to raw feed title so stored titles remain plain text.
+                    title = clean_summary_text(raw_title)
+                    link = canonicalize_url(str(entry.get("link") or "").strip())
+                    if not title or not link:
+                        continue
+
+                    published_at = parse_datetime(entry.get("published") or entry.get("updated")) or now_utc
+                    raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
+                    prepared_entries.append(
+                        PreparedFeedEntry(
+                            entry=entry,
+                            raw_title=raw_title,
+                            title=title,
+                            link=link,
+                            published_at=published_at,
+                            raw_guid=raw_guid,
+                        )
                     )
+
+                recorded_guids, recorded_pairs = _prefetch_recorded_raw_keys(
+                    db,
+                    source_id=source.id,
+                    prepared_entries=prepared_entries,
                 )
 
-            recorded_guids, recorded_pairs = _prefetch_recorded_raw_keys(
-                db,
-                source_id=source.id,
-                prepared_entries=prepared_entries,
-            )
+                provider_name = _clamp_label(source.name)
+                page_config = PAGE_FETCH_CONFIGS.get(source.code)
 
-            provider_name = _clamp_label(source.name)
-            page_config = PAGE_FETCH_CONFIGS.get(source.code)
+                for prepared in prepared_entries:
+                    try:
+                        created_article = False
+                        persisted_raw = False
+                        persisted_raw_guid: str | None = None
+                        persisted_pair: tuple[str, datetime] | None = None
 
-            for prepared in prepared_entries:
-                try:
-                    created_article = False
-                    persisted_raw = False
-                    persisted_raw_guid: str | None = None
-                    persisted_pair: tuple[str, datetime] | None = None
+                        # Isolate malformed entries so one bad payload does not roll back the full feed run.
+                        with db.begin_nested():
+                            if prepared.raw_guid and prepared.raw_guid in recorded_guids:
+                                continue
+                            if (prepared.link, prepared.published_at) in recorded_pairs:
+                                continue
 
-                    # Isolate malformed entries so one bad payload does not roll back the full feed run.
-                    with db.begin_nested():
-                        if prepared.raw_guid and prepared.raw_guid in recorded_guids:
-                            continue
-                        if (prepared.link, prepared.published_at) in recorded_pairs:
-                            continue
+                            raw_summary = (
+                                str(prepared.entry.get("summary") or prepared.entry.get("description") or "").strip()
+                                or None
+                            )
+                            summary = clean_summary_text(raw_summary)
 
-                        raw_summary = (
-                            str(prepared.entry.get("summary") or prepared.entry.get("description") or "").strip()
-                            or None
-                        )
-                        summary = clean_summary_text(raw_summary)
-
-                        entry_source_name = _extract_provider(prepared.entry, source_name)
-                        ticker_hits = _extract_entry_tickers(
-                            prepared.title,
-                            summary or "",
-                            prepared.link,
-                            feed_url,
-                            known_symbols,
-                        )
-                        if not ticker_hits and page_config is not None:
-                            ticker_hits = _extract_source_fallback_tickers(
+                            entry_source_name = _extract_provider(prepared.entry, source_name)
+                            ticker_hits = _extract_entry_tickers(
                                 prepared.title,
                                 summary or "",
                                 prepared.link,
                                 feed_url,
                                 known_symbols,
-                                timeout_seconds,
-                                page_config,
+                            )
+                            if not ticker_hits and page_config is not None:
+                                ticker_hits = _extract_source_fallback_tickers(
+                                    prepared.title,
+                                    summary or "",
+                                    prepared.link,
+                                    feed_url,
+                                    known_symbols,
+                                    timeout_seconds,
+                                    page_config,
+                                )
+
+                            allow_existing_unmapped = False
+                            if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
+                                existing_article_id = db.scalar(
+                                    select(Article.id)
+                                    .where(Article.canonical_url_hash == sha256_str(prepared.link))
+                                    .limit(1)
+                                )
+                                allow_existing_unmapped = existing_article_id is not None
+
+                            if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
+                                continue
+
+                            article, created, matched_by_url = _upsert_article(
+                                db,
+                                source_code=source.code,
+                                canonical_url=prepared.link,
+                                title=prepared.title,
+                                summary=summary,
+                                published_at=prepared.published_at,
+                                source_name=source_name,
+                                provider_name=provider_name,
+                            )
+                            created_article = created
+
+                            # New articles never have mappings yet; skip the SELECT in _upsert_article_tickers().
+                            existing_rows = {} if created else None
+                            _upsert_article_tickers(
+                                db,
+                                article.id,
+                                ticker_hits,
+                                symbol_to_id,
+                                existing_rows=existing_rows,
+                                prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
                             )
 
-                        allow_existing_unmapped = False
-                        if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
-                            existing_article_id = db.scalar(
-                                select(Article.id)
-                                .where(Article.canonical_url_hash == sha256_str(prepared.link))
-                                .limit(1)
+                            payload = {
+                                "title": prepared.raw_title,
+                                "link": prepared.link,
+                                "published": prepared.entry.get("published") or prepared.entry.get("updated"),
+                                "summary": raw_summary,
+                                "source": entry_source_name,
+                            }
+                            db.add(
+                                RawFeedItem(
+                                    source_id=source.id,
+                                    article_id=article.id,
+                                    feed_url=feed_url,
+                                    raw_guid=prepared.raw_guid,
+                                    raw_title=prepared.raw_title,
+                                    raw_link=prepared.link,
+                                    raw_pub_date=prepared.published_at,
+                                    raw_payload_json=to_json_safe(payload),
+                                )
                             )
-                            allow_existing_unmapped = existing_article_id is not None
+                            persisted_raw = True
+                            persisted_raw_guid = prepared.raw_guid
+                            persisted_pair = (prepared.link, prepared.published_at)
 
-                        if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
-                            continue
+                        # Only update counters/caches after the savepoint commits successfully.
+                        if persisted_raw:
+                            if created_article:
+                                items_inserted += 1
+                            if persisted_raw_guid:
+                                recorded_guids.add(persisted_raw_guid)
+                            if persisted_pair:
+                                recorded_pairs.add(persisted_pair)
 
-                        article, created, matched_by_url = _upsert_article(
-                            db,
-                            source_code=source.code,
-                            canonical_url=prepared.link,
-                            title=prepared.title,
-                            summary=summary,
-                            published_at=prepared.published_at,
-                            source_name=source_name,
-                            provider_name=provider_name,
+                    except Exception as entry_exc:
+                        entry_errors += 1
+                        error_text = (
+                            f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
                         )
-                        created_article = created
+                        continue
 
-                        # New articles never have mappings yet; skip the SELECT in _upsert_article_tickers().
-                        existing_rows = {} if created else None
-                        _upsert_article_tickers(
-                            db,
-                            article.id,
-                            ticker_hits,
-                            symbol_to_id,
-                            existing_rows=existing_rows,
-                            prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
-                        )
-
-                        payload = {
-                            "title": prepared.raw_title,
-                            "link": prepared.link,
-                            "published": prepared.entry.get("published") or prepared.entry.get("updated"),
-                            "summary": raw_summary,
-                            "source": entry_source_name,
-                        }
-                        db.add(
-                            RawFeedItem(
-                                source_id=source.id,
-                                article_id=article.id,
-                                feed_url=feed_url,
-                                raw_guid=prepared.raw_guid,
-                                raw_title=prepared.raw_title,
-                                raw_link=prepared.link,
-                                raw_pub_date=prepared.published_at,
-                                raw_payload_json=to_json_safe(payload),
-                            )
-                        )
-                        persisted_raw = True
-                        persisted_raw_guid = prepared.raw_guid
-                        persisted_pair = (prepared.link, prepared.published_at)
-
-                    # Only update counters/caches after the savepoint commits successfully.
-                    if persisted_raw:
-                        if created_article:
-                            items_inserted += 1
-                        if persisted_raw_guid:
-                            recorded_guids.add(persisted_raw_guid)
-                        if persisted_pair:
-                            recorded_pairs.add(persisted_pair)
-
-                except Exception as entry_exc:
-                    entry_errors += 1
-                    error_text = (
-                        f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
-                    )
-                    continue
-
-            db.commit()
-            committed_items_inserted = items_inserted
-            if entry_errors > 0 and error_text is None:
-                error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}."
+                db.commit()
+                committed_items_inserted = items_inserted
+                if entry_errors > 0 and error_text is None:
+                    error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}."
     except Exception as exc:
         db.rollback()
         status = "failed"
         error_text = str(exc)
         committed_items_inserted = 0
+        now_utc = datetime.now(timezone.utc)
+        feed_state = _get_or_create_feed_poll_state(db, feed_url)
+        _mark_feed_failure_backoff(
+            feed_state,
+            now_utc=now_utc,
+            base_seconds=failure_backoff_base_seconds,
+            max_seconds=failure_backoff_max_seconds,
+        )
 
     run.status = status
     run.items_seen = items_seen
@@ -1135,6 +1251,8 @@ def run_ingestion_cycle(
                     fetch_backoff_seconds=settings.feed_fetch_backoff_seconds,
                     fetch_backoff_jitter_seconds=settings.feed_fetch_backoff_jitter_seconds,
                     enable_conditional_get=enable_conditional_get,
+                    failure_backoff_base_seconds=settings.feed_failure_backoff_base_seconds,
+                    failure_backoff_max_seconds=settings.feed_failure_backoff_max_seconds,
                 )
 
             # Parallel workers: each task uses its own DB session.
@@ -1163,6 +1281,8 @@ def run_ingestion_cycle(
                     fetch_backoff_seconds=settings.feed_fetch_backoff_seconds,
                     fetch_backoff_jitter_seconds=settings.feed_fetch_backoff_jitter_seconds,
                     enable_conditional_get=enable_conditional_get,
+                    failure_backoff_base_seconds=settings.feed_failure_backoff_base_seconds,
+                    failure_backoff_max_seconds=settings.feed_failure_backoff_max_seconds,
                 )
 
     results: list[IngestFeedResult] = []
@@ -1196,7 +1316,7 @@ def run_ingestion_cycle(
     for result in per_feed:
         total_seen += int(result["items_seen"])
         total_inserted += int(result["items_inserted"])
-        if result["status"] != "success":
+        if result["status"] == "failed":
             failed += 1
 
     source_remaps: list[SourceRemapStats] = []

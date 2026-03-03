@@ -33,6 +33,8 @@ def _settings(**overrides):
         "feed_fetch_max_attempts": 1,
         "feed_fetch_backoff_seconds": 0.0,
         "feed_fetch_backoff_jitter_seconds": 0.0,
+        "feed_failure_backoff_base_seconds": 30.0,
+        "feed_failure_backoff_max_seconds": 600.0,
         "raw_feed_retention_days": 30,
         "raw_feed_prune_batch_size": 5000,
         "raw_feed_prune_max_batches": 1,

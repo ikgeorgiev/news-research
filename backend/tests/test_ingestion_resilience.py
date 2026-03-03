@@ -17,7 +17,7 @@ from app.ingestion import (
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
-from app.models import IngestionRun, RawFeedItem, Source
+from app.models import FeedPollState, IngestionRun, RawFeedItem, Source
 
 
 def _make_db_session() -> Session:
@@ -112,8 +112,54 @@ def test_fetch_feed_with_retries_succeeds_after_transient_failures(monkeypatch):
     assert response.content == b"<rss />"
 
 
+def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
+    attempts = {"count": 0}
+    slept: list[float] = []
+
+    class RateLimitedResponse:
+        status_code = 429
+        headers = {"Retry-After": "2"}
+        content = b""
+
+        def raise_for_status(self) -> None:
+            raise requests.HTTPError("429", response=self)  # type: ignore[arg-type]
+
+    class OkResponse:
+        status_code = 200
+        headers = {}
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return RateLimitedResponse()
+        return OkResponse()
+
+    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+    monkeypatch.setattr("app.ingestion.time.sleep", lambda seconds: slept.append(float(seconds)))
+
+    response = _fetch_feed_with_retries(
+        feed_url="https://example.com/feed.xml",
+        timeout_seconds=5,
+        max_attempts=2,
+        backoff_seconds=0.01,
+        backoff_jitter_seconds=0.0,
+    )
+
+    assert attempts["count"] == 2
+    assert slept == [2.0]
+    assert response.content == b"<rss />"
+
+
 def test_update_feed_http_cache_reads_requests_case_insensitive_headers():
+    db = _make_db_session()
     feed_url = "https://example.com/feed-with-conditional-cache.xml"
+    state = FeedPollState(feed_url=feed_url)
+    db.add(state)
+    db.commit()
 
     class FakeResponse:
         headers = CaseInsensitiveDict(
@@ -123,11 +169,87 @@ def test_update_feed_http_cache_reads_requests_case_insensitive_headers():
             }
         )
 
-    _update_feed_http_cache(feed_url, FakeResponse())  # type: ignore[arg-type]
-    headers = _get_feed_conditional_headers(feed_url)
+    _update_feed_http_cache(state, FakeResponse())  # type: ignore[arg-type]
+    db.commit()
+    headers = _get_feed_conditional_headers(state)
 
     assert headers["If-None-Match"] == '"abc123"'
     assert headers["If-Modified-Since"] == "Tue, 03 Mar 2026 10:00:00 GMT"
+    db.close()
+
+
+def test_ingest_feed_persists_conditional_headers_across_runs(monkeypatch):
+    db = _make_db_session()
+    source = _seed_source(db)
+    sent_headers: list[dict[str, str]] = []
+    attempts = {"count": 0}
+
+    class FirstResponse:
+        status_code = 200
+        headers = CaseInsensitiveDict(
+            {
+                "etag": '"persisted-etag"',
+                "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
+            }
+        )
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class NotModifiedResponse:
+        status_code = 304
+        headers = CaseInsensitiveDict({})
+        content = b""
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(*_args, **kwargs):
+        attempts["count"] += 1
+        sent_headers.append(dict(kwargs.get("headers") or {}))
+        if attempts["count"] == 1:
+            return FirstResponse()
+        return NotModifiedResponse()
+
+    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[]),
+    )
+
+    first = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://example.com/conditional.xml",
+        known_symbols=set(),
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+    second = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://example.com/conditional.xml",
+        known_symbols=set(),
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == "https://example.com/conditional.xml"))
+
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert len(sent_headers) == 2
+    assert sent_headers[1].get("If-None-Match") == '"persisted-etag"'
+    assert sent_headers[1].get("If-Modified-Since") == "Tue, 03 Mar 2026 10:00:00 GMT"
+    assert state is not None and state.etag == '"persisted-etag"'
+    db.close()
 
 
 def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
@@ -181,6 +303,55 @@ def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
     assert first["status"] == "success"
     assert second["status"] == "success"
     assert len(raw_rows) == 1
+    db.close()
+
+
+def test_ingest_feed_skips_when_feed_is_in_failure_backoff(monkeypatch):
+    db = _make_db_session()
+    source = _seed_source(db)
+    calls = {"count": 0}
+
+    def failing_get(*_args, **_kwargs):
+        calls["count"] += 1
+        raise requests.Timeout("upstream unavailable")
+
+    monkeypatch.setattr("app.ingestion.requests.get", failing_get)
+
+    first = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://example.com/backoff.xml",
+        known_symbols=set(),
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+        failure_backoff_base_seconds=30.0,
+        failure_backoff_max_seconds=600.0,
+    )
+    second = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://example.com/backoff.xml",
+        known_symbols=set(),
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+        failure_backoff_base_seconds=30.0,
+        failure_backoff_max_seconds=600.0,
+    )
+
+    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == "https://example.com/backoff.xml"))
+
+    assert first["status"] == "failed"
+    assert second["status"] == "skipped_backoff"
+    assert calls["count"] == 1
+    assert state is not None
+    assert state.failure_count == 1
+    assert state.backoff_until is not None
     db.close()
 
 

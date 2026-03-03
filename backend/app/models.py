@@ -45,6 +45,19 @@ class Source(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
 
+class FeedPollState(Base):
+    __tablename__ = "feed_poll_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    feed_url: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    etag: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_modified: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+
+
 class Article(Base):
     __tablename__ = "articles"
 

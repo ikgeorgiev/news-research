@@ -46,6 +46,54 @@ docker compose up --build
 
 Default frontend host port is `3005` (`FRONTEND_PORT` in `.env`).
 
+## Monitoring UI (Prometheus + Grafana)
+
+This repo now includes a lightweight monitoring stack (no alerting):
+
+- Prometheus: scrape + query metrics
+- Grafana: dashboard UI
+- Grafana alerting is disabled in `docker-compose.yml` (`GF_UNIFIED_ALERTING_ENABLED=false`)
+
+### 1) Run backend with metrics exposed
+
+If you run backend locally, bind to `0.0.0.0` so Dockerized Prometheus can scrape it:
+
+```powershell
+.\dev-backend.ps1 -BindHost 0.0.0.0 -Port 8001
+```
+
+Confirm metrics endpoint:
+
+- http://127.0.0.1:8001/metrics
+
+### 2) Start monitoring services
+
+```powershell
+docker compose up -d prometheus grafana
+```
+
+### 3) Open dashboards
+
+- Prometheus: http://127.0.0.1:9090
+- Grafana: http://127.0.0.1:3006
+  - default login: `admin` / `admin`
+
+Grafana auto-loads dashboard:
+
+- `CEF / CEF Ingestion Overview`
+
+### 4) What you can see
+
+- ingestion cycle duration (`p50` / `p95`)
+- ingestion outcomes (`success`, `skipped_*`, `failed`)
+- last cycle summary (duration, inserted, failed feeds, timestamp)
+- API route latency (`http_request_duration_seconds`)
+
+### Notes
+
+- Default scrape targets are `host.docker.internal:8001` and `host.docker.internal:8000`.
+- If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
+
 ## Recommended Fast Dev Loop (Docker DB + Local App)
 
 This is the fastest workflow when you are making lots of code changes:
