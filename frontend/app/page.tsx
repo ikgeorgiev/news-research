@@ -103,6 +103,13 @@ const CheckIcon = () => (
   </svg>
 )
 
+const BellIcon = ({ active = false }: { active?: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+)
+
 function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   const merged: NewsItem[] = []
   const seen = new Set<number>()
@@ -169,8 +176,12 @@ export default function Page() {
   const feedContainerRef = useRef<HTMLElement | null>(null)
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
   const itemsRef = useRef<NewsItem[]>([])
+  const pendingNewItemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
   const lastAutoRefreshAtRef = useRef(0)
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const notificationsEnabledRef = useRef(false)
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -202,6 +213,15 @@ export default function Page() {
       if (storedViewMode === "list" || storedViewMode === "full") {
         setViewMode(storedViewMode)
       }
+
+      if (
+        localStorage.getItem("notificationsEnabled") === "true" &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+      ) {
+        setNotificationsEnabled(true)
+        notificationsEnabledRef.current = true
+      }
     } catch (e) {
       console.error("Failed to parse local storage", e)
     } finally {
@@ -217,6 +237,45 @@ export default function Page() {
   useEffect(() => {
     itemsRef.current = items
   }, [items])
+
+  useEffect(() => {
+    pendingNewItemsRef.current = pendingNewItems
+  }, [pendingNewItems])
+
+  const playNotificationSound = () => {
+    try {
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.frequency.value = 880
+      osc.type = "sine"
+      gain.gain.setValueAtTime(0.08, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.3)
+    } catch { /* ignore audio errors */ }
+  }
+
+  const fireNotification = (newItems: NewsItem[]) => {
+    if (!notificationsEnabledRef.current) return
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return
+
+    playNotificationSound()
+
+    const count = newItems.length
+    const tickers = [...new Set(newItems.flatMap(i => i.tickers || []))]
+    const tickerText = tickers.length > 0 ? tickers.slice(0, 5).join(", ") : "General"
+    const title = `CEF News: ${count} new article${count !== 1 ? "s" : ""}`
+    const body = `${tickerText}${tickers.length > 5 ? "..." : ""}\n${newItems[0]?.title || ""}`
+
+    const notif = new Notification(title, { body, tag: "cef-news" })
+    notif.onclick = () => {
+      window.focus()
+      notif.close()
+    }
+  }
 
   const triggerRefresh = (reason: "auto" | "manual") => {
     refreshReasonRef.current = reason
@@ -235,6 +294,10 @@ export default function Page() {
   useEffect(() => {
     persistValue("newsViewMode", viewMode)
   }, [viewMode])
+
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled
+  }, [notificationsEnabled])
 
   // Fetch tickers once
   useEffect(() => {
@@ -383,12 +446,15 @@ export default function Page() {
           if (bgGeneration !== feedGenerationRef.current) return
           const currentIds = new Set(itemsRef.current.map((i) => i.id))
           const newOnes = data.items.filter((i) => !currentIds.has(i.id))
-          if (newOnes.length > 0) {
+          const pendingIds = new Set(pendingNewItemsRef.current.map((i) => i.id))
+          const freshOnes = newOnes.filter((i) => !pendingIds.has(i.id))
+          if (freshOnes.length > 0) {
             setPendingNewItems((prev) => {
-              const pendingIds = new Set(prev.map((i) => i.id))
-              const freshOnes = newOnes.filter((i) => !pendingIds.has(i.id))
-              return freshOnes.length > 0 ? [...freshOnes, ...prev] : prev
+              const prevIds = new Set(prev.map((i) => i.id))
+              const uniqueFresh = freshOnes.filter((i) => !prevIds.has(i.id))
+              return uniqueFresh.length > 0 ? [...uniqueFresh, ...prev] : prev
             })
+            fireNotification(freshOnes)
           }
         })
         .catch(() => {}) // Silently ignore background fetch errors
@@ -422,6 +488,13 @@ export default function Page() {
         if (requestGeneration !== feedGenerationRef.current) return
         // Refresh succeeded — safe to clear pending banner.
         setPendingNewItems([])
+        const currentIds = new Set(itemsRef.current.map((item) => item.id))
+        const autoRefreshNewOnes = isAutoRefresh
+          ? data.items.filter((item) => !currentIds.has(item.id))
+          : []
+        if (autoRefreshNewOnes.length > 0) {
+          fireNotification(autoRefreshNewOnes)
+        }
         if (isAutoRefresh && itemsRef.current.length > data.items.length) {
           // Keep previously loaded pages; prepend only genuinely new top stories.
           setItems((prev) => {
@@ -728,6 +801,23 @@ export default function Page() {
     closeContextMenu()
   }
 
+  const toggleNotifications = async () => {
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false)
+      persistValue("notificationsEnabled", "false")
+      return
+    }
+    if (typeof Notification === "undefined") return
+    let perm = Notification.permission
+    if (perm === "default") {
+      perm = await Notification.requestPermission()
+    }
+    if (perm === "granted") {
+      setNotificationsEnabled(true)
+      persistValue("notificationsEnabled", "true")
+    }
+  }
+
   // Close context menu on outside click or Escape
   useEffect(() => {
     if (!contextMenu) return
@@ -952,6 +1042,15 @@ export default function Page() {
                   <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l5.67-1.16" />
                 </svg>
                 Refresh
+              </button>
+              <button
+                className="icon-button"
+                onClick={toggleNotifications}
+                title={notificationsEnabled ? "Disable notifications" : "Enable notifications"}
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: notificationsEnabled ? "var(--accent-blue)" : "transparent", color: notificationsEnabled ? "var(--text-solid)" : "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
+              >
+                <BellIcon active={notificationsEnabled} />
+                {notificationsEnabled ? "Alerts On" : "Alerts"}
               </button>
               <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
               <button 

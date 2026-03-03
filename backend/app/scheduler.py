@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
+from app.database import get_engine
 from app.ingestion import IngestionCycleResult, run_ingestion_cycle
 
 logger = logging.getLogger(__name__)
@@ -21,20 +22,6 @@ class IngestionScheduler:
         self.session_factory = session_factory
         self._scheduler = BackgroundScheduler(timezone="UTC")
         self._lock = threading.Lock()
-
-    def _acquire_global_lock(self, db: Session) -> bool:
-        bind = db.get_bind()
-        if bind is None or bind.dialect.name != "postgresql":
-            return True
-        return bool(
-            db.scalar(select(func.pg_try_advisory_lock(self.settings.ingestion_advisory_lock_key)))
-        )
-
-    def _release_global_lock(self, db: Session) -> None:
-        bind = db.get_bind()
-        if bind is None or bind.dialect.name != "postgresql":
-            return
-        db.scalar(select(func.pg_advisory_unlock(self.settings.ingestion_advisory_lock_key)))
 
     def start(self) -> None:
         if not self.settings.scheduler_enabled:
@@ -63,27 +50,55 @@ class IngestionScheduler:
 
     def run_once(self) -> IngestionCycleResult | None:
         if not self._lock.acquire(blocking=False):
+            logger.info("Ingestion job skipped: another run is already in progress (in-process lock)")
             return None
         try:
-            with self.session_factory() as db:
-                acquired_global_lock = self._acquire_global_lock(db)
-                if not acquired_global_lock:
-                    return None
-                try:
-                    return run_ingestion_cycle(db, self.settings)
-                finally:
-                    try:
-                        self._release_global_lock(db)
-                    except Exception:
-                        logger.exception("Failed to release ingestion advisory lock")
+            return self._run_with_global_lock()
         finally:
             self._lock.release()
+
+    def _run_with_global_lock(self) -> IngestionCycleResult | None:
+        engine = get_engine()
+
+        # Skip advisory lock for non-PostgreSQL (e.g. SQLite in tests).
+        if engine.dialect.name != "postgresql":
+            with self.session_factory() as db:
+                return run_ingestion_cycle(db, self.settings)
+
+        # Hold the advisory lock on a dedicated connection that stays open for
+        # the full duration. Previously the lock was acquired via the Session,
+        # but Session.commit() inside run_ingestion_cycle can return the underlying
+        # connection back to the pool.
+        #
+        # pg_advisory_lock is connection/session-level: it stays bound to the
+        # PostgreSQL connection, not the SQLAlchemy Session. If the Session later
+        # checks out a different pooled connection for pg_advisory_unlock, the
+        # unlock is a no-op and the lock leaks until that pooled connection is
+        # recycled, causing subsequent cycles to be skipped.
+        with engine.connect() as lock_conn:
+            lock_key = self.settings.ingestion_advisory_lock_key
+            acquired = lock_conn.execute(select(func.pg_try_advisory_lock(lock_key))).scalar()
+            # Avoid leaving the lock connection "idle in transaction" for the full run.
+            lock_conn.commit()
+            if not acquired:
+                logger.info("Ingestion job skipped: advisory lock is held by another instance")
+                return None
+            try:
+                with self.session_factory() as db:
+                    return run_ingestion_cycle(db, self.settings)
+            finally:
+                try:
+                    unlocked = lock_conn.execute(select(func.pg_advisory_unlock(lock_key))).scalar()
+                    lock_conn.commit()
+                    if not unlocked:
+                        logger.warning("Ingestion advisory unlock returned false (key=%s)", lock_key)
+                except Exception:
+                    logger.exception("Failed to release ingestion advisory lock")
 
     def _run_job(self) -> None:
         try:
             result = self.run_once()
             if result is None:
-                logger.info("Ingestion job skipped because a run is already in progress")
                 return
 
             logger.info(

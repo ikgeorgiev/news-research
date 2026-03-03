@@ -733,11 +733,22 @@ def ingest_feed(
                     if not title or not link:
                         continue
 
-                    raw_summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
-                    summary = clean_summary_text(raw_summary)
                     published_at = parse_datetime(entry.get("published") or entry.get("updated"))
                     if published_at is None:
                         published_at = datetime.now(timezone.utc)
+
+                    raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
+                    if _raw_item_already_recorded(
+                        db,
+                        source_id=source.id,
+                        raw_guid=raw_guid,
+                        raw_link=link,
+                        raw_pub_date=published_at,
+                    ):
+                        continue
+
+                    raw_summary = str(entry.get("summary") or entry.get("description") or "").strip() or None
+                    summary = clean_summary_text(raw_summary)
 
                     provider_name = _clamp_label(source.name)
                     entry_source_name = _extract_provider(entry, source_name)
@@ -795,15 +806,6 @@ def ingest_feed(
                         "summary": raw_summary,
                         "source": entry_source_name,
                     }
-                    raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
-                    if _raw_item_already_recorded(
-                        db,
-                        source_id=source.id,
-                        raw_guid=raw_guid,
-                        raw_link=link,
-                        raw_pub_date=published_at,
-                    ):
-                        continue
                     db.add(
                         RawFeedItem(
                             source_id=source.id,
@@ -923,7 +925,6 @@ def run_ingestion_cycle(
             source_remaps.append(
                 remap_source_articles(db, settings, source_code=code, limit=500, only_unmapped=True)
             )
-
     pruned_raw_items = prune_raw_feed_items(
         db,
         retention_days=settings.raw_feed_retention_days,
