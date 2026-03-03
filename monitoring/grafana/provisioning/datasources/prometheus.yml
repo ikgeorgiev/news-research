@@ -8,3 +8,17 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: true
+  - name: Postgres
+    uid: postgres
+    type: postgres
+    access: proxy
+    url: db:5432
+    user: cef
+    jsonData:
+      database: cef_news
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: cef
+    editable: true

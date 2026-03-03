@@ -88,11 +88,13 @@ Grafana auto-loads dashboard:
 - ingestion outcomes (`success`, `skipped_*`, `failed`)
 - last cycle summary (duration, inserted, failed feeds, timestamp)
 - API route latency (`http_request_duration_seconds`)
+- latest individual feed runs table (`source`, `feed_url`, start/end, status, seen/inserted, error)
 
 ### Notes
 
 - Default scrape targets are `host.docker.internal:8001` and `host.docker.internal:8000`.
 - If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
+- The table panel uses a provisioned Postgres datasource (`db:5432`, `cef/cef`, `cef_news`).
 
 ## Recommended Fast Dev Loop (Docker DB + Local App)
 

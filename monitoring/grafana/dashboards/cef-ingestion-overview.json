@@ -310,6 +310,51 @@
       ],
       "title": "HTTP p95 Latency by Route",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgres"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 8,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\\n  s.code AS source,\\n  r.feed_url,\\n  r.started_at,\\n  r.finished_at,\\n  r.status,\\n  r.items_seen,\\n  r.items_inserted,\\n  r.error_text\\nFROM ingestion_runs r\\nJOIN sources s ON s.id = r.source_id\\nWHERE $__timeFilter(r.started_at)\\nORDER BY r.started_at DESC\\nLIMIT 200;",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Feed Runs",
+      "type": "table"
     }
   ],
   "refresh": "10s",
