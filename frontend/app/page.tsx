@@ -7,6 +7,8 @@ import { NewsItem, TickerItem } from "@/lib/types"
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
+const ALERT_COOLDOWN_MS = 60_000
+const ALERT_BATCH_SIZE = 10
 const MAX_PERSISTED_READ_IDS = 20_000
 const MAX_PERSISTED_STARRED_IDS = 10_000
 const NEWS_IDS_PAGE_SIZE = 1000
@@ -182,6 +184,30 @@ export default function Page() {
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
   const notificationsEnabledRef = useRef(false)
+  const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
+  const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
+  const alertQueueRef = useRef<NewsItem[]>([])
+  const alertQueuedIdsRef = useRef<Set<number>>(new Set())
+  const alertScopeLastSeenRef = useRef<Record<string, number>>({})
+  const lastAlertAtRef = useRef(0)
+  const alertWatchlistKey = useMemo(
+    () => Array.from(alertWatchlistIds).sort().join(","),
+    [alertWatchlistIds]
+  )
+  const alertScopesConfigured = alertIncludeAllNews || alertWatchlistIds.size > 0
+  const activeAlertScopeNames = useMemo(() => {
+    const names: string[] = []
+    if (alertIncludeAllNews) names.push("All News")
+    if (alertWatchlistIds.size > 0) {
+      for (const watchlist of customWatchlists) {
+        if (alertWatchlistIds.has(watchlist.id)) {
+          names.push(watchlist.name)
+        }
+      }
+    }
+    return names
+  }, [alertIncludeAllNews, alertWatchlistIds, customWatchlists])
+  const activeAlertScopeCount = activeAlertScopeNames.length
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -222,6 +248,42 @@ export default function Page() {
         setNotificationsEnabled(true)
         notificationsEnabledRef.current = true
       }
+
+      const storedAlertIncludeAll = localStorage.getItem("alertIncludeAllNews")
+      if (storedAlertIncludeAll !== null) {
+        setAlertIncludeAllNews(storedAlertIncludeAll === "true")
+      }
+
+      const storedAlertWatchlistIds = localStorage.getItem("alertWatchlistIds")
+      if (storedAlertWatchlistIds) {
+        const parsed = JSON.parse(storedAlertWatchlistIds)
+        if (Array.isArray(parsed)) {
+          const validIds = parsed.filter((id): id is string => typeof id === "string" && id.length > 0)
+          setAlertWatchlistIds(new Set(validIds))
+        }
+      }
+
+      const storedAlertScopeLastSeen = localStorage.getItem("alertScopeLastSeen")
+      if (storedAlertScopeLastSeen) {
+        const parsed = JSON.parse(storedAlertScopeLastSeen)
+        if (parsed && typeof parsed === "object") {
+          const next: Record<string, number> = {}
+          for (const [key, value] of Object.entries(parsed)) {
+            if (typeof key === "string" && typeof value === "number" && Number.isFinite(value) && value > 0) {
+              next[key] = value
+            }
+          }
+          alertScopeLastSeenRef.current = next
+        }
+      }
+
+      const storedAlertLastFiredAt = localStorage.getItem("alertLastFiredAtMs")
+      if (storedAlertLastFiredAt) {
+        const parsed = Number(storedAlertLastFiredAt)
+        if (Number.isFinite(parsed) && parsed > 0) {
+          lastAlertAtRef.current = parsed
+        }
+      }
     } catch (e) {
       console.error("Failed to parse local storage", e)
     } finally {
@@ -232,6 +294,41 @@ export default function Page() {
   // Save custom watchlists
   useEffect(() => {
     persistJson("customWatchlists", customWatchlists)
+  }, [customWatchlists])
+
+  useEffect(() => {
+    persistValue("alertIncludeAllNews", String(alertIncludeAllNews))
+  }, [alertIncludeAllNews])
+
+  useEffect(() => {
+    persistJson("alertWatchlistIds", Array.from(alertWatchlistIds))
+  }, [alertWatchlistIds])
+
+  useEffect(() => {
+    const validIds = new Set(customWatchlists.map((wl) => wl.id))
+    setAlertWatchlistIds((prev) => {
+      const filtered = Array.from(prev).filter((id) => validIds.has(id))
+      if (filtered.length === prev.size) return prev
+      return new Set(filtered)
+    })
+
+    const activeScopeKeys = new Set([
+      "all",
+      ...customWatchlists.map((wl) => `watchlist:${wl.id}`),
+    ])
+    let changed = false
+    const nextScopeState: Record<string, number> = {}
+    for (const [key, value] of Object.entries(alertScopeLastSeenRef.current)) {
+      if (activeScopeKeys.has(key)) {
+        nextScopeState[key] = value
+      } else {
+        changed = true
+      }
+    }
+    if (changed) {
+      alertScopeLastSeenRef.current = nextScopeState
+      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
+    }
   }, [customWatchlists])
 
   useEffect(() => {
@@ -277,6 +374,63 @@ export default function Page() {
     }
   }
 
+  const flushQueuedAlerts = () => {
+    if (alertQueueRef.current.length === 0) return
+    if (!notificationsEnabledRef.current) return
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return
+
+    const now = Date.now()
+    if (now - lastAlertAtRef.current < ALERT_COOLDOWN_MS) return
+
+    const nextBatch = [...alertQueueRef.current]
+      .sort((a, b) => b.id - a.id)
+      .slice(0, ALERT_BATCH_SIZE)
+    if (nextBatch.length === 0) return
+
+    fireNotification(nextBatch)
+
+    const sentIds = new Set(nextBatch.map((item) => item.id))
+    alertQueueRef.current = alertQueueRef.current.filter((item) => !sentIds.has(item.id))
+    sentIds.forEach((id) => alertQueuedIdsRef.current.delete(id))
+
+    lastAlertAtRef.current = now
+    persistValue("alertLastFiredAtMs", String(now))
+  }
+
+  const enqueueAlertItems = (newItems: NewsItem[]) => {
+    if (newItems.length === 0) return
+    for (const item of newItems) {
+      if (alertQueuedIdsRef.current.has(item.id)) continue
+      alertQueuedIdsRef.current.add(item.id)
+      alertQueueRef.current.push(item)
+    }
+    flushQueuedAlerts()
+  }
+
+  const isScopeAlertsEnabled = (watchlistId: string): boolean => {
+    if (watchlistId === "all") return alertIncludeAllNews
+    return alertWatchlistIds.has(watchlistId)
+  }
+
+  const toggleScopeAlerts = (watchlistId: string) => {
+    if (watchlistId === "all") {
+      setAlertIncludeAllNews((prev) => !prev)
+      return
+    }
+    setAlertWatchlistIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(watchlistId)) next.delete(watchlistId)
+      else next.add(watchlistId)
+      return next
+    })
+  }
+
+  const handleToggleScopeAlerts = (watchlistId: string, e?: MouseEvent) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    toggleScopeAlerts(watchlistId)
+  }
+
   const triggerRefresh = (reason: "auto" | "manual") => {
     refreshReasonRef.current = reason
     setRefreshTick((prev) => prev + 1)
@@ -297,6 +451,9 @@ export default function Page() {
 
   useEffect(() => {
     notificationsEnabledRef.current = notificationsEnabled
+    if (notificationsEnabled) {
+      flushQueuedAlerts()
+    }
   }, [notificationsEnabled])
 
   // Fetch tickers once
@@ -392,6 +549,103 @@ export default function Page() {
     }
   }, [mounted])
 
+  // Phase 1 rule-based alerts: all-news + selected watchlists.
+  useEffect(() => {
+    if (!mounted) return
+    if (!alertScopesConfigured) return
+
+    type ScopeQuery = {
+      key: string
+      params: {
+        tickers?: string[]
+        provider?: string
+        includeUnmappedFromProvider?: string
+        q?: string
+        limit: number
+      }
+    }
+
+    const scopes: ScopeQuery[] = []
+    if (alertIncludeAllNews) {
+      scopes.push({
+        key: "all",
+        params: {
+          includeUnmappedFromProvider: "Business Wire",
+          limit: 40,
+        },
+      })
+    }
+
+    const watchlistsById = new Map(customWatchlists.map((wl) => [wl.id, wl]))
+    for (const watchlistId of alertWatchlistIds) {
+      const wl = watchlistsById.get(watchlistId)
+      if (!wl) continue
+      const wlTickers = wl.tickers && wl.tickers.length > 0 ? [...wl.tickers] : undefined
+      scopes.push({
+        key: `watchlist:${watchlistId}`,
+        params: {
+          tickers: wlTickers,
+          provider: wl.provider || undefined,
+          q: wl.q || undefined,
+          limit: 40,
+        },
+      })
+    }
+
+    if (scopes.length === 0) return
+
+    let cancelled = false
+    const run = async () => {
+      const incoming: NewsItem[] = []
+      const incomingIds = new Set<number>()
+
+      for (const scope of scopes) {
+        try {
+          const data = await fetchNews(scope.params)
+          if (cancelled) return
+
+          if (data.items.length === 0) continue
+          const maxId = data.items.reduce((max, item) => Math.max(max, item.id), 0)
+          if (maxId <= 0) continue
+
+          const prevSeen = alertScopeLastSeenRef.current[scope.key]
+          if (typeof prevSeen !== "number") {
+            // First observation of this scope seeds the watermark without alerting.
+            alertScopeLastSeenRef.current[scope.key] = maxId
+            continue
+          }
+
+          const fresh = data.items.filter((item) => item.id > prevSeen)
+          for (const item of fresh) {
+            if (incomingIds.has(item.id)) continue
+            if (alertQueuedIdsRef.current.has(item.id)) continue
+            incomingIds.add(item.id)
+            incoming.push(item)
+          }
+          if (maxId > prevSeen) {
+            alertScopeLastSeenRef.current[scope.key] = maxId
+          }
+        } catch {
+          // Ignore alert polling errors and keep UI/feed flow uninterrupted.
+        }
+      }
+
+      if (cancelled) return
+      if (incoming.length > 0) {
+        enqueueAlertItems(incoming)
+      } else {
+        flushQueuedAlerts()
+      }
+      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [mounted, refreshTick, alertScopesConfigured, alertIncludeAllNews, alertWatchlistKey, customWatchlists])
+
   // Fetch news when filters change
   useEffect(() => {
     const queryKey = JSON.stringify({
@@ -454,7 +708,6 @@ export default function Page() {
               const uniqueFresh = freshOnes.filter((i) => !prevIds.has(i.id))
               return uniqueFresh.length > 0 ? [...uniqueFresh, ...prev] : prev
             })
-            fireNotification(freshOnes)
           }
         })
         .catch(() => {}) // Silently ignore background fetch errors
@@ -492,9 +745,6 @@ export default function Page() {
         const autoRefreshNewOnes = isAutoRefresh
           ? data.items.filter((item) => !currentIds.has(item.id))
           : []
-        if (autoRefreshNewOnes.length > 0) {
-          fireNotification(autoRefreshNewOnes)
-        }
         if (isAutoRefresh && itemsRef.current.length > data.items.length) {
           // Keep previously loaded pages; prepend only genuinely new top stories.
           setItems((prev) => {
@@ -849,18 +1099,31 @@ export default function Page() {
           style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
         >
           <span>All News</span>
-          {unreadCount > 0 && (
-            <span style={{ 
-              background: activeWatchlistId === "all" ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
-              color: activeWatchlistId === "all" ? "white" : "var(--text-secondary)", 
-              fontSize: "0.75rem", 
-              padding: "2px 8px", 
-              borderRadius: "12px", 
-              fontWeight: "normal" 
-            }}>
-              {unreadCount}
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <button
+              className="icon-button"
+              title={alertIncludeAllNews ? "Disable alerts for All News" : "Enable alerts for All News"}
+              onClick={(e) => handleToggleScopeAlerts("all", e)}
+              style={{
+                padding: "2px",
+                color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-muted)",
+              }}
+            >
+              <BellIcon active={alertIncludeAllNews} />
+            </button>
+            {unreadCount > 0 && (
+              <span style={{ 
+                background: activeWatchlistId === "all" ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
+                color: activeWatchlistId === "all" ? "white" : "var(--text-secondary)", 
+                fontSize: "0.75rem", 
+                padding: "2px 8px", 
+                borderRadius: "12px", 
+                fontWeight: "normal" 
+              }}>
+                {unreadCount}
+              </span>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -910,6 +1173,21 @@ export default function Page() {
                   <span>{wl.name}</span>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <button
+                    className="icon-button"
+                    title={
+                      isScopeAlertsEnabled(wl.id)
+                        ? `Disable alerts for ${wl.name}`
+                        : `Enable alerts for ${wl.name}`
+                    }
+                    onClick={(e) => handleToggleScopeAlerts(wl.id, e)}
+                    style={{
+                      padding: "2px",
+                      color: isScopeAlertsEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-muted)",
+                    }}
+                  >
+                    <BellIcon active={isScopeAlertsEnabled(wl.id)} />
+                  </button>
                   {wlUnreadCount > 0 && (
                     <span style={{ 
                       background: activeWatchlistId === wl.id ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
@@ -969,6 +1247,10 @@ export default function Page() {
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
           >
+            <div className="context-menu-item" onClick={() => { toggleScopeAlerts(contextMenu.watchlistId); closeContextMenu() }}>
+              {isScopeAlertsEnabled(contextMenu.watchlistId) ? "Disable Alerts" : "Enable Alerts"}
+            </div>
+            <div className="context-menu-separator" />
             <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
               Mark All Items as Read
             </div>
@@ -1052,6 +1334,24 @@ export default function Page() {
                 <BellIcon active={notificationsEnabled} />
                 {notificationsEnabled ? "Alerts On" : "Alerts"}
               </button>
+              <span
+                title={
+                  activeAlertScopeCount > 0
+                    ? `Enabled scopes: ${activeAlertScopeNames.join(", ")}`
+                    : "No alert scopes enabled"
+                }
+                style={{
+                  padding: "4px 10px",
+                  fontSize: "0.8rem",
+                  borderRadius: "999px",
+                  border: "1px solid var(--border-color)",
+                  background: activeAlertScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
+                  color: activeAlertScopeCount > 0 ? "var(--accent-blue)" : "var(--text-muted)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Alert scopes: {activeAlertScopeCount}
+              </span>
               <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
               <button 
                 className={`icon-button ${viewMode === "list" ? "active" : ""}`} 
