@@ -349,7 +349,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\\n  s.code AS source,\\n  r.feed_url,\\n  r.started_at,\\n  r.finished_at,\\n  r.status,\\n  r.items_seen,\\n  r.items_inserted,\\n  r.error_text\\nFROM ingestion_runs r\\nJOIN sources s ON s.id = r.source_id\\nWHERE r.started_at >= NOW() - INTERVAL '24 hours'\\nORDER BY r.started_at DESC\\nLIMIT 200",
+          "rawSql": "SELECT s.code AS source, r.feed_url, r.started_at, r.finished_at, r.status, r.items_seen, r.items_inserted, r.error_text FROM ingestion_runs r JOIN sources s ON s.id = r.source_id WHERE r.started_at >= NOW() - INTERVAL '24 hours' ORDER BY r.started_at DESC LIMIT 200",
           "refId": "A"
         }
       ],
@@ -376,6 +376,6 @@
   "timezone": "browser",
   "title": "CEF Ingestion Overview",
   "uid": "cef-ingestion-overview",
-  "version": 100,
+  "version": 101,
   "weekStart": ""
 }
