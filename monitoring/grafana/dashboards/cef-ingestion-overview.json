@@ -313,7 +313,7 @@
     },
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
+        "type": "postgres",
         "uid": "postgres"
       },
       "fieldConfig": {
@@ -343,13 +343,13 @@
       "targets": [
         {
           "datasource": {
-            "type": "grafana-postgresql-datasource",
+            "type": "postgres",
             "uid": "postgres"
           },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\\n  s.code AS source,\\n  r.feed_url,\\n  r.started_at,\\n  r.finished_at,\\n  r.status,\\n  r.items_seen,\\n  r.items_inserted,\\n  r.error_text\\nFROM ingestion_runs r\\nJOIN sources s ON s.id = r.source_id\\nWHERE $__timeFilter(r.started_at)\\nORDER BY r.started_at DESC\\nLIMIT 200;",
+          "rawSql": "SELECT\\n  s.code AS source,\\n  r.feed_url,\\n  r.started_at,\\n  r.finished_at,\\n  r.status,\\n  r.items_seen,\\n  r.items_inserted,\\n  r.error_text\\nFROM ingestion_runs r\\nJOIN sources s ON s.id = r.source_id\\nWHERE r.started_at >= NOW() - INTERVAL '24 hours'\\nORDER BY r.started_at DESC\\nLIMIT 200",
           "refId": "A"
         }
       ],
