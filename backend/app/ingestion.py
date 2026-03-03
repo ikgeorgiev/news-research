@@ -6,6 +6,7 @@ import time
 import re
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import TypedDict
@@ -29,14 +30,14 @@ REQUEST_HEADERS = {
     "User-Agent": "cef-news-feed/0.1 (+local)",
     "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
 }
-BUSINESSWIRE_PAGE_HEADERS = {
+SOURCE_PAGE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; cef-news-feed/0.1; +local)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.1",
 }
 GENERAL_SOURCE_CODE = "businesswire"
-BUSINESSWIRE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
-BUSINESSWIRE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
-BUSINESSWIRE_PAGE_CACHE_MAX_ITEMS = 512
+SOURCE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
+SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
+SOURCE_PAGE_CACHE_MAX_ITEMS = 1024
 
 EXCHANGE_PATTERN = re.compile(r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b")
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
@@ -46,7 +47,7 @@ HTML_SCRIPT_STYLE_PATTERN = re.compile(
 )
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
-    r"<td[^>]*>\s*([A-Z][A-Z0-9\.\-]{0,9})\s*</td>",
+    r"<td[^>]*>(?:\s|<[^>]+>)*([A-Z][A-Z0-9\.\-]{0,9})(?:\s|<[^>]+>)*</td>",
     flags=re.IGNORECASE,
 )
 STOPWORDS = {
@@ -82,9 +83,24 @@ STOPWORDS = {
 # They remain matchable via stronger signals (context, exchange pattern, or parenthesized symbol).
 AMBIGUOUS_TOKEN_SYMBOLS = {
     "FUND",
+    "IDE",
 }
-_businesswire_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
-_businesswire_page_cache_lock = threading.Lock()
+_source_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
+_source_page_cache_lock = threading.Lock()
+
+
+@dataclass(slots=True, frozen=True)
+class SourcePageConfig:
+    source_code: str
+    hostname_suffix: str
+    table_match_type: str
+
+
+PAGE_FETCH_CONFIGS: dict[str, SourcePageConfig] = {
+    "businesswire": SourcePageConfig("businesswire", "businesswire.com", "bw_table"),
+    "prnewswire": SourcePageConfig("prnewswire", "prnewswire.com", "prn_table"),
+    "globenewswire": SourcePageConfig("globenewswire", "globenewswire.com", "gnw_table"),
+}
 
 
 class TickerSyncStats(TypedDict):
@@ -103,11 +119,15 @@ class IngestFeedResult(TypedDict):
     error: str | None
 
 
-class BusinessWireRemapStats(TypedDict):
+class SourceRemapStats(TypedDict):
+    source_code: str
     processed: int
     articles_with_hits: int
     remapped_articles: int
     only_unmapped: bool
+
+
+BusinessWireRemapStats = SourceRemapStats
 
 
 class IngestionCycleResult(TypedDict):
@@ -116,7 +136,8 @@ class IngestionCycleResult(TypedDict):
     total_items_inserted: int
     failed_feeds: int
     ticker_sync: TickerSyncStats
-    businesswire_remap: BusinessWireRemapStats
+    businesswire_remap: SourceRemapStats
+    source_remaps: list[SourceRemapStats]
     feeds: list[IngestFeedResult]
 
 
@@ -304,47 +325,55 @@ def _parse_context_symbols(feed_url: str) -> list[str]:
     return symbols
 
 
-def _canonical_businesswire_article_url(url: str) -> str:
+def _canonical_article_url(url: str) -> str:
     parsed = urlparse(url)
-    # Keep path-only URL for stable cache keys and fewer duplicate fetches.
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
 
 
-def _is_businesswire_article_url(url: str) -> bool:
+def _is_source_article_url(url: str, hostname_suffix: str) -> bool:
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     hostname = (parsed.hostname or "").lower()
     if scheme not in {"http", "https"} or not hostname:
         return False
-    return hostname == "businesswire.com" or hostname.endswith(".businesswire.com")
+    return hostname == hostname_suffix or hostname.endswith("." + hostname_suffix)
 
 
-def _cache_businesswire_page(url: str, fetched_at: float, html_text: str | None) -> None:
-    with _businesswire_page_cache_lock:
-        _businesswire_page_cache[url] = (fetched_at, html_text)
-        _businesswire_page_cache.move_to_end(url)
-
-        while len(_businesswire_page_cache) > BUSINESSWIRE_PAGE_CACHE_MAX_ITEMS:
-            _businesswire_page_cache.popitem(last=False)
+# Backward-compat wrappers (tests import these directly).
+def _canonical_businesswire_article_url(url: str) -> str:
+    return _canonical_article_url(url)
 
 
-def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
-    fetch_url = _canonical_businesswire_article_url(url)
-    if not _is_businesswire_article_url(fetch_url):
+def _is_businesswire_article_url(url: str) -> bool:
+    return _is_source_article_url(url, "businesswire.com")
+
+
+def _cache_source_page(url: str, fetched_at: float, html_text: str | None) -> None:
+    with _source_page_cache_lock:
+        _source_page_cache[url] = (fetched_at, html_text)
+        _source_page_cache.move_to_end(url)
+
+        while len(_source_page_cache) > SOURCE_PAGE_CACHE_MAX_ITEMS:
+            _source_page_cache.popitem(last=False)
+
+
+def _fetch_source_page_html(url: str, timeout_seconds: int, config: SourcePageConfig) -> str | None:
+    fetch_url = _canonical_article_url(url)
+    if not _is_source_article_url(fetch_url, config.hostname_suffix):
         return None
 
     now = time.time()
-    with _businesswire_page_cache_lock:
-        cached = _businesswire_page_cache.get(fetch_url)
+    with _source_page_cache_lock:
+        cached = _source_page_cache.get(fetch_url)
         if cached is not None:
             fetched_at, cached_html = cached
             ttl_seconds = (
-                BUSINESSWIRE_PAGE_CACHE_TTL_SECONDS
+                SOURCE_PAGE_CACHE_TTL_SECONDS
                 if cached_html is not None
-                else BUSINESSWIRE_PAGE_FAILURE_CACHE_TTL_SECONDS
+                else SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS
             )
             if now - fetched_at <= ttl_seconds:
-                _businesswire_page_cache.move_to_end(fetch_url)
+                _source_page_cache.move_to_end(fetch_url)
                 return cached_html
 
     html_text: str | None = None
@@ -352,15 +381,19 @@ def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
         response = requests.get(
             fetch_url,
             timeout=timeout_seconds,
-            headers=BUSINESSWIRE_PAGE_HEADERS,
+            headers=SOURCE_PAGE_HEADERS,
         )
         if response.ok and response.text:
             html_text = response.text
     except Exception:
         html_text = None
 
-    _cache_businesswire_page(fetch_url, time.time(), html_text)
+    _cache_source_page(fetch_url, time.time(), html_text)
     return html_text
+
+
+def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
+    return _fetch_source_page_html(url, timeout_seconds, PAGE_FETCH_CONFIGS["businesswire"])
 
 
 def _extract_table_cell_symbols_from_html(html_text: str, known_symbols: set[str]) -> set[str]:
@@ -382,19 +415,19 @@ def _html_to_plain_text(html_text: str) -> str:
     return text
 
 
-def _extract_businesswire_fallback_tickers(
+def _extract_source_fallback_tickers(
     title: str,
     summary: str,
     link: str,
     feed_url: str,
     known_symbols: set[str],
     timeout_seconds: int,
+    config: SourcePageConfig,
 ) -> dict[str, tuple[str, float]]:
-    html_text = _fetch_businesswire_page_html(link, timeout_seconds)
+    html_text = _fetch_source_page_html(link, timeout_seconds, config)
     if not html_text:
         return {}
 
-    # Avoid noisy all-token scan on large pages; rely on explicit exchange/paren patterns.
     plain_text = _html_to_plain_text(html_text)
     enriched_summary = " ".join([part for part in [summary, plain_text] if part]).strip()
     hits = _extract_entry_tickers(
@@ -406,13 +439,26 @@ def _extract_businesswire_fallback_tickers(
         include_token=False,
     )
 
-    # Extract compact symbols from HTML table cells to catch columns like "Ticker: DSM, LEO".
     for symbol in _extract_table_cell_symbols_from_html(html_text, known_symbols):
         existing = hits.get(symbol)
         if existing is None or 0.84 > existing[1]:
-            hits[symbol] = ("bw_table", 0.84)
+            hits[symbol] = (config.table_match_type, 0.84)
 
     return hits
+
+
+def _extract_businesswire_fallback_tickers(
+    title: str,
+    summary: str,
+    link: str,
+    feed_url: str,
+    known_symbols: set[str],
+    timeout_seconds: int,
+) -> dict[str, tuple[str, float]]:
+    return _extract_source_fallback_tickers(
+        title, summary, link, feed_url, known_symbols, timeout_seconds,
+        PAGE_FETCH_CONFIGS["businesswire"],
+    )
 
 
 def _extract_entry_tickers(
@@ -696,15 +742,18 @@ def ingest_feed(
                     provider_name = _clamp_label(source.name)
                     entry_source_name = _extract_provider(entry, source_name)
                     ticker_hits = _extract_entry_tickers(title, summary or "", link, feed_url, known_symbols)
-                    if source.code == GENERAL_SOURCE_CODE and not ticker_hits:
-                        ticker_hits = _extract_businesswire_fallback_tickers(
-                            title,
-                            summary or "",
-                            link,
-                            feed_url,
-                            known_symbols,
-                            timeout_seconds,
-                        )
+                    if not ticker_hits:
+                        page_config = PAGE_FETCH_CONFIGS.get(source.code)
+                        if page_config is not None:
+                            ticker_hits = _extract_source_fallback_tickers(
+                                title,
+                                summary or "",
+                                link,
+                                feed_url,
+                                known_symbols,
+                                timeout_seconds,
+                                page_config,
+                            )
 
                     allow_existing_unmapped = False
                     if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
@@ -867,15 +916,13 @@ def run_ingestion_cycle(
             if result["status"] != "success":
                 failed += 1
 
-    remap_stats: BusinessWireRemapStats | None = None
+    source_remaps: list[SourceRemapStats] = []
     ticker_changed = ticker_sync["created"] > 0 or ticker_sync["updated"] > 0
     if ticker_changed:
-        remap_stats = remap_businesswire_articles(
-            db,
-            settings,
-            limit=500,
-            only_unmapped=True,
-        )
+        for code in PAGE_FETCH_CONFIGS:
+            source_remaps.append(
+                remap_source_articles(db, settings, source_code=code, limit=500, only_unmapped=True)
+            )
 
     pruned_raw_items = prune_raw_feed_items(
         db,
@@ -886,30 +933,47 @@ def run_ingestion_cycle(
     if pruned_raw_items:
         logger.info("Pruned %s raw feed items older than %s days", pruned_raw_items, settings.raw_feed_retention_days)
 
-    default_remap: BusinessWireRemapStats = {
+    default_bw_remap: SourceRemapStats = {
+        "source_code": "businesswire",
         "processed": 0,
         "articles_with_hits": 0,
         "remapped_articles": 0,
         "only_unmapped": True,
     }
+    bw_remap = next(
+        (r for r in source_remaps if r["source_code"] == "businesswire"),
+        default_bw_remap,
+    )
     return {
         "total_feeds": len(per_feed),
         "total_items_seen": total_seen,
         "total_items_inserted": total_inserted,
         "failed_feeds": failed,
         "ticker_sync": ticker_sync,
-        "businesswire_remap": remap_stats or default_remap,
+        "businesswire_remap": bw_remap,
+        "source_remaps": source_remaps,
         "feeds": per_feed,
     }
 
 
-def remap_businesswire_articles(
+def remap_source_articles(
     db: Session,
     settings: Settings,
     *,
+    source_code: str,
     limit: int = 500,
     only_unmapped: bool = True,
-) -> BusinessWireRemapStats:
+) -> SourceRemapStats:
+    config = PAGE_FETCH_CONFIGS.get(source_code)
+    if config is None:
+        return {
+            "source_code": source_code,
+            "processed": 0,
+            "articles_with_hits": 0,
+            "remapped_articles": 0,
+            "only_unmapped": only_unmapped,
+        }
+
     ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
     symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
     known_symbols = set(symbol_to_id.keys())
@@ -921,21 +985,21 @@ def remap_businesswire_articles(
         .correlate(Article)
         .exists()
     )
-    businesswire_exists = (
+    source_exists = (
         select(1)
         .select_from(RawFeedItem)
         .join(Source, Source.id == RawFeedItem.source_id)
         .where(
             and_(
                 RawFeedItem.article_id == Article.id,
-                Source.code == GENERAL_SOURCE_CODE,
+                Source.code == source_code,
             )
         )
         .correlate(Article)
         .exists()
     )
 
-    query = select(Article).where(businesswire_exists)
+    query = select(Article).where(source_exists)
     if only_unmapped:
         query = query.where(~mapped_exists)
 
@@ -966,13 +1030,14 @@ def remap_businesswire_articles(
             known_symbols,
         )
         if not ticker_hits:
-            ticker_hits = _extract_businesswire_fallback_tickers(
+            ticker_hits = _extract_source_fallback_tickers(
                 row.title,
                 summary,
                 row.canonical_url,
                 "",
                 known_symbols,
                 settings.request_timeout_seconds,
+                config,
             )
         if not ticker_hits:
             continue
@@ -998,8 +1063,21 @@ def remap_businesswire_articles(
     db.commit()
 
     return {
+        "source_code": source_code,
         "processed": processed,
         "articles_with_hits": articles_with_hits,
         "remapped_articles": remapped_articles,
         "only_unmapped": only_unmapped,
     }
+
+
+def remap_businesswire_articles(
+    db: Session,
+    settings: Settings,
+    *,
+    limit: int = 500,
+    only_unmapped: bool = True,
+) -> SourceRemapStats:
+    return remap_source_articles(
+        db, settings, source_code="businesswire", limit=limit, only_unmapped=only_unmapped,
+    )

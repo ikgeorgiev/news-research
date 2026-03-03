@@ -74,9 +74,18 @@ class BusinessWireRemapResponse(BaseModel):
     only_unmapped: bool
 
 
+class SourceRemapResponse(BaseModel):
+    source_code: str
+    processed: int
+    articles_with_hits: int
+    remapped_articles: int
+    only_unmapped: bool
+
+
 class ReloadTickersResponse(BaseModel):
     loaded: int
     created: int
     updated: int
     unchanged: int
     remap: BusinessWireRemapResponse | None = None
+    source_remaps: list[SourceRemapResponse] | None = None

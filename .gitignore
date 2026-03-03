@@ -9,6 +9,13 @@ node_modules/
 
 # Local env
 .env
+.env.example
+
+# Docker
+docker-compose.yml
+docker-compose.yaml
+compose.yml
+compose.yaml
 
 # OS
 .DS_Store

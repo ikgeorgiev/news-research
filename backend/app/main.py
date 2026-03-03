@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
-from app.ingestion import reconcile_stale_ingestion_runs, remap_businesswire_articles
+from app.ingestion import PAGE_FETCH_CONFIGS, reconcile_stale_ingestion_runs, remap_businesswire_articles, remap_source_articles
 from app.models import Article, ArticleTicker, IngestionRun, RawFeedItem, Source, Ticker
 from app.schemas import (
     BusinessWireRemapResponse,
@@ -24,6 +24,7 @@ from app.schemas import (
     NewsListResponse,
     ReloadTickersResponse,
     RunIngestionResponse,
+    SourceRemapResponse,
     TickerItem,
     TickerListResponse,
 )
@@ -577,34 +578,93 @@ def admin_remap_businesswire(
 
 
 @app.post(
+    f"{settings.api_prefix}/admin/remap/{{source_code}}",
+    response_model=SourceRemapResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def admin_remap_source(
+    source_code: str,
+    limit: int = Query(default=500, ge=1, le=5000),
+    only_unmapped: bool = Query(
+        default=True,
+        description="Remap only articles that currently have no ticker mapping",
+    ),
+    db: Session = Depends(get_db),
+):
+    if source_code not in PAGE_FETCH_CONFIGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Source '{source_code}' does not support page-fetch remap. "
+            f"Supported: {', '.join(sorted(PAGE_FETCH_CONFIGS.keys()))}",
+        )
+    result = remap_source_articles(
+        db, settings, source_code=source_code, limit=limit, only_unmapped=only_unmapped,
+    )
+    return SourceRemapResponse(
+        source_code=result["source_code"],
+        processed=int(result["processed"]),
+        articles_with_hits=int(result["articles_with_hits"]),
+        remapped_articles=int(result["remapped_articles"]),
+        only_unmapped=bool(result["only_unmapped"]),
+    )
+
+
+@app.post(
     f"{settings.api_prefix}/admin/tickers/reload",
     response_model=ReloadTickersResponse,
     dependencies=[Depends(require_admin_api_key)],
 )
 def admin_reload_tickers(
-    remap_unmapped_businesswire: bool = Query(
+    remap_unmapped: bool = Query(
         default=True,
-        description="Run Business Wire remap after loading ticker CSV",
+        description="Run source remaps after loading ticker CSV",
     ),
     remap_limit: int = Query(default=500, ge=1, le=5000),
     db: Session = Depends(get_db),
+    *,
+    remap_unmapped_businesswire: bool | None = Query(
+        default=None,
+        description="Deprecated alias for remap_unmapped",
+        deprecated=True,
+    ),
 ):
     ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
 
     remap_payload: BusinessWireRemapResponse | None = None
-    if remap_unmapped_businesswire:
-        result = remap_businesswire_articles(
-            db,
-            settings,
-            limit=remap_limit,
-            only_unmapped=True,
-        )
-        remap_payload = BusinessWireRemapResponse(
-            processed=int(result["processed"]),
-            articles_with_hits=int(result["articles_with_hits"]),
-            remapped_articles=int(result["remapped_articles"]),
-            only_unmapped=bool(result["only_unmapped"]),
-        )
+    source_remap_payloads: list[SourceRemapResponse] = []
+    primary_should_remap = remap_unmapped if isinstance(remap_unmapped, bool) else True
+    legacy_should_remap = (
+        remap_unmapped_businesswire
+        if isinstance(remap_unmapped_businesswire, bool)
+        else None
+    )
+    should_remap = (
+        legacy_should_remap
+        if legacy_should_remap is not None
+        else primary_should_remap
+    )
+
+    if should_remap:
+        for code in sorted(PAGE_FETCH_CONFIGS.keys()):
+            result = remap_source_articles(
+                db, settings, source_code=code, limit=remap_limit, only_unmapped=True,
+            )
+            source_remap_payloads.append(SourceRemapResponse(
+                source_code=result["source_code"],
+                processed=int(result["processed"]),
+                articles_with_hits=int(result["articles_with_hits"]),
+                remapped_articles=int(result["remapped_articles"]),
+                only_unmapped=bool(result["only_unmapped"]),
+            ))
+
+        bw = next((r for r in source_remap_payloads if r.source_code == "businesswire"), None)
+        if bw is not None:
+            remap_payload = BusinessWireRemapResponse(
+                processed=bw.processed,
+                articles_with_hits=bw.articles_with_hits,
+                remapped_articles=bw.remapped_articles,
+                only_unmapped=bw.only_unmapped,
+            )
 
     return ReloadTickersResponse(
         loaded=int(ticker_stats["loaded"]),
@@ -612,4 +672,5 @@ def admin_reload_tickers(
         updated=int(ticker_stats["updated"]),
         unchanged=int(ticker_stats["unchanged"]),
         remap=remap_payload,
+        source_remaps=source_remap_payloads if source_remap_payloads else None,
     )

@@ -1,11 +1,15 @@
 from app.ingestion import (
-    _businesswire_page_cache,
-    _fetch_businesswire_page_html,
-    _clamp_label,
+    PAGE_FETCH_CONFIGS,
     _extract_businesswire_fallback_tickers,
     _extract_entry_tickers,
+    _extract_source_fallback_tickers,
     _extract_table_cell_symbols_from_html,
+    _fetch_businesswire_page_html,
+    _fetch_source_page_html,
     _is_businesswire_article_url,
+    _is_source_article_url,
+    _source_page_cache,
+    _clamp_label,
     _should_persist_entry,
 )
 
@@ -125,7 +129,7 @@ def test_extract_table_cell_symbols_from_html():
 
 
 def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
-    def fake_fetch(_url: str, _timeout: int) -> str:
+    def fake_fetch(_url, _timeout, _config):
         return """
         <html><body>
           <h1>BNY Mellon Municipal Bond Closed-End Funds Declare Distributions</h1>
@@ -137,7 +141,7 @@ def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_businesswire_page_html", fake_fetch)
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
 
     hits = _extract_businesswire_fallback_tickers(
         "BNY Mellon Municipal Bond Closed-End Funds Declare Distributions",
@@ -175,10 +179,10 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch):
             return timestamps.pop(0)
         return 1000.5
 
-    _businesswire_page_cache.clear()
+    _source_page_cache.clear()
     monkeypatch.setattr("app.ingestion.requests.get", fake_get)
     monkeypatch.setattr("app.ingestion.time.time", fake_time)
-    monkeypatch.setattr("app.ingestion.BUSINESSWIRE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
+    monkeypatch.setattr("app.ingestion.SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
 
     first = _fetch_businesswire_page_html("https://www.businesswire.com/news/home/abc", 5)
     second = _fetch_businesswire_page_html("https://www.businesswire.com/news/home/abc", 5)
@@ -187,7 +191,7 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch):
     assert second == "<html>ok</html>"
     assert calls["count"] == 2
 
-    _businesswire_page_cache.clear()
+    _source_page_cache.clear()
 
 
 def test_is_businesswire_article_url_allows_expected_hosts():
@@ -205,10 +209,106 @@ def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch):
         calls["count"] += 1
         raise AssertionError("non-businesswire URL should not be fetched")
 
-    _businesswire_page_cache.clear()
+    _source_page_cache.clear()
     monkeypatch.setattr("app.ingestion.requests.get", fake_get)
 
     result = _fetch_businesswire_page_html("https://evil.example.com/news/home/abc", 5)
+
+    assert result is None
+    assert calls["count"] == 0
+
+
+def test_is_source_article_url_prnewswire():
+    assert _is_source_article_url("https://www.prnewswire.com/news-releases/abc-123.html", "prnewswire.com")
+    assert _is_source_article_url("https://prnewswire.com/news-releases/abc-123.html", "prnewswire.com")
+    assert not _is_source_article_url("https://evil.com/prnewswire.com", "prnewswire.com")
+    assert not _is_source_article_url("file:///tmp/prnewswire.html", "prnewswire.com")
+
+
+def test_is_source_article_url_globenewswire():
+    assert _is_source_article_url("https://www.globenewswire.com/news-release/2026/01/abc", "globenewswire.com")
+    assert _is_source_article_url("https://globenewswire.com/news-release/abc", "globenewswire.com")
+    assert not _is_source_article_url("https://example.com/globenewswire", "globenewswire.com")
+
+
+def test_prnewswire_fallback_extracts_table_symbols(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Invesco Closed-End Funds Declare Dividends</h1>
+          <table>
+            <tr><th>Fund Name</th><th>Ticker</th></tr>
+            <tr><td>Invesco Municipal Trust</td><td>VKQ</td></tr>
+            <tr><td>Invesco Municipal Opportunity Trust</td><td>VMO</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Invesco Closed-End Funds Declare Dividends",
+        "",
+        "https://www.prnewswire.com/news-releases/invesco-302701172.html",
+        "",
+        {"VKQ", "VMO", "OIA"},
+        timeout_seconds=5,
+        config=config,
+    )
+
+    assert "VKQ" in hits
+    assert "VMO" in hits
+    assert hits["VKQ"][0] == "prn_table"
+    assert hits["VKQ"][1] == 0.84
+    assert "OIA" not in hits
+
+
+def test_globenewswire_fallback_extracts_exchange_and_table(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>BNY Mellon Funds Declare Distributions</h1>
+          <p>The Board of Directors of NYSE: DSM announced distributions.</p>
+          <table>
+            <tr><td>BNY Mellon Strategic Municipals</td><td>LEO</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BNY Mellon Funds Declare Distributions",
+        "",
+        "https://www.globenewswire.com/news-release/2026/03/abc",
+        "",
+        {"DSM", "LEO"},
+        timeout_seconds=5,
+        config=config,
+    )
+
+    assert "DSM" in hits
+    assert hits["DSM"][0] == "exchange"
+    assert "LEO" in hits
+    assert hits["LEO"][0] == "gnw_table"
+
+
+def test_source_page_fetch_skips_wrong_host(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_get(*_args, **_kwargs):
+        calls["count"] += 1
+        raise AssertionError("wrong host should not be fetched")
+
+    _source_page_cache.clear()
+    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+    result = _fetch_source_page_html("https://evil.example.com/news/abc", 5, config)
 
     assert result is None
     assert calls["count"] == 0
