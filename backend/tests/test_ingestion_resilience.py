@@ -4,12 +4,15 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import requests
+from requests.structures import CaseInsensitiveDict
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
 from app.ingestion import (
     _fetch_feed_with_retries,
+    _get_feed_conditional_headers,
+    _update_feed_http_cache,
     ingest_feed,
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
@@ -107,6 +110,24 @@ def test_fetch_feed_with_retries_succeeds_after_transient_failures(monkeypatch):
 
     assert attempts["count"] == 3
     assert response.content == b"<rss />"
+
+
+def test_update_feed_http_cache_reads_requests_case_insensitive_headers():
+    feed_url = "https://example.com/feed-with-conditional-cache.xml"
+
+    class FakeResponse:
+        headers = CaseInsensitiveDict(
+            {
+                "etag": '"abc123"',
+                "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
+            }
+        )
+
+    _update_feed_http_cache(feed_url, FakeResponse())  # type: ignore[arg-type]
+    headers = _get_feed_conditional_headers(feed_url)
+
+    assert headers["If-None-Match"] == '"abc123"'
+    assert headers["If-Modified-Since"] == "Tue, 03 Mar 2026 10:00:00 GMT"
 
 
 def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):

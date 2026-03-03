@@ -110,3 +110,10 @@ class IngestionRun(Base):
 
 Index("ix_articles_published_id", Article.published_at, Article.id)
 Index("ix_runs_source_started", IngestionRun.source_id, IngestionRun.started_at)
+Index("ix_raw_feed_items_source_guid", RawFeedItem.source_id, RawFeedItem.raw_guid)
+Index(
+    "ix_raw_feed_items_source_link_pub_date",
+    RawFeedItem.source_id,
+    RawFeedItem.raw_link,
+    RawFeedItem.raw_pub_date,
+)
