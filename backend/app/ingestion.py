@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
+from app.push_alerts import check_and_send_alerts
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
@@ -146,6 +147,7 @@ class IngestionCycleResult(TypedDict):
     businesswire_remap: SourceRemapStats
     source_remaps: list[SourceRemapStats]
     feeds: list[IngestFeedResult]
+    push_alerts: dict[str, int]
 
 
 def _clamp_label(value: str | None, max_len: int = 120) -> str:
@@ -1353,6 +1355,18 @@ def run_ingestion_cycle(
         (r for r in source_remaps if r["source_code"] == "businesswire"),
         default_bw_remap,
     )
+    push_alerts = {
+        "scanned": 0,
+        "sent": 0,
+        "failed": 0,
+        "deactivated": 0,
+    }
+    if total_inserted > 0:
+        try:
+            push_alerts = check_and_send_alerts(db, settings)
+        except Exception:
+            logger.exception("Push alert processing failed after ingestion cycle")
+
     return {
         "total_feeds": len(per_feed),
         "total_items_seen": total_seen,
@@ -1362,6 +1376,7 @@ def run_ingestion_cycle(
         "businesswire_remap": bw_remap,
         "source_remaps": source_remaps,
         "feeds": per_feed,
+        "push_alerts": push_alerts,
     }
 
 

@@ -48,6 +48,20 @@ INGESTION_LAST_CYCLE_FAILED_FEEDS = Gauge(
     "ingestion_last_cycle_failed_feeds",
     "Failed feeds in the most recent successful ingestion cycle",
 )
+PUSH_NOTIFICATIONS_TOTAL = Counter(
+    "push_notifications_sent_total",
+    "Number of push notification delivery attempts by status",
+    ["status"],
+)
+PUSH_NOTIFICATION_DURATION_SECONDS = Histogram(
+    "push_notification_duration_seconds",
+    "Push notification delivery latency in seconds",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+)
+PUSH_ACTIVE_SUBSCRIPTIONS = Gauge(
+    "push_active_subscriptions",
+    "Number of active push subscriptions",
+)
 
 
 def observe_http_request(method: str, path: str, status_code: int, duration_seconds: float) -> None:
@@ -76,6 +90,18 @@ def record_ingestion_failure(duration_seconds: float) -> None:
     INGESTION_CYCLE_TOTAL.labels(status="failed").inc()
     INGESTION_CYCLE_DURATION_SECONDS.observe(duration_seconds)
     INGESTION_LAST_CYCLE_UNIX_SECONDS.set(time.time())
+
+
+def record_push_delivery(status: str) -> None:
+    PUSH_NOTIFICATIONS_TOTAL.labels(status=str(status or "unknown")).inc()
+
+
+def record_push_delivery_duration(duration_seconds: float) -> None:
+    PUSH_NOTIFICATION_DURATION_SECONDS.observe(max(0.0, float(duration_seconds)))
+
+
+def set_push_active_subscriptions(value: int) -> None:
+    PUSH_ACTIVE_SUBSCRIPTIONS.set(max(0.0, float(value)))
 
 
 def render_metrics() -> tuple[bytes, str]:

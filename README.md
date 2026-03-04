@@ -198,6 +198,9 @@ For frontend on `3000` instead:
 - `GET /api/v1/tickers`
 - `GET /api/v1/news`
 - `GET /api/v1/news/{id}`
+- `GET /api/v1/push/vapid-key`
+- `PUT /api/v1/push/subscription`
+- `DELETE /api/v1/push/subscription`
 - `POST /api/v1/admin/ingest/run-once`
 - `GET /api/v1/admin/ingest/status`
 - `POST /api/v1/admin/tickers/reload`
@@ -209,6 +212,18 @@ Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wi
 `GET /api/v1/news/ids` supports cursor pagination with `limit` and `cursor`.
 
 Admin endpoints require the `X-API-Key` header and `ADMIN_API_KEY` to be configured.
+
+Push endpoints require Web Push configuration in `.env`:
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_CONTACT_EMAIL`
+
+Generate keys with:
+
+```bash
+python -m app.vapid_keygen
+```
 
 After editing `data/cef_tickers.csv` while the backend is running, call:
 

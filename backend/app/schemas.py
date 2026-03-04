@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NewsItem(BaseModel):
@@ -89,3 +89,55 @@ class ReloadTickersResponse(BaseModel):
     unchanged: int
     remap: BusinessWireRemapResponse | None = None
     source_remaps: list[SourceRemapResponse] | None = None
+
+
+class PushVapidKeyResponse(BaseModel):
+    enabled: bool
+    public_key: str | None = None
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscriptionPayload(BaseModel):
+    endpoint: str
+    expiration_time: int | None = None
+    keys: PushSubscriptionKeys
+
+
+class PushWatchlistScope(BaseModel):
+    id: str
+    name: str | None = None
+    tickers: list[str] | None = None
+    provider: str | None = None
+    q: str | None = None
+
+
+class PushAlertScopes(BaseModel):
+    include_all_news: bool = True
+    watchlists: list[PushWatchlistScope] = Field(default_factory=list)
+
+
+class PushUpsertRequest(BaseModel):
+    subscription: PushSubscriptionPayload
+    scopes: PushAlertScopes
+    manage_token: str | None = None
+
+
+class PushUpsertResponse(BaseModel):
+    id: int
+    active: bool
+    created: bool
+    manage_token: str | None = None
+    seeded_last_notified: dict[str, int] = Field(default_factory=dict)
+
+
+class PushDeleteRequest(BaseModel):
+    endpoint: str
+    manage_token: str
+
+
+class PushDeleteResponse(BaseModel):
+    deleted: bool

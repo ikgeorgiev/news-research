@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     source_enable_bw: bool = True
 
     request_timeout_seconds: int = Field(default=20, ge=5, le=120)
+    push_send_timeout_seconds: int = Field(default=10, ge=1, le=120)
+    push_max_per_cycle: int = Field(default=25, ge=1, le=500)
+    push_max_consecutive_failures: int = Field(default=20, ge=1, le=1000)
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_contact_email: str | None = None
 
     # Root-level default: <repo>/data/cef_tickers.csv
     tickers_csv_path: str = str(Path(__file__).resolve().parents[2] / "data" / "cef_tickers.csv")

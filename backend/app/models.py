@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -121,8 +122,28 @@ class IngestionRun(Base):
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    key_p256dh: Mapped[str] = mapped_column(Text, nullable=False)
+    key_auth: Mapped[str] = mapped_column(Text, nullable=False)
+    expiration_time: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    alert_scopes_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    last_notified_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    manage_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+
+
 Index("ix_articles_published_id", Article.published_at, Article.id)
 Index("ix_runs_source_started", IngestionRun.source_id, IngestionRun.started_at)
+Index("ix_push_subscriptions_active_updated", PushSubscription.active, PushSubscription.updated_at)
 Index("ix_raw_feed_items_source_guid", RawFeedItem.source_id, RawFeedItem.raw_guid)
 Index(
     "ix_raw_feed_items_source_link_pub_date",
