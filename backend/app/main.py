@@ -13,11 +13,18 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
-from app.ingestion import PAGE_FETCH_CONFIGS, reconcile_stale_ingestion_runs, remap_businesswire_articles, remap_source_articles
+from app.ingestion import (
+    PAGE_FETCH_CONFIGS,
+    dedupe_businesswire_url_variants,
+    reconcile_stale_ingestion_runs,
+    remap_businesswire_articles,
+    remap_source_articles,
+)
 from app.monitoring import observe_http_request, render_metrics
 from app.models import Article, ArticleTicker, IngestionRun, PushSubscription, RawFeedItem, Source, Ticker
 from app.push_alerts import hash_manage_token, normalize_scopes, push_runtime_enabled, seed_last_notified_watermarks
 from app.schemas import (
+    BusinessWireDedupeResponse,
     BusinessWireRemapResponse,
     IngestionRunItem,
     IngestionRunResponse,
@@ -711,6 +718,24 @@ def admin_remap_businesswire(
         articles_with_hits=int(result["articles_with_hits"]),
         remapped_articles=int(result["remapped_articles"]),
         only_unmapped=bool(result["only_unmapped"]),
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/dedupe/businesswire-url-variants",
+    response_model=BusinessWireDedupeResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
+    result = dedupe_businesswire_url_variants(db)
+    return BusinessWireDedupeResponse(
+        scanned_articles=int(result["scanned_articles"]),
+        duplicate_groups=int(result["duplicate_groups"]),
+        merged_articles=int(result["merged_articles"]),
+        raw_items_relinked=int(result["raw_items_relinked"]),
+        ticker_rows_relinked=int(result["ticker_rows_relinked"]),
+        ticker_rows_updated=int(result["ticker_rows_updated"]),
+        ticker_rows_deleted=int(result["ticker_rows_deleted"]),
     )
 
 

@@ -13,11 +13,13 @@ from app.ingestion import (
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
     _update_feed_http_cache,
+    dedupe_businesswire_url_variants,
     ingest_feed,
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
-from app.models import FeedPollState, IngestionRun, RawFeedItem, Source
+from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
+from app.utils import sha256_str
 
 
 def _make_db_session() -> Session:
@@ -27,17 +29,53 @@ def _make_db_session() -> Session:
     return session_factory()
 
 
-def _seed_source(db: Session) -> Source:
+def _seed_source(
+    db: Session,
+    *,
+    code: str = "businesswire",
+    name: str = "Business Wire",
+    base_url: str = "https://www.businesswire.com",
+) -> Source:
     source = Source(
-        code="businesswire",
-        name="Business Wire",
-        base_url="https://www.businesswire.com",
+        code=code,
+        name=name,
+        base_url=base_url,
         enabled=True,
     )
     db.add(source)
     db.commit()
     db.refresh(source)
     return source
+
+
+def _seed_article(
+    db: Session,
+    *,
+    canonical_url: str,
+    title: str,
+    summary: str,
+    published_at: datetime,
+    source_name: str,
+    provider_name: str,
+) -> Article:
+    article = Article(
+        canonical_url=canonical_url,
+        canonical_url_hash=sha256_str(canonical_url),
+        title=title,
+        summary=summary,
+        published_at=published_at,
+        source_name=source_name,
+        provider_name=provider_name,
+        content_hash=sha256_str(f"content:{canonical_url}"),
+        title_normalized_hash=sha256_str(f"title:{title.lower()}"),
+        cluster_key=sha256_str(f"cluster:{title.lower()}"),
+        created_at=published_at,
+        updated_at=published_at,
+    )
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    return article
 
 
 def test_reconcile_stale_ingestion_runs_marks_only_stale_running_rows():
@@ -303,6 +341,487 @@ def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
     assert first["status"] == "success"
     assert second["status"] == "success"
     assert len(raw_rows) == 1
+    db.close()
+
+
+def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(monkeypatch):
+    db = _make_db_session()
+    yahoo = _seed_source(
+        db,
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+    )
+    businesswire = _seed_source(db)
+
+    yahoo_entry = {
+        "id": "y-guid-1",
+        "guid": "y-guid-1",
+        "title": "ACME distribution update NYSE: UTF",
+        "link": "https://www.businesswire.com/news/home/20260301000001/en?feedref=JjAwJuNHiystnCoBq_hl-XxV8f8yqXw8M0Q",
+        "summary": "Yahoo copy",
+        "published": "2026-03-01T00:00:00Z",
+    }
+    bw_entry = {
+        "id": "bw-guid-1",
+        "guid": "bw-guid-1",
+        "title": "ACME distribution update NYSE: UTF",
+        "link": "https://www.businesswire.com/news/home/20260301000001/en",
+        "summary": "Business Wire copy",
+        "published": "2026-03-01T00:00:00Z",
+    }
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
+    )
+    yahoo_run = ingest_feed(
+        db,
+        source=yahoo,
+        feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+        known_symbols={"UTF"},
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[bw_entry]),
+    )
+    bw_run = ingest_feed(
+        db,
+        source=businesswire,
+        feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+        known_symbols={"UTF"},
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    raw_rows = db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
+    assert yahoo_run["status"] == "success"
+    assert bw_run["status"] == "success"
+    assert len(articles) == 1
+    assert articles[0].canonical_url == "https://www.businesswire.com/news/home/20260301000001/en"
+    raw_links_by_source = {row.source_id: row.raw_link for row in raw_rows}
+    assert raw_links_by_source.get(yahoo.id) == (
+        "https://www.businesswire.com/news/home/20260301000001/en"
+        "?feedref=JjAwJuNHiystnCoBq_hl-XxV8f8yqXw8M0Q"
+    )
+    if businesswire.id in raw_links_by_source:
+        assert raw_links_by_source[businesswire.id] == "https://www.businesswire.com/news/home/20260301000001/en"
+    db.close()
+
+
+def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(monkeypatch):
+    db = _make_db_session()
+    yahoo = _seed_source(
+        db,
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+    )
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    canonical_url = "https://www.businesswire.com/news/home/20260301000001/en"
+    article = _seed_article(
+        db,
+        canonical_url=canonical_url,
+        title="ACME distribution update",
+        summary="Original summary",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+    ticker = Ticker(symbol="UTF", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add(
+        ArticleTicker(
+            article_id=article.id,
+            ticker_id=ticker.id,
+            match_type="exchange",
+            confidence=0.88,
+        )
+    )
+    db.commit()
+
+    yahoo_entry = {
+        "id": "y-guid-1",
+        "guid": "y-guid-1",
+        "title": "ACME distribution update",
+        "link": canonical_url + "?tsrc=rss",
+        "summary": "Yahoo mirror with no ticker text",
+        "published": "2026-03-01T00:00:00Z",
+    }
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
+    )
+
+    result = ingest_feed(
+        db,
+        source=yahoo,
+        # Multi-symbol feed URL disables context-symbol auto-hit.
+        feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF,GOF",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    tickers_after = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+    assert result["status"] == "success"
+    assert len(tickers_after) == 1
+    assert tickers_after[0].ticker_id == ticker.id
+    db.close()
+
+
+def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(monkeypatch):
+    db = _make_db_session()
+    yahoo = _seed_source(
+        db,
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+    )
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    canonical_url = "https://www.businesswire.com/news/home/20260301000001/en"
+    article = _seed_article(
+        db,
+        canonical_url=canonical_url,
+        title="Canonical BW headline",
+        summary="Canonical Business Wire summary with richer details.",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+
+    mirror_entry = {
+        "id": "y-guid-2",
+        "guid": "y-guid-2",
+        "title": "Mirrored Yahoo title",
+        "link": canonical_url + "?tsrc=rss",
+        "summary": "Short mirror summary",
+        "published": "2026-03-01T00:10:00Z",
+    }
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[mirror_entry]),
+    )
+
+    result = ingest_feed(
+        db,
+        source=yahoo,
+        feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF,GOF",
+        known_symbols={"UTF"},
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    article_after = db.scalar(select(Article).where(Article.id == article.id))
+    assert result["status"] == "success"
+    assert article_after is not None
+    assert article_after.title == "Canonical BW headline"
+    assert article_after.summary == "Canonical Business Wire summary with richer details."
+    assert article_after.source_name == "Business Wire"
+    assert article_after.provider_name == "Business Wire"
+    assert article_after.published_at is not None
+    assert article_after.published_at.replace(tzinfo=timezone.utc) == published
+    db.close()
+
+
+def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(monkeypatch):
+    db = _make_db_session()
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    url_with_query = "https://www.prnewswire.com/news-releases/acme-update.html?id=123"
+    article = _seed_article(
+        db,
+        canonical_url=url_with_query,
+        title="Old title",
+        summary="Old summary",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(symbol="UTF", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add(
+        ArticleTicker(
+            article_id=article.id,
+            ticker_id=ticker.id,
+            match_type="exchange",
+            confidence=0.88,
+        )
+    )
+    db.commit()
+
+    entry = {
+        "id": "prn-guid-1",
+        "guid": "prn-guid-1",
+        "title": "New title without symbol",
+        "link": url_with_query,
+        "summary": "New short summary",
+        "published": "2026-03-01T00:10:00Z",
+    }
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
+    )
+
+    result = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://www.prnewswire.com/rss/financial-services-latest-news/dividends-list.rss",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    article_after = db.scalar(select(Article).where(Article.id == article.id))
+    ticker_rows_after = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+    assert result["status"] == "success"
+    assert article_after is not None
+    assert article_after.title == "New title without symbol"
+    assert article_after.summary == "New short summary"
+    assert len(ticker_rows_after) == 0
+    db.close()
+
+
+def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(monkeypatch):
+    db = _make_db_session()
+    source = _seed_source(db)
+    entries = [
+        {
+            "id": "guid-1",
+            "guid": "guid-1",
+            "title": "Fund update",
+            "link": "https://www.businesswire.com/news/home/20260301000001/en",
+            "summary": "Story one",
+            "published": "2026-03-01T00:00:00Z",
+        },
+        {
+            "id": "guid-2",
+            "guid": "guid-2",
+            "title": "Fund update",
+            "link": "https://www.businesswire.com/news/home/20260301000002/en",
+            "summary": "Story two",
+            "published": "2026-03-01T00:05:00Z",
+        },
+    ]
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ingestion.feedparser.parse",
+        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=entries),
+    )
+
+    result = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+        known_symbols=set(),
+        symbol_to_id={},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    assert result["status"] == "success"
+    assert len(articles) == 2
+    db.close()
+
+
+def test_dedupe_businesswire_url_variants_merges_historical_rows():
+    db = _make_db_session()
+    yahoo = _seed_source(
+        db,
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+    )
+    businesswire = _seed_source(db)
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    query_url = (
+        "https://www.businesswire.com/news/home/20260301000001/en"
+        "?feedref=JjAwJuNHiystnCoBq_hl-XxV8f8yqXw8M0Q"
+    )
+    clean_url = "https://www.businesswire.com/news/home/20260301000001/en"
+    yahoo_article = _seed_article(
+        db,
+        canonical_url=query_url,
+        title="ACME distribution update",
+        summary="Short Yahoo summary",
+        published_at=published,
+        source_name="Yahoo Finance",
+        provider_name="Yahoo Finance",
+    )
+    businesswire_article = _seed_article(
+        db,
+        canonical_url=clean_url,
+        title="ACME distribution update",
+        summary="Business Wire summary has more context than Yahoo copy",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+    ticker = Ticker(symbol="UTF", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all([
+        ArticleTicker(
+            article_id=yahoo_article.id,
+            ticker_id=ticker.id,
+            match_type="token",
+            confidence=0.62,
+        ),
+        ArticleTicker(
+            article_id=businesswire_article.id,
+            ticker_id=ticker.id,
+            match_type="exchange",
+            confidence=0.88,
+        ),
+        RawFeedItem(
+            source_id=yahoo.id,
+            article_id=yahoo_article.id,
+            feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+            raw_guid="y-guid-1",
+            raw_link=query_url,
+            raw_pub_date=published,
+            raw_payload_json={},
+        ),
+        RawFeedItem(
+            source_id=businesswire.id,
+            article_id=businesswire_article.id,
+            feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+            raw_guid="bw-guid-1",
+            raw_link=clean_url,
+            raw_pub_date=published,
+            raw_payload_json={},
+        ),
+    ])
+    db.commit()
+
+    result = dedupe_businesswire_url_variants(db)
+
+    remaining_articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    assert result["duplicate_groups"] == 1
+    assert result["merged_articles"] == 1
+    assert result["raw_items_relinked"] == 1
+    assert result["ticker_rows_deleted"] == 1
+    assert len(remaining_articles) == 1
+    winner = remaining_articles[0]
+    assert winner.canonical_url == clean_url
+
+    raw_article_ids = {
+        row.article_id
+        for row in db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
+    }
+    assert raw_article_ids == {winner.id}
+    winner_tickers = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == winner.id)
+    ).all()
+    assert len(winner_tickers) == 1
+    assert winner_tickers[0].confidence == 0.88
+    assert winner_tickers[0].match_type == "exchange"
+    db.close()
+
+
+def test_dedupe_businesswire_url_variants_skips_distinct_story_ids():
+    db = _make_db_session()
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    _seed_article(
+        db,
+        canonical_url="https://www.businesswire.com/news/home/20260301000001/en",
+        title="Fund update",
+        summary="Story one",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+    _seed_article(
+        db,
+        canonical_url="https://www.businesswire.com/news/home/20260301000002/en",
+        title="Fund update",
+        summary="Story two",
+        published_at=published + timedelta(minutes=5),
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+
+    result = dedupe_businesswire_url_variants(db)
+
+    articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    assert result["scanned_articles"] == 2
+    assert result["duplicate_groups"] == 0
+    assert result["merged_articles"] == 0
+    assert len(articles) == 2
     db.close()
 
 

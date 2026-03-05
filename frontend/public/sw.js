@@ -40,8 +40,11 @@ self.addEventListener("push", (event) => {
 
       await self.registration.showNotification(title, {
         body,
+        icon: "/icon.svg",
+        badge: "/icon.svg",
         tag,
         renotify: true,
+        requireInteraction: true,
         data,
       })
     })()

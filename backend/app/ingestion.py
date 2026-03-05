@@ -138,6 +138,16 @@ class SourceRemapStats(TypedDict):
 BusinessWireRemapStats = SourceRemapStats
 
 
+class BusinessWireUrlDedupeStats(TypedDict):
+    scanned_articles: int
+    duplicate_groups: int
+    merged_articles: int
+    raw_items_relinked: int
+    ticker_rows_relinked: int
+    ticker_rows_updated: int
+    ticker_rows_deleted: int
+
+
 class IngestionCycleResult(TypedDict):
     total_feeds: int
     total_items_seen: int
@@ -422,7 +432,9 @@ class PreparedFeedEntry:
     entry: dict
     raw_title: str
     title: str
-    link: str
+    raw_link: str
+    article_url: str
+    is_exact_source_url: bool
     published_at: datetime
     raw_guid: str | None
 
@@ -448,7 +460,7 @@ def _prefetch_recorded_raw_keys(
         return set(), set()
 
     guids = {item.raw_guid for item in prepared_entries if item.raw_guid}
-    pairs = {(item.link, item.published_at) for item in prepared_entries}
+    pairs = {(item.raw_link, item.published_at) for item in prepared_entries}
 
     existing_guids: set[str] = set()
     if guids:
@@ -761,6 +773,7 @@ def _upsert_article(
     published_at: datetime,
     source_name: str,
     provider_name: str,
+    allow_url_match_overwrite: bool = True,
 ) -> tuple[Article, bool, bool]:
     url_hash = sha256_str(canonical_url)
     title_hash = sha256_str(normalize_title(title))
@@ -833,19 +846,25 @@ def _upsert_article(
         raise RuntimeError("article upsert failed to resolve target row")
 
     if not created:
-        article.title = title
-        article.source_name = source_name
-        article.provider_name = provider_name
-        article.content_hash = content_hash
-        article.cluster_key = cluster_key
+        should_overwrite_on_url_match = (not matched_by_url) or allow_url_match_overwrite
+        if should_overwrite_on_url_match:
+            article.title = title
+            article.source_name = source_name
+            article.provider_name = provider_name
+            article.content_hash = content_hash
+            article.cluster_key = cluster_key
         if summary:
-            if matched_by_url:
+            if matched_by_url and allow_url_match_overwrite:
                 # For exact URL matches, trust the feed payload for this URL.
                 article.summary = summary
-            elif not article.summary or len(summary) > len(article.summary):
+            elif (not matched_by_url) and (not article.summary or len(summary) > len(article.summary)):
+                # Mirrors (matched_by_url=True, allow_url_match_overwrite=False) intentionally
+                # skip summary updates so they don't clobber the canonical source's richer text.
                 article.summary = summary
-        if article.published_at is None or published_at > article.published_at:
-            article.published_at = published_at
+        if should_overwrite_on_url_match:
+            article_published = article.published_at
+            if article_published is None or _to_utc(published_at) > _to_utc(article_published):
+                article.published_at = published_at
 
     return article, created, matched_by_url
 
@@ -992,9 +1011,27 @@ def ingest_feed(
                     raw_title = str(entry.get("title") or "").strip()
                     # Never fall back to raw feed title so stored titles remain plain text.
                     title = clean_summary_text(raw_title)
-                    link = canonicalize_url(str(entry.get("link") or "").strip())
-                    if not title or not link:
+                    raw_link_input = str(entry.get("link") or "").strip()
+                    raw_link = canonicalize_url(raw_link_input)
+                    if not title or not raw_link:
                         continue
+
+                    parsed_input = urlparse(raw_link_input)
+                    is_businesswire_link = _is_businesswire_article_url(raw_link)
+                    article_url = raw_link
+                    if is_businesswire_link:
+                        # Yahoo and other feeds may append tracking/query params to BW links.
+                        # Normalize BW article URLs so cross-feed copies resolve to one article row.
+                        article_url = _canonical_businesswire_article_url(raw_link)
+                        # Treat any original query/fragment as mirrored so metadata
+                        # overwrite/pruning cannot run on canonical BW rows via mirrors.
+                        is_exact_source_url = (
+                            not parsed_input.query
+                            and not parsed_input.fragment
+                            and raw_link == article_url
+                        )
+                    else:
+                        is_exact_source_url = raw_link == article_url
 
                     published_at = parse_datetime(entry.get("published") or entry.get("updated")) or now_utc
                     raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
@@ -1003,7 +1040,9 @@ def ingest_feed(
                             entry=entry,
                             raw_title=raw_title,
                             title=title,
-                            link=link,
+                            raw_link=raw_link,
+                            article_url=article_url,
+                            is_exact_source_url=is_exact_source_url,
                             published_at=published_at,
                             raw_guid=raw_guid,
                         )
@@ -1029,7 +1068,7 @@ def ingest_feed(
                         with db.begin_nested():
                             if prepared.raw_guid and prepared.raw_guid in recorded_guids:
                                 continue
-                            if (prepared.link, prepared.published_at) in recorded_pairs:
+                            if (prepared.raw_link, prepared.published_at) in recorded_pairs:
                                 continue
 
                             raw_summary = (
@@ -1042,7 +1081,7 @@ def ingest_feed(
                             ticker_hits = _extract_entry_tickers(
                                 prepared.title,
                                 summary or "",
-                                prepared.link,
+                                prepared.raw_link,
                                 feed_url,
                                 known_symbols,
                             )
@@ -1050,7 +1089,7 @@ def ingest_feed(
                                 ticker_hits = _extract_source_fallback_tickers(
                                     prepared.title,
                                     summary or "",
-                                    prepared.link,
+                                    prepared.raw_link,
                                     feed_url,
                                     known_symbols,
                                     timeout_seconds,
@@ -1061,7 +1100,7 @@ def ingest_feed(
                             if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
                                 existing_article_id = db.scalar(
                                     select(Article.id)
-                                    .where(Article.canonical_url_hash == sha256_str(prepared.link))
+                                    .where(Article.canonical_url_hash == sha256_str(prepared.article_url))
                                     .limit(1)
                                 )
                                 allow_existing_unmapped = existing_article_id is not None
@@ -1072,12 +1111,13 @@ def ingest_feed(
                             article, created, matched_by_url = _upsert_article(
                                 db,
                                 source_code=source.code,
-                                canonical_url=prepared.link,
+                                canonical_url=prepared.article_url,
                                 title=prepared.title,
                                 summary=summary,
                                 published_at=prepared.published_at,
                                 source_name=source_name,
                                 provider_name=provider_name,
+                                allow_url_match_overwrite=prepared.is_exact_source_url,
                             )
                             created_article = created
 
@@ -1089,12 +1129,19 @@ def ingest_feed(
                                 ticker_hits,
                                 symbol_to_id,
                                 existing_rows=existing_rows,
-                                prune_missing=(source.code != GENERAL_SOURCE_CODE and matched_by_url),
+                                # Prune only when the source entry URL exactly matches the article URL.
+                                # Mirrored Business Wire copies (e.g., Yahoo with query variants) should not
+                                # prune mappings on the canonical BW article.
+                                prune_missing=(
+                                    source.code != GENERAL_SOURCE_CODE
+                                    and matched_by_url
+                                    and prepared.is_exact_source_url
+                                ),
                             )
 
                             payload = {
                                 "title": prepared.raw_title,
-                                "link": prepared.link,
+                                "link": prepared.raw_link,
                                 "published": prepared.entry.get("published") or prepared.entry.get("updated"),
                                 "summary": raw_summary,
                                 "source": entry_source_name,
@@ -1106,14 +1153,14 @@ def ingest_feed(
                                     feed_url=feed_url,
                                     raw_guid=prepared.raw_guid,
                                     raw_title=prepared.raw_title,
-                                    raw_link=prepared.link,
+                                    raw_link=prepared.raw_link,
                                     raw_pub_date=prepared.published_at,
                                     raw_payload_json=to_json_safe(payload),
                                 )
                             )
                             persisted_raw = True
                             persisted_raw_guid = prepared.raw_guid
-                            persisted_pair = (prepared.link, prepared.published_at)
+                            persisted_pair = (prepared.raw_link, prepared.published_at)
 
                         # Only update counters/caches after the savepoint commits successfully.
                         if persisted_raw:
@@ -1492,6 +1539,116 @@ def remap_source_articles(
         "articles_with_hits": articles_with_hits,
         "remapped_articles": remapped_articles,
         "only_unmapped": only_unmapped,
+    }
+
+
+def dedupe_businesswire_url_variants(db: Session) -> BusinessWireUrlDedupeStats:
+    candidate_rows = db.scalars(
+        select(Article)
+        .where(Article.canonical_url.ilike("%businesswire.com%"))
+        .order_by(Article.id.asc())
+    ).all()
+
+    grouped: dict[str, list[Article]] = {}
+    scanned_articles = 0
+    for article in candidate_rows:
+        canonical_candidate = canonicalize_url(article.canonical_url)
+        if not _is_businesswire_article_url(canonical_candidate):
+            continue
+        scanned_articles += 1
+        normalized = _canonical_businesswire_article_url(canonical_candidate)
+        grouped.setdefault(normalized, []).append(article)
+
+    duplicate_groups = 0
+    merged_articles = 0
+    raw_items_relinked = 0
+    ticker_rows_relinked = 0
+    ticker_rows_updated = 0
+    ticker_rows_deleted = 0
+
+    for normalized_url, articles in grouped.items():
+        if len(articles) <= 1:
+            continue
+
+        duplicate_groups += 1
+        article_ids = [row.id for row in articles]
+        ticker_rows = db.scalars(
+            select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
+        ).all()
+        ticker_rows_by_article: dict[int, list[ArticleTicker]] = {}
+        for ticker_row in ticker_rows:
+            ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(ticker_row)
+
+        raw_rows = db.scalars(
+            select(RawFeedItem).where(RawFeedItem.article_id.in_(article_ids))
+        ).all()
+
+        def _winner_rank(row: Article) -> tuple[int, int, int, float, int]:
+            cleaned_url = canonicalize_url(row.canonical_url)
+            has_normalized_url = int(cleaned_url == normalized_url)
+            ticker_count = len(ticker_rows_by_article.get(row.id, []))
+            summary_len = len(row.summary or "")
+            published = row.published_at or row.created_at
+            published_rank = _to_utc(published).timestamp()
+            return has_normalized_url, ticker_count, summary_len, published_rank, row.id
+
+        winner = max(articles, key=_winner_rank)
+        duplicates = [row for row in articles if row.id != winner.id]
+        if not duplicates:
+            continue
+
+        winner_cleaned_url = canonicalize_url(winner.canonical_url)
+        if winner_cleaned_url != normalized_url:
+            winner.canonical_url = normalized_url
+            winner.canonical_url_hash = sha256_str(normalized_url)
+
+        winner_tickers: dict[int, ArticleTicker] = {
+            row.ticker_id: row for row in ticker_rows_by_article.get(winner.id, [])
+        }
+
+        duplicate_ids = {row.id for row in duplicates}
+        for raw_row in raw_rows:
+            if raw_row.article_id not in duplicate_ids:
+                continue
+            raw_row.article_id = winner.id
+            raw_items_relinked += 1
+
+        for duplicate in duplicates:
+            duplicate_summary = duplicate.summary or ""
+            winner_summary = winner.summary or ""
+            if duplicate_summary and (not winner_summary or len(duplicate_summary) > len(winner_summary)):
+                winner.summary = duplicate.summary
+            if duplicate.published_at and (winner.published_at is None or duplicate.published_at > winner.published_at):
+                winner.published_at = duplicate.published_at
+
+            for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
+                existing = winner_tickers.get(ticker_row.ticker_id)
+                if existing is None:
+                    ticker_row.article_id = winner.id
+                    winner_tickers[ticker_row.ticker_id] = ticker_row
+                    ticker_rows_relinked += 1
+                    continue
+
+                if ticker_row.confidence > existing.confidence:
+                    existing.confidence = ticker_row.confidence
+                    existing.match_type = ticker_row.match_type
+                    ticker_rows_updated += 1
+                db.delete(ticker_row)
+                ticker_rows_deleted += 1
+
+            db.flush()
+            db.delete(duplicate)
+            merged_articles += 1
+
+    db.commit()
+    return {
+        "scanned_articles": scanned_articles,
+        "duplicate_groups": duplicate_groups,
+        "merged_articles": merged_articles,
+        "raw_items_relinked": raw_items_relinked,
+        "ticker_rows_relinked": ticker_rows_relinked,
+        "ticker_rows_updated": ticker_rows_updated,
+        "ticker_rows_deleted": ticker_rows_deleted,
     }
 
 

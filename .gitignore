@@ -25,6 +25,13 @@ compose.yaml
 .DS_Store
 Thumbs.db
 
+# Build artifacts
+_tmpbuild/
+
+# Local dev scripts
+dev-*.ps1
+dev-*.sh
+
 # Research scratch files
 .tmp_*.js
 .tmp_*.html

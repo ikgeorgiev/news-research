@@ -18,6 +18,7 @@ $tickersCsv = Join-Path $repoRoot "data\\cef_tickers.csv"
 $env:DATABASE_URL = "postgresql+psycopg://cef:cef@${DbHost}:$DbPort/cef_news"
 $env:TICKERS_CSV_PATH = $tickersCsv
 $env:CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3005,http://127.0.0.1:3005"
+$env:ADMIN_API_KEY = "12345"
 $env:SCHEDULER_ENABLED = "true"
 if ($DisableScheduler) {
     $env:SCHEDULER_ENABLED = "false"

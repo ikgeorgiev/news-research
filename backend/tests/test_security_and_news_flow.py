@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
 from app.main import count_news, health, list_news, list_news_ids, require_admin_api_key, settings
-from app.models import Article, ArticleTicker, Ticker
+from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import sha256_str
 
@@ -29,10 +29,12 @@ def _seed_article(
     slug: str,
     published_at: datetime,
     created_at: datetime | None = None,
+    canonical_url: str | None = None,
 ) -> Article:
+    url = canonical_url or f"https://example.com/{slug}"
     article = Article(
-        canonical_url=f"https://example.com/{slug}",
-        canonical_url_hash=sha256_str(f"https://example.com/{slug}"),
+        canonical_url=url,
+        canonical_url_hash=sha256_str(url),
         title=f"Title {slug}",
         summary=f"Summary {slug}",
         published_at=published_at,
@@ -108,6 +110,94 @@ def test_count_news_treats_empty_ticker_query_like_default_mapped_only():
     )
     assert response.total == 1
     assert unmapped_article.id != mapped_article.id
+    db.close()
+
+
+def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
+    db = _make_db_session()
+    businesswire = Source(
+        code="businesswire",
+        name="Business Wire",
+        base_url="https://feed.businesswire.com",
+        enabled=True,
+    )
+    yahoo = Source(
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+        enabled=True,
+    )
+    db.add_all([businesswire, yahoo])
+    db.commit()
+    db.refresh(businesswire)
+    db.refresh(yahoo)
+
+    canonical_url = "https://www.businesswire.com/news/home/20260301000001/en"
+    yahoo_variant_url = canonical_url + "?feedref=abc123"
+    article = _seed_article(
+        db,
+        slug="bw-provider",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        canonical_url=canonical_url,
+    )
+
+    db.add(
+        RawFeedItem(
+            source_id=businesswire.id,
+            article_id=article.id,
+            feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+            raw_guid="bw-1",
+            raw_link=canonical_url,
+            raw_pub_date=datetime(2025, 1, 3, tzinfo=timezone.utc),
+            raw_payload_json={},
+        )
+    )
+    db.commit()
+
+    # Add a newer mirrored Yahoo raw row that should NOT override canonical provider attribution.
+    db.add(
+        RawFeedItem(
+            source_id=yahoo.id,
+            article_id=article.id,
+            feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+            raw_guid="y-1",
+            raw_link=yahoo_variant_url,
+            raw_pub_date=datetime(2025, 1, 3, tzinfo=timezone.utc),
+            raw_payload_json={},
+        )
+    )
+    db.commit()
+
+    bw_response = list_news(
+        ticker=None,
+        source=None,
+        provider="Business Wire",
+        q=None,
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+    assert [item.id for item in bw_response.items] == [article.id]
+    assert bw_response.items[0].provider == "Business Wire"
+
+    yahoo_response = list_news(
+        ticker=None,
+        source=None,
+        provider="Yahoo Finance",
+        q=None,
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+    assert yahoo_response.items == []
     db.close()
 
 

@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
-from app.main import admin_reload_tickers, admin_remap_businesswire
+from app.main import admin_dedupe_businesswire_url_variants, admin_reload_tickers, admin_remap_businesswire
 
 
 def _make_db_session() -> Session:
@@ -118,5 +118,34 @@ def test_admin_remap_businesswire_response_contract(monkeypatch):
     assert response.only_unmapped is False
     assert calls["limit"] == 777
     assert calls["only_unmapped"] is False
+
+    db.close()
+
+
+def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch):
+    db = _make_db_session()
+
+    def fake_dedupe(_db: Session):  # noqa: ANN001
+        return {
+            "scanned_articles": 42,
+            "duplicate_groups": 6,
+            "merged_articles": 7,
+            "raw_items_relinked": 11,
+            "ticker_rows_relinked": 3,
+            "ticker_rows_updated": 1,
+            "ticker_rows_deleted": 2,
+        }
+
+    monkeypatch.setattr("app.main.dedupe_businesswire_url_variants", fake_dedupe)
+
+    response = admin_dedupe_businesswire_url_variants(db=db)
+
+    assert response.scanned_articles == 42
+    assert response.duplicate_groups == 6
+    assert response.merged_articles == 7
+    assert response.raw_items_relinked == 11
+    assert response.ticker_rows_relinked == 3
+    assert response.ticker_rows_updated == 1
+    assert response.ticker_rows_deleted == 2
 
     db.close()
