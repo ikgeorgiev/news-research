@@ -1,367 +1,367 @@
 ticker,fund_name,sponsor,active
-ACP,abrdn Income Credit Strategies Fund,abrdn,TRUE
-ADX,,,TRUE
-AFB,,,TRUE
-AGD,,,TRUE
-AIO,Virtus Artificial Intelligence & Technology Opportunities Fund,Virtus,TRUE
-AOD,,,TRUE
-ARDC,,,TRUE
-ASA,,,TRUE
-ASG,,,TRUE
-ASGI,,,TRUE
-AVK,,,TRUE
-AWF,AllianceBernstein Global High Income Fund,AllianceBernstein,TRUE
-BBN,,,TRUE
-BCAT,,,TRUE
-BCX,,,TRUE
-BDJ,,,TRUE
-BGB,,,TRUE
-BGH,,,TRUE
-BGR,,,TRUE
-BGT,,,TRUE
-BGX,,,TRUE
-BGY,,,TRUE
-BHK,,,TRUE
-BLW,,,TRUE
-BME,BlackRock Health Sciences Trust,BlackRock,TRUE
+ACP,abrdn Income Credit Strategies Fund,abrdn Investments Limited,TRUE
+ADX,Adams Diversified Equity Fund,Adams Diversified Equity Fund Inc,TRUE
+AFB,AllianceBernstein National Mun Inc,AllianceBernstein L.P.,TRUE
+AGD,abrdn Global Dynamic Dividend,abrdn Investments Limited,TRUE
+AIO,Virtus AI & Tech Opp Fund,"Virtus Investment Advisers, LLC",TRUE
+AOD,abrdn Total Dynamic Dividend,abrdn Investments Limited,TRUE
+ARDC,Ares Dynamic Credit Allocation Fund,Ares Capital Management II LLC,TRUE
+ASA,ASA Gold and Precious Metals Limited,ASA,TRUE
+ASG,Liberty All-Star Growth,ALPS Advisors Inc,TRUE
+ASGI,abrdn Global Infrastructure Income Fund,abrdn Inc.,TRUE
+AVK,Advent Convertible & Income Fund,"Advent Capital Management, LLC",TRUE
+AWF,AllianceBernstein Global High Income,AllianceBernstein L.P.,TRUE
+BBN,BlackRock Taxable Municipal Bond Trust,"BlackRock Advisors, LLC",TRUE
+BCAT,BlackRock Capital Allocation Term Trust,BlackRock,TRUE
+BCX,BlackRock Resources&Commodities Strategy,BlackRock,TRUE
+BDJ,BlackRock Enhanced Dividend Achievers,BlackRock,TRUE
+BGB,Blackstone Strategic Credit 2027 term,Blackstone Liquid Credit Strategies LLC,TRUE
+BGH,Barings Global Short Duration High Yield,Barings LLC,TRUE
+BGR,BlackRock Energy and Resources,BlackRock,TRUE
+BGT,Blackrock Floating Rate Income,BlackRock,TRUE
+BGX,Blackstone Long-Short Credit Income,Blackstone Liquid Credit Strategies LLC,TRUE
+BGY,BlackRock Enhanced Intl Div Trust,BlackRock,TRUE
+BHK,BlackRock Core Bond,BlackRock,TRUE
+BLW,BlackRock Limited Duration Income,BlackRock,TRUE
+BME,BlackRock Health Sciences,BlackRock,TRUE
 BMEZ,BlackRock Health Sciences Term Trust,BlackRock,TRUE
-BOE,,,TRUE
-BSL,,,TRUE
+BOE,BlackRock Enhanced Glbl Div Trust,BlackRock,TRUE
+BSL,Blackstone Senior Floating Rt 2027 term,Blackstone Liquid Credit Strategies LLC,TRUE
 BST,BlackRock Science and Technology Trust,BlackRock,TRUE
-BSTZ,BlackRock Science and Technology Term Trust,BlackRock,TRUE
-BTO,,,TRUE
-BTT,,,TRUE
-BTZ,,,TRUE
-BUI,,,TRUE
-BWG,,,TRUE
-BXMX,,,TRUE
-CAF,,,TRUE
-CCD,,,TRUE
-CEE,,,TRUE
-CEF,,,TRUE
-CET,,,TRUE
-CGO,,,TRUE
-CHI,,,TRUE
-CHW,,,TRUE
-CHY,,,TRUE
-CIF,,,TRUE
-CII,,,TRUE
-CIK,,,TRUE
-CLM,Cornerstone Strategic Value Fund,Cornerstone,TRUE
-CMU,,,TRUE
-CRF,Cornerstone Total Return Fund,Cornerstone,TRUE
-CSQ,,,TRUE
-CXE,,,TRUE
-DBL,,,TRUE
-DFP,,,TRUE
-DHF,,,TRUE
-DHY,,,TRUE
-DIAX,,,TRUE
-DLY,,,TRUE
-DMB,,,TRUE
-DMO,,,TRUE
-DNP,,,TRUE
-DPG,,,TRUE
-DSL,,,TRUE
-DSM,,,TRUE
-DSU,,,TRUE
-EAD,,,TRUE
-EARN,,,TRUE
-ECC,Eagle Point Credit Company,Eagle Point,TRUE
-ECF,,,TRUE
-EDD,,,TRUE
-EDF,,,TRUE
-EEA,,,TRUE
-EFR,,,TRUE
-EFT,,,TRUE
-EIC,,,TRUE
-EIM,,,TRUE
-EMD,,,TRUE
-EMF,,,TRUE
-EOD,Allspring Global Dividend Opportunity Fund,Allspring,TRUE
-EOI,,,TRUE
-EOS,Eaton Vance Enhanced Equity Income Fund II,Morgan Stanley,TRUE
-ERC,,,TRUE
-ERH,,,TRUE
-ETB,,,TRUE
-ETG,,,TRUE
-ETJ,,,TRUE
-ETO,,,TRUE
-ETV,,,TRUE
-ETW,,,TRUE
-ETY,,,TRUE
-EVF,,,TRUE
-EVG,,,TRUE
-EVN,,,TRUE
-EVT,,,TRUE
-EVV,,,TRUE
-EXG,,,TRUE
-FCO,,,TRUE
-FCT,,,TRUE
-FFA,,,TRUE
-FFC,,,TRUE
-FINS,,,TRUE
-FLC,Flaherty & Crumrine Total Return Fund,Flaherty & Crumrine,TRUE
-FMN,,,TRUE
-FOF,,,TRUE
-FPF,,,TRUE
-FRA,,,TRUE
-FT,,,TRUE
-FTF,,,TRUE
-FUND,,,TRUE
-GAB,,,TRUE
-GAM,,,TRUE
-GBAB,,,TRUE
-GCV,,,TRUE
-GDO,,,TRUE
-GDV,,,TRUE
-GF,,,TRUE
-GGN,,,TRUE
-GHY,,,TRUE
-GLO,,,TRUE
-GLQ,,,TRUE
-GLV,,,TRUE
-GNT,,,TRUE
-GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,TRUE
-GRX,,,TRUE
-GUT,,,TRUE
-HEQ,,,TRUE
-HFRO,Highland Opportunities and Income Fund,NexPoint,TRUE
-HGLB,,,TRUE
-HIO,,,TRUE
-HIX,,,TRUE
-HPF,,,TRUE
-HPI,John Hancock Preferred Income Fund,John Hancock,TRUE
-HPS,John Hancock Preferred Income Fund II,John Hancock,TRUE
-HQH,,,TRUE
-HQL,,,TRUE
-HTD,,,TRUE
-HYI,,,TRUE
-HYT,,,TRUE
-IAE,,,TRUE
-IDE,,,TRUE
-IFN,,,TRUE
-IGA,,,TRUE
-IGD,,,TRUE
-IGR,,,TRUE
-IHD,,,TRUE
-IIF,,,TRUE
-IIM,,,TRUE
-IQI,,,TRUE
-ISD,,,TRUE
-JCE,,,TRUE
-JFR,,,TRUE
-JGH,,,TRUE
-JHI,,,TRUE
-JLS,,,TRUE
-JOF,,,TRUE
-JPC,,,TRUE
-JQC,,,TRUE
-JRI,Nuveen Real Asset Income and Growth Fund,Nuveen,TRUE
-JRS,,,TRUE
-KIO,,,TRUE
-KTF,,,TRUE
-KYN,,,TRUE
-LDP,,,TRUE
-LEO,,,TRUE
-LGI,,,TRUE
-MCI,,,TRUE
-MCN,,,TRUE
-MCR,,,TRUE
-MEGI,,,TRUE
-MFM,,,TRUE
-MGF,,,TRUE
-MHD,,,TRUE
-MIN,,,TRUE
-MIY,,,TRUE
-MMD,,,TRUE
-MMT,,,TRUE
-MMU,,,TRUE
-MPA,,,TRUE
-MQY,,,TRUE
-MSD,,,TRUE
-MUA,,,TRUE
-MUC,,,TRUE
-MUJ,,,TRUE
-MXF,,,TRUE
-MYI,,,TRUE
-MYN,,,TRUE
-NAC,,,TRUE
-NAD,,,TRUE
-NAN,,,TRUE
-NBB,,,TRUE
-NBH,,,TRUE
-NBXG,,,TRUE
-NCA,,,TRUE
-NDMO,,,TRUE
-NEA,,,TRUE
-NFJ,,,TRUE
-NHS,,,TRUE
-NIE,Virtus AllianzGI Equity & Convertible Income Fund,Virtus,TRUE
-NKX,,,TRUE
-NMCO,,,TRUE
-NML,,,TRUE
-NMZ,,,TRUE
-NPV,,,TRUE
-NQP,,,TRUE
-NRK,,,TRUE
-NRO,,,TRUE
-NUV,,,TRUE
-NUW,,,TRUE
-NVG,,,TRUE
-NXJ,,,TRUE
-NXP,Nuveen Select Tax-Free Income Portfolio,Nuveen,TRUE
-NZF,,,TRUE
-OCCI,,,TRUE
-OIA,,,TRUE
-OPP,,,TRUE
-PAXS,,,TRUE
-PCF,,,TRUE
-PCM,,,TRUE
-PCN,,,TRUE
-PCQ,,,TRUE
-PDI,PIMCO Dynamic Income Fund,PIMCO,TRUE
-PDO,,,TRUE
-PDT,,,TRUE
-PEO,,,TRUE
-PFD,,,TRUE
-PFL,,,TRUE
-PFN,,,TRUE
-PFO,,,TRUE
-PGP,,,TRUE
-PGZ,,,TRUE
-PHK,,,TRUE
-PHYS,,,TRUE
-PIM,,,TRUE
-PML,,,TRUE
-PMM,,,TRUE
-PMO,,,TRUE
-PNI,,,TRUE
-PPT,,,TRUE
-PSF,,,TRUE
-PSLV,,,TRUE
-PTA,,,TRUE
-PTY,PIMCO Corporate & Income Opportunity Fund,PIMCO,TRUE
-QQQX,,,TRUE
-RA,,,TRUE
-RCS,,,TRUE
-RFI,,,TRUE
-RFM,,,TRUE
-RFMZ,,,TRUE
-RGT,,,TRUE
-RIV,,,TRUE
-RLTY,,,TRUE
-RMT,,,TRUE
-RNP,Cohen & Steers REIT and Preferred Income Fund,Cohen & Steers,TRUE
-RQI,Cohen & Steers Quality Income Realty Fund,Cohen & Steers,TRUE
-RVT,,,TRUE
-SBI,,,TRUE
-SDHY,,,TRUE
-SPE,,,TRUE
-SPPP,,,TRUE
-SPXX,,,TRUE
-STK,,,TRUE
-SWZ,,,TRUE
-TDF,,,TRUE
-TEI,,,TRUE
-THQ,,,TRUE
-THW,,,TRUE
-TSI,,,TRUE
-TWN,,,TRUE
-TY,,,TRUE
-TYG,,,TRUE
-USA,Liberty All-Star Equity Fund,Liberty,TRUE
-UTG,Reaves Utility Income Fund,Reaves,TRUE
-VBF,,,TRUE
-VCV,,,TRUE
-VFL,,,TRUE
-VGI,,,TRUE
-VGM,,,TRUE
-VKI,,,TRUE
-VKQ,,,TRUE
-VMO,,,TRUE
-VPV,,,TRUE
-VVR,,,TRUE
-WDI,,,TRUE
-WEA,,,TRUE
-WIA,,,TRUE
-WIW,,,TRUE
-XFLT,,,TRUE
-ZTR,,,TRUE
-ACV,,,TRUE
-AEF,,,TRUE
-AWP,,,TRUE
-BANX,,,TRUE
-BCV,,,TRUE
-BHV,,,TRUE
-BIT,,,TRUE
-BKT,,,TRUE
-BMN,,,TRUE
-BPRE,,,TRUE
-BRW,,,TRUE
-BTX,,,TRUE
-CCIF,,,TRUE
-CEV,,,TRUE
-CFND,,,TRUE
-CPZ,,,TRUE
-CXH,,,TRUE
-DMA,,,TRUE
-DTF,,,TRUE
-DXYZ,,,TRUE
-ECAT,,,TRUE
-EHI,,,TRUE
-EMO,,,TRUE
-EOT,,,TRUE
-ETX,,,TRUE
-FAX,,,TRUE
-FMY,,,TRUE
-FSCO,,,TRUE
-FSSL,,,TRUE
-FTHY,,,TRUE
-GDL,,,TRUE
-GGT,,,TRUE
-GGZ,,,TRUE
-GLU,,,TRUE
-GRF,,,TRUE
-GUG,,,TRUE
-HERZ,,,TRUE
-IAF,,,TRUE
-IGI,,,TRUE
-JHS,,,TRUE
-JMM,,,TRUE
-KF,,,TRUE
-MHF,,,TRUE
-MPV,,,TRUE
-MXE,,,TRUE
-NAZ,,,TRUE
-NCV,,,TRUE
-NCZ,,,TRUE
-NIM,,,TRUE
-NMAI,,,TRUE
-NMI,,,TRUE
-NMS,,,TRUE
-NMT,,,TRUE
-NNY,,,TRUE
-NOM,,,TRUE
-NPCT,,,TRUE
-NPFD,,,TRUE
-NXG,,,TRUE
-OXLC,Oxford Lane Capital Corp,Oxford Lane,TRUE
-PAI,,,TRUE
-PDCC,,,TRUE
-PDX,,,TRUE
-RCG,,,TRUE
-RMI,,,TRUE
-RMM,,,TRUE
-RMMZ,,,TRUE
-RSF,,,TRUE
-SABA,,,TRUE
-SCD,,,TRUE
-SOR,,,TRUE
-SPMC,,,TRUE
-SRV,,,TRUE
-STEW,,,TRUE
-TBLD,,,TRUE
-UTF,Cohen & Steers Infrastructure Fund,Cohen & Steers,TRUE
-VLT,,,TRUE
-VTN,,,TRUE
+BSTZ,BlackRock Science and Technology Term,BlackRock,TRUE
+BTO,JHancock Financial Opportunities,John Hancock Investment Management LLC,TRUE
+BTT,BlackRock Municipal 2030 Target Term,BlackRock,TRUE
+BTZ,BlackRock Credit Allocation Income Trust,BlackRock,TRUE
+BUI,"BlackRock Util, Infra & Power Opp",BlackRock,TRUE
+BWG,BrandywineGLOBAL – Global Inc Opp Fund,"Franklin Templeton Fund Adviser, LLC",TRUE
+BXMX,Nuveen S&P 500 Buy-Write Income,"Nuveen Fund Advisors, LLC.",TRUE
+CAF,Morgan Stanley China A Share,Morgan Stanley,TRUE
+CCD,Calamos Dynamic Convertible and Income,Calamos Advisors LLC,TRUE
+CEE,The Central and Eastern Europe Fund,DWS,TRUE
+CEF,Sprott Physical Gold and Silver Trust,Sprott Asset Management LP,TRUE
+CET,Central Securities Corporation,Central Securities Corp,TRUE
+CGO,Calamos Global Total Return,Calamos Advisors LLC,TRUE
+CHI,Calamos Convertible Opp Inc,Calamos Advisors LLC,TRUE
+CHW,Calamos Global Dynamic Income Fund,Calamos Advisors LLC,TRUE
+CHY,Calamos Convertible & High Income Fund,Calamos Advisors LLC,TRUE
+CIF,MFS Intermediate High Income,MFS,TRUE
+CII,BlackRock Enhanced Large Cap Core Fund,BlackRock,TRUE
+CIK,Credit Suisse Asset Mgmt Income,UBS Asset Management (Americas) LLC,TRUE
+CLM,Cornerstone Strategic Investment Fund,"Cornerstone Advisors, LLC",TRUE
+CMU,MFS High Yield Municipal,MFS,TRUE
+CRF,Cornerstone Total Return Fund,"Cornerstone Advisors, LLC",TRUE
+CSQ,Calamos Strategic Total Return,Calamos Advisors LLC,TRUE
+CXE,MFS® High Income Municipal,MFS,TRUE
+DBL,Doubleline Opportunistic Cred,DoubleLine,TRUE
+DFP,Flah & Crum Dynamic Pref & Income Fund,Flaherty & Crumrine Inc,TRUE
+DHF,BNY Mellon High Yield Strategies Fund,BNY Mellon,TRUE
+DHY,Credit Suisse High Yield Credit,UBS Asset Management (Americas) LLC,TRUE
+DIAX,Nuveen Dow 30 Dynamic Overwrite,"Nuveen Fund Advisors, LLC.",TRUE
+DLY,DoubleLine Yield Opportunities Fund,DoubleLine Capital LP,TRUE
+DMB,BNY Mellon Muni Bond Infrastructure Fund,BNY Mellon,TRUE
+DMO,Western Asset Mortgage Opp Fund Inc.,"Franklin Templeton Fund Adviser, LLC",TRUE
+DNP,DNP Select Income,Duff & Phelps Inv Mgmt Co (IL),TRUE
+DPG,Duff & Phelps Utility and Infra Fund Inc,Duff & Phelps Inv Mgmt Co (IL),TRUE
+DSL,DoubleLine Income Solutions Fund,DoubleLine Capital LP,TRUE
+DSM,BNY Mellon Strategic Muni Bond,BNY Mellon,TRUE
+DSU,BlackRock Debt Strategies,BlackRock,TRUE
+EAD,Allspring Income Opps,Allspring Global Investments,TRUE
+EARN,Ellington Credit Company,Ellington Credit Co Management LLC,TRUE
+ECC,Eagle Point Credit Company LLC,Eagle Point Credit Management,TRUE
+ECF,Ellsworth Growth and Income Fund,Gabelli Funds LLC,TRUE
+EDD,Morgan Stanley Emrgng Mkts Domestic Debt,"Morgan Stanley Investment Management, Inc.",TRUE
+EDF,Virtus Stone Harbor Emerging Markets Inc,Virtus Investment Advisors (VIA),TRUE
+EEA,European Equity Fund,DWS,TRUE
+EFR,Eaton Vance Senior Floating Rate,Eaton Vance Management,TRUE
+EFT,Eaton Vance Floating-Rate Income,Eaton Vance Management,TRUE
+EIC,Eagle Point Income Co Inc,Eagle Point Income Management LLC,TRUE
+EIM,Eaton Vance Municipal Bond,Eaton Vance Management,TRUE
+EMD,Western Asset Emerging Markets Debt,"Franklin Templeton Fund Adviser, LLC",TRUE
+EMF,Templeton Emerging Markets,Franklin Templeton Investments,TRUE
+EOD,Allspring Global Dividend Opp Fd,Allspring Global Investments,TRUE
+EOI,Eaton Vance Enhanced Equity Income,Eaton Vance Management,TRUE
+EOS,Eaton Vance Enhanced Equity Income II,Eaton Vance,TRUE
+ERC,Allspring Multi-Sec Inc,Allspring Global Investments,TRUE
+ERH,Allspring Util & High In,Allspring Global Investments,TRUE
+ETB,Eaton Vance Tax-Managed Buy-Write Income,Eaton Vance Management,TRUE
+ETG,Eaton Vance Tax Adv Global Dividend Inc,Eaton Vance Management,TRUE
+ETJ,Eaton Vance Risk-Mgd Divers Eq Inc,Eaton Vance Management,TRUE
+ETO,Eaton Vance Tax-Advantaged Glbl Div Opp,Eaton Vance Management,TRUE
+ETV,Eaton Vance Tax-Managed Buy-Write Opp,Eaton Vance Management,TRUE
+ETW,Eaton Vance Tx-Mgd Glbl Buy-Write Opp,Eaton Vance,TRUE
+ETY,Eaton Vance Tax-Managed Divrs Equity Inc,Eaton Vance Management,TRUE
+EVF,Eaton Vance Senior Income,Eaton Vance Management,TRUE
+EVG,Eaton Vance Short Duration Divers Inc,Eaton Vance Management,TRUE
+EVN,Eaton Vance Municipal Income,Eaton Vance,TRUE
+EVT,Eaton Vance Tax Advantaged Dividend Inc,Eaton Vance Management,TRUE
+EVV,Eaton Vance Limited Duration Income,Eaton Vance,TRUE
+EXG,Eaton Vance Tax-Mgd Glb Divrs Equity Inc,Eaton Vance Management,TRUE
+FCO,"abrdn Global Income Fund, Inc.",abrdn Inc.,TRUE
+FCT,First Trust Senior FR Inc II,First Trust Advisors L.P.,TRUE
+FFA,First Trust Enhanced Equity Income,First Trust Advisors L.P.,TRUE
+FFC,Flah&Crum Preferred Securities,Flaherty & Crumrine Inc,TRUE
+FINS,Angel Oak Financial Strats Income Term,"Angel Oak Capital Advisors, LLC",TRUE
+FLC,Flah&Crum Total Return Fund,Flaherty & Crumrine Inc,TRUE
+FMN,Federated Premier Municipal Income,Federated Advisers,TRUE
+FOF,Cohen & Steers Closed-End Opportunity,"Cohen & Steers Capital Management, Inc.",TRUE
+FPF,First Trust Inter Dur Pref & Income Fund,First Trust Advisors L.P.,TRUE
+FRA,BlackRock Floating Rate Inc Strategies,"BlackRock Advisors, LLC",TRUE
+FT,Franklin Universal Trust,"Franklin Advisers, Inc.",TRUE
+FTF,Franklin Limited Duration Income Trust,"Franklin Advisers, Inc.",TRUE
+FUND,Sprott Focus Trust,Sprott Asset Management USA Inc.,TRUE
+GAB,Gabelli Equity,Gabelli,TRUE
+GAM,General American Investors,General American Investors Co Inc,TRUE
+GBAB,Guggenheim Tax Muni & Inv Grade Debt Tr,Guggenheim Funds Investment Advisors LLC,TRUE
+GCV,Gabelli Conv Inc Secs,Gabelli,TRUE
+GDO,Western Asset Global Corp Opp,"Franklin Templeton Fund Adviser, LLC",TRUE
+GDV,Gabelli Dividend & Income,Gabelli Funds LLC,TRUE
+GF,New Germany,DWS,TRUE
+GGN,GAMCO Global Gold Natural Resources&Inc,Gabelli,TRUE
+GHY,"PGIM Global High Yield Fund, Inc.",PGIM,TRUE
+GLO,Clough Global Opportunities,Clough Capital Partners L.P.,TRUE
+GLQ,Clough Global Equity,Clough Capital Partners L.P.,TRUE
+GLV,Clough Global Dividend and Income,Clough Capital Partners L.P.,TRUE
+GNT,"GAMCO Natural Resources, Gold & Inc Tr",Gabelli Funds LLC,TRUE
+GOF,Guggenheim Strategic Opp Fund,Guggenheim Funds Investment Advisors LLC,TRUE
+GRX,Gabelli Healthcare & Wellness Trust,Gabelli,TRUE
+GUT,Gabelli Utility Trust,Gabelli,TRUE
+HEQ,John Hancock Diversified Income Fund,John Hancock Investment Management LLC,TRUE
+HFRO,Highland Opportunities and Income Ord,"NexPoint Asset Management, L.P.",TRUE
+HGLB,Highland Global Allocation Fund,"NexPoint Asset Management, L.P.",TRUE
+HIO,Western Asset High Income Opportunity,"Franklin Templeton Fund Adviser, LLC",TRUE
+HIX,Western Asset High Income II,Franklin Templeton Investments,TRUE
+HPF,JHancock Preferred Income II,John Hancock Investment Management LLC,TRUE
+HPI,JHancock Preferred Income,John Hancock Investment Management LLC,TRUE
+HPS,JHancock Preferred Income III,John Hancock Investment Management LLC,TRUE
+HQH,abrdn Healthcare Investors,abrdn Inc.,TRUE
+HQL,abrdn Life Sciences Investors,abrdn Inc.,TRUE
+HTD,JHancock Tax-Advantaged Dividend Inc,John Hancock Investment Management LLC,TRUE
+HYI,Western Asset High Yield Opp Fund,"Franklin Templeton Fund Adviser, LLC",TRUE
+HYT,BlackRock Corporate High Yield Fund,BlackRock,TRUE
+IAE,Voya Asia Pacific High Div Eq Inc Fd,"Voya Investments, LLC",TRUE
+IDE,Voya Infrastructure Industrials&Matls Fd,"Voya Investments, LLC",TRUE
+IFN,The India Fund Inc,abrdn Asia Limited,TRUE
+IGA,Voya Global Advantage and Premium Opp Fd,"Voya Investments, LLC",TRUE
+IGD,Voya Global Equity Dividend&Prm Opp Fd,"Voya Investments, LLC",TRUE
+IGR,CBRE Global Real Estate Income,CBRE Investment Management Listed Real Assets LLC,TRUE
+IHD,Voya Emerging Markets High Div Eq Fd,"Voya Investments, LLC",TRUE
+IIF,Morgan Stanley India Investment,"Morgan Stanley Investment Management, Inc.",TRUE
+IIM,Invesco Value Muni Income,"Invesco Advisers, Inc",TRUE
+IQI,Invesco Quality Municipal Income Trust,"Invesco Advisers, Inc",TRUE
+ISD,"PGIM High Yield Bond Fund, Inc.",PGIM,TRUE
+JCE,Nuveen Core Equity Alpha,"Nuveen Fund Advisors, LLC.",TRUE
+JFR,Nuveen Floating Rate Income,"Nuveen Fund Advisors, LLC.",TRUE
+JGH,Nuveen Global High Income Fund,"Nuveen Fund Advisors, LLC.",TRUE
+JHI,JHancock Investors,John Hancock,TRUE
+JLS,Nuveen Mortgage and Income Fund,"Nuveen Fund Advisors, LLC.",TRUE
+JOF,Japan Smaller Cap Fund,Nomura Asset Management Co Ltd,TRUE
+JPC,Nuveen Pref & Income Opps Fund,"Nuveen Fund Advisors, LLC.",TRUE
+JQC,Nuveen Credit Strategies Income Fund,"Nuveen Fund Advisors, LLC.",TRUE
+JRI,Nuveen Real Asset Inc and Grwt,"Nuveen Fund Advisors, LLC.",TRUE
+JRS,Nuveen Real Estate Income,"Nuveen Fund Advisors, LLC.",TRUE
+KIO,KKR Income Opportunities Fund,Kohlberg Kravis Roberts & Co.,TRUE
+KTF,DWS Municipal Income,"DWS Investment Management Americas, Inc.",TRUE
+KYN,Kayne Anderson Energy Infrastructure,"KA Fund Advisors, LLC",TRUE
+LDP,Cohen & Steers Ltd Duration Pref & Inc,"Cohen & Steers Capital Management, Inc.",TRUE
+LEO,BNY Mellon Strategic Municipals,BNY Mellon,TRUE
+LGI,Lazard Global Total Return and Income,Lazard Asset Management LLC,TRUE
+MCI,Barings Corporate Investors,Barings LLC,TRUE
+MCN,XAI Madison Equity Premium Income Fund,XA Investments LLC,TRUE
+MCR,MFS Charter Income,MFS,TRUE
+MEGI,NYLI CBRE Glb Infra Megatrends Term Fund,New York Life Investment Management LLC,TRUE
+MFM,MFS Municipal Income,MFS,TRUE
+MGF,MFS Government Markets Inc,MFS,TRUE
+MHD,BlackRock Muniholdings,BlackRock,TRUE
+MIN,MFS Intermediate Income,MFS,TRUE
+MIY,BlackRock MuniYield MI Quality,BlackRock,TRUE
+MMD,NYLI MacKay DefinedTerm Muni Opps Fund,New York Life Investment Management LLC,TRUE
+MMT,MFS Multimarket Income,MFS,TRUE
+MMU,Western Asset Managed Municipals,Franklin Templeton Investments,TRUE
+MPA,BlackRock MuniYield PA Quality,BlackRock,TRUE
+MQY,BlackRock Muniyield Quality,"BlackRock Advisors, LLC",TRUE
+MSD,Morgan Stanley Emerging Markets Debt,"Morgan Stanley Investment Management, Inc.",TRUE
+MUA,BlackRock Muniassets,BlackRock,TRUE
+MUC,BlackRock MuniHoldings CA Qty,BlackRock,TRUE
+MUJ,BlackRock MuniHoldings NJ Qty,BlackRock,TRUE
+MXF,Mexico Fund,"Impulsora Del Fondo Mexico, SC",TRUE
+MYI,BlackRock MuniYield Qty III,BlackRock,TRUE
+MYN,BlackRock MuniYield NY Quality,"BlackRock Advisors, LLC",TRUE
+NAC,Nuveen CA Quality Muni Income,"Nuveen Fund Advisors, LLC.",TRUE
+NAD,Nuveen Quality Muni Income Fund,"Nuveen Fund Advisors, LLC.",TRUE
+NAN,Nuveen NY Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NBB,Nuveen Taxable Municipal Income,"Nuveen Fund Advisors, LLC.",TRUE
+NBH,Neuberger Municipal Fund,Neuberger Berman,TRUE
+NBXG,Neuberger Brmn Nxt Gnrtn Cnnctvty,Neuberger Berman,TRUE
+NCA,Nuveen CA Municipal Value,"Nuveen Fund Advisors, LLC.",TRUE
+NDMO,Nuveen Dynamic Municipal Opportunities,"Nuveen Fund Advisors, LLC.",TRUE
+NEA,Nuveen AMT-Free Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NFJ,AllianzGI Div Interest & Prem Common,"Virtus Investment Advisers, LLC",TRUE
+NHS,Neuberger High Yield Strategies,Neuberger Berman,TRUE
+NIE,Virtus Equity & Convertible Inc Fund,"Virtus Investment Advisers, LLC",TRUE
+NKX,Nuveen CA AMT - Free Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NMCO,Nuveen Municipal Credit Opps Fund,"Nuveen Fund Advisors, LLC.",TRUE
+NML,NB Energy Infra and Income Fund Inc,Neuberger Berman,TRUE
+NMZ,Nuveen Municipal High Income Opp Fd,"Nuveen Fund Advisors, LLC.",TRUE
+NPV,Nuveen VA Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NQP,Nuveen PA Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NRK,Nuveen NY AMT - Free Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NRO,Neuberger Real Estate Securities Income,Neuberger Berman,TRUE
+NUV,Nuveen Municipal Value,"Nuveen Fund Advisors, LLC.",TRUE
+NUW,Nuveen AMT-Free Municipal Value Fund,"Nuveen Fund Advisors, LLC.",TRUE
+NVG,Nuveen AMT-Free Muni Credit Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NXJ,Nuveen NJ Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NXP,Nuveen Select Tax Free Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NZF,Nuveen Municipal Credit Income,"Nuveen Fund Advisors, LLC.",TRUE
+OCCI,OFS Credit Company Inc,"OFS Capital Management, LLC",TRUE
+OIA,Invesco Municipal Inc Opp I,"Invesco Advisers, Inc",TRUE
+OPP,RiverNorth/DoubleLine Strategic Opp Fund,"RiverNorth Capital Management, LLC",TRUE
+PAXS,PIMCO Access Income,PIMCO,TRUE
+PCF,High Income Securities,Bulldog Investors LLP,TRUE
+PCM,PCM Fund,"Pacific Investment Management Company, LLC",TRUE
+PCN,PIMCO Corporate & Income Strgy,"Pacific Investment Management Company, LLC",TRUE
+PCQ,PIMCO CA Municipal Income,"Pacific Investment Management Company, LLC",TRUE
+PDI,PIMCO Dynamic Income Fund,"Pacific Investment Management Company, LLC",TRUE
+PDO,PIMCO Dynamic Income Opportunities Fund,"Pacific Investment Management Company, LLC",TRUE
+PDT,JHancock Premium Dividend Fund,John Hancock,TRUE
+PEO,Adams Natural Resources Fund,Adams Natural Resources Fund Inc,TRUE
+PFD,Flaherty & Crumrine Preferred Income,Flaherty & Crumrine,TRUE
+PFL,PIMCO Income Strategy,PIMCO,TRUE
+PFN,PIMCO Income Strategy II,"Pacific Investment Management Company, LLC",TRUE
+PFO,Flaherty & Crumrine Preferred Income Opp,Flaherty & Crumrine Inc,TRUE
+PGP,PIMCO Global StocksPLUS & Income,"Pacific Investment Management Company, LLC",TRUE
+PGZ,Principal Real Estate Income Fund,Principal Funds,TRUE
+PHK,PIMCO High Income,"Pacific Investment Management Company, LLC",TRUE
+PHYS,Sprott Physical Gold Trust Unit,Sprott Asset Management LP,TRUE
+PIM,Putnam Master Interm Income,"Franklin Advisers, Inc.",TRUE
+PML,PIMCO Municipal Income II,PIMCO,TRUE
+PMM,Putnam Managed Muni Income,"Franklin Advisers, Inc.",TRUE
+PMO,Putnam Muni Opportunities,"Franklin Advisers, Inc.",TRUE
+PNI,PIMCO NY Municipal Income II,PIMCO,TRUE
+PPT,Putnam Premier Income,"Franklin Advisers, Inc.",TRUE
+PSF,Cohen & Steers Select Preferred & Inc,Cohen & Steers,TRUE
+PSLV,Sprott Physical Silver Trust Unit,Sprott Asset Management LP,TRUE
+PTA,Cohen & Steers Tax-adv Prd Sec and Inc,"Cohen & Steers Capital Management, Inc.",TRUE
+PTY,PIMCO Corporate & Income Opportunity Fd,PIMCO,TRUE
+QQQX,Nuveen NASDAQ 100 Dynamic Overwrite,"Nuveen Fund Advisors, LLC.",TRUE
+RA,Brookfield Real Assets Income Fund Inc.,Brookfield Public Securities Group LLC,TRUE
+RCS,PIMCO Strategic Income Fund,PIMCO,TRUE
+RFI,Cohen & Steers Total Return,"Cohen & Steers Capital Management, Inc.",TRUE
+RFM,RiverNorth Flexible Municipal Income,"RiverNorth Capital Management, LLC",TRUE
+RFMZ,RiverNorth Flexible Municipal Income II,"RiverNorth Capital Management, LLC",TRUE
+RGT,"Royce Global Trust, Inc.",Royce Investment Partners,TRUE
+RIV,RiverNorth Opportunities Fund,"RiverNorth Capital Management, LLC",TRUE
+RLTY,Cohen & Steers Real Estate Opp & Inc Fd,"Cohen & Steers Capital Management, Inc.",TRUE
+RMT,Royce Micro-Cap Trust,Royce Investment Partners,TRUE
+RNP,Cohen & Steers REIT & Preferred Inc Fd,"Cohen & Steers Capital Management, Inc.",TRUE
+RQI,Cohen & Steers Qual Inc Realty,Cohen & Steers,TRUE
+RVT,Royce Small-Cap Trust,Royce Investment Partners,TRUE
+SBI,Western Asset Intermediate Muni,"Franklin Templeton Fund Adviser, LLC",TRUE
+SDHY,PGIM Short Duration High Yield Opps,PGIM,TRUE
+SPE,Special Opportunities,Bulldog Investors LLP,TRUE
+SPPP,Sprott Physical Platinum & Palladium Tr,Sprott Asset Management LP,TRUE
+SPXX,Nuveen S&P 500 Dynamic Overwrite,"Nuveen Fund Advisors, LLC.",TRUE
+STK,Columbia Seligman Premium Technology Gr,"Columbia Mgmt Investment Advisers, LLC",TRUE
+SWZ,Total Return Securities Fund,Bulldog Investors LLP,TRUE
+TDF,Templeton Dragon,Templeton Asset Management Ltd.,TRUE
+TEI,Templeton Emerg Mkts Income,"Franklin Advisers, Inc.",TRUE
+THQ,abrdn Healthcare Opportunities Fund,abrdn Inc.,TRUE
+THW,abrdn World Healthcare Fund,abrdn Inc.,TRUE
+TSI,TCW Strategic Income,TCW Investment Management Co LLC,TRUE
+TWN,Taiwan Fund,Nomura Asset Management USA Inc,TRUE
+TY,Tri-Continental,"Columbia Mgmt Investment Advisers, LLC",TRUE
+TYG,Tortoise Energy Infrastructure Corp.,"Tortoise Capital Advisors, LLC",TRUE
+USA,Liberty All-Star Equity,ALPS Advisors Inc,TRUE
+UTG,Reaves Utility Income,Reaves Asset Management,TRUE
+VBF,Invesco Bond,"Invesco Advisers, Inc",TRUE
+VCV,Invesco CA Value,"Invesco Advisers, Inc",TRUE
+VFL,abrdn National Municipal Income Fund,abrdn Inc.,TRUE
+VGI,Virtus Global Multi-Sector Income Fund,"Virtus Investment Advisers, LLC",TRUE
+VGM,Invesco Tr Inv Gr Muni,"Invesco Advisers, Inc",TRUE
+VKI,Invesco Adv Muni Inc II,"Invesco Advisers, Inc",TRUE
+VKQ,Invesco Municipal,"Invesco Advisers, Inc",TRUE
+VMO,Invesco Muni Opp,"Invesco Advisers, Inc",TRUE
+VPV,Invesco PA Value,"Invesco Advisers, Inc",TRUE
+VVR,Invesco Senior Income,"Invesco Advisers, Inc",TRUE
+WDI,Western Asset Diversified Inc Fund,"Franklin Templeton Fund Adviser, LLC",TRUE
+WEA,Western Asset Premier Bond,Western Asset Management Company Pte Ltd. – Singapore,TRUE
+WIA,Western Asset Inflation-Linked Income Fd,"Western Asset Management Company, LLC",TRUE
+WIW,Western Asset Infl-Linked Opps & Inc Fd,"Western Asset Management Company, LLC",TRUE
+XFLT,XAI Octagon FR & Alternative Inc Trust,XA Investments LLC,TRUE
+ZTR,Virtus Total Return Fund Inc,"Virtus Investment Advisers, LLC",TRUE
+ACV,Virtus Diversified Inc & Conv Fund,"Virtus Investment Advisers, LLC",TRUE
+AEF,abrdn Emerging Markets ex-China Fund,abrdn Investments Limited,TRUE
+AWP,abrdn Global Premier Properties,abrdn Inc.,TRUE
+BANX,ArrowMark Financial Corp,"ArrowMark Asset Management, LLC",TRUE
+BCV,Bancroft Fund,Gabelli Funds LLC,TRUE
+BHV,BlackRock VA Municipal Bond,BlackRock,TRUE
+BIT,BlackRock Multi-Sector Income Trust,BlackRock,TRUE
+BKT,BlackRock Income,BlackRock,TRUE
+BMN,BlackRock 2037 Municipal Target term,BlackRock,TRUE
+BPRE,Bluerock Private Real Estate Fund,"Bluerock Fund Advisors, LLC",TRUE
+BRW,Saba Capital Income & Opportunities Fund,"Saba Capital Management, LP",TRUE
+BTX,BlackRock Tech and Private Equity Term,BlackRock,TRUE
+CCIF,Carlyle Credit Income Ord,Carlyle Global Credit Inv Mgmt,TRUE
+CEV,Eaton Vance CA Muni Inc,Eaton Vance Management,TRUE
+CFND,C1 Fund Inc.,C1 Advisors LLC,TRUE
+CPZ,Calamos L/S Equity & Dynamic Inc Trust,Calamos Advisors LLC,TRUE
+CXH,MFS Investment Grade Municipal,MFS,TRUE
+DMA,Destra Multi-Alternative,Destra Capital Advisors LLC,TRUE
+DTF,DTF Tax-Free Income 2028 Term,Duff & Phelps,TRUE
+DXYZ,Destiny Tech100 Inc,Destiny Advisors LLC,TRUE
+ECAT,BlackRock ESG Capital Allocation Term,BlackRock,TRUE
+EHI,Western Asset Global High Income,Franklin Templeton Investments,TRUE
+EMO,ClearBridge Energy Midstream Opportunity,"Franklin Templeton Fund Adviser, LLC",TRUE
+EOT,Eaton Vance National Municipal Opprs Tr,Eaton Vance Management,TRUE
+ETX,EV Municipal Income 2028 Term Trust,Eaton Vance Management,TRUE
+FAX,abrdn Asia-Pacific Income Fund Inc,abrdn Asia Limited,TRUE
+FMY,First Trust Mortgage Income,First Trust Advisors L.P.,TRUE
+FSCO,FS Credit Opportunities Corp.,FS Global Advisor LLC,TRUE
+FSSL,FS Specialty Lending Fund,FS Specialty Lending Advisor LLC,TRUE
+FTHY,FIRST TRUST HY OPPORTUNITIES 2027 Term,First Trust Advisors L.P.,TRUE
+GDL,GDL Fund,Gabelli Funds LLC,TRUE
+GGT,Gabelli Multimedia,Gabelli,TRUE
+GGZ,Gabelli Global Small & Mid Cap Value Tru,Gabelli,TRUE
+GLU,Gabelli Global Utility & Income,Gabelli Funds LLC,TRUE
+GRF,Eagle Capital Growth,Sims Capital Management LLC,TRUE
+GUG,Guggenheim Active Allocation Fund,Guggenheim Funds Investment Advisors LLC,TRUE
+HERZ,Herzfeld Credit Income Fund,Thomas J Herzfeld Advisors Inc,TRUE
+IAF,abrdn Australia Equity Fund Inc,abrdn Asia Limited,TRUE
+IGI,Western Asset Invstm Grd Opp Tr Inc,"Franklin Templeton Fund Adviser, LLC",TRUE
+JHS,JHancock Income Secs,John Hancock Investment Management LLC,TRUE
+JMM,Nuveen Multi-Market Income Fund,"Nuveen Fund Advisors, LLC.",TRUE
+KF,Korea Fund,JPMorgan Asset Management (Asia Pacific) Limited,TRUE
+MHF,Western Asset Municipal High Income,"Franklin Templeton Fund Adviser, LLC",TRUE
+MPV,Barings Participation Invs,Barings LLC,TRUE
+MXE,Mexico Equity & Income,Pichardo Asset Management SA De CV,TRUE
+NAZ,Nuveen AZ Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NCV,Virtus Convertible & Income Fund,"Virtus Investment Advisers, LLC",TRUE
+NCZ,Virtus Convertible & Income Fund II,"Virtus Investment Advisers, LLC",TRUE
+NIM,Nuveen Select Maturity Muni,"Nuveen Fund Advisors, LLC.",TRUE
+NMAI,Nuveen Multi-Asset Income,"Nuveen Fund Advisors, LLC.",TRUE
+NMI,Nuveen Municipal Income,"Nuveen Fund Advisors, LLC.",TRUE
+NMS,Nuveen MN Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NMT,Nuveen MA Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NNY,Nuveen NY Municipal Value,"Nuveen Fund Advisors, LLC.",TRUE
+NOM,Nuveen MO Quality Muni Inc,"Nuveen Fund Advisors, LLC.",TRUE
+NPCT,Nuveen Core Plus Impact Fund,"Nuveen Fund Advisors, LLC.",TRUE
+NPFD,Nuveen Variable Rate Pref & Inc Fund,"Nuveen Fund Advisors, LLC.",TRUE
+NXG,NXG NextGen Infrastructure Inc,Cushing Asset Management LP,TRUE
+OXLC,Oxford Lane Capital Corp,Oxford Lane Management,TRUE
+PAI,Western Asset Income,Franklin Templeton Investments,TRUE
+PDCC,Pearl Diver Credit Company Inc,Pearl Diver Capital LLP,TRUE
+PDX,PIMCO Dynamic Income Strategy Fund,PIMCO,TRUE
+RCG,RENN Fund ord,Horizon Kinetics Asset Management LLC,TRUE
+RMI,RiverNorth Opp Muni Income Fund Inc,"RiverNorth Capital Management, LLC",TRUE
+RMM,RiverNorth Managed Duration Muni Inc Fd,"RiverNorth Capital Management, LLC",TRUE
+RMMZ,RiverNorth Manage Dur Muni Inc Fd II Inc,"RiverNorth Capital Management, LLC",TRUE
+RSF,RiverNorth Capital and Inc Fund,"RiverNorth Capital Management, LLC",TRUE
+SABA,Saba Capital Income & Ops Fund II,"Saba Capital Management, LP",TRUE
+SCD,LMP Capital and Income,"Franklin Templeton Fund Adviser, LLC",TRUE
+SOR,Source Capital,"First Pacific Advisors, LP",TRUE
+SPMC,Sound Point Meridian Capital Inc,Sound Point Meridian Management Company LLC,TRUE
+SRV,NXG Cushing Midstream Energy Fund,Cushing Asset Management LP,TRUE
+STEW,SRH Total Return Fund,Paralel Advisors LLC,TRUE
+TBLD,Thornburg Income Builder Opp Trust,Thornburg Investment Management Inc,TRUE
+UTF,Cohen & Steers Infrastructure,Cohen & Steers,TRUE
+VLT,Invesco High Income II,"Invesco Advisers, Inc",TRUE
+VTN,Invesco Tr Inv Gr NY,"Invesco Advisers, Inc",TRUE

@@ -92,6 +92,16 @@ class BusinessWireDedupeResponse(BaseModel):
     ticker_rows_deleted: int
 
 
+class TitleDedupeResponse(BaseModel):
+    scanned_articles: int
+    duplicate_groups: int
+    merged_articles: int
+    raw_items_relinked: int
+    ticker_rows_relinked: int
+    ticker_rows_updated: int
+    ticker_rows_deleted: int
+
+
 class ReloadTickersResponse(BaseModel):
     loaded: int
     created: int

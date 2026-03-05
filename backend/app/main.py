@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
 from app.ingestion import (
     PAGE_FETCH_CONFIGS,
+    dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
     reconcile_stale_ingestion_runs,
     remap_businesswire_articles,
@@ -26,6 +27,7 @@ from app.push_alerts import hash_manage_token, normalize_scopes, push_runtime_en
 from app.schemas import (
     BusinessWireDedupeResponse,
     BusinessWireRemapResponse,
+    TitleDedupeResponse,
     IngestionRunItem,
     IngestionRunResponse,
     NewsCountResponse,
@@ -729,6 +731,24 @@ def admin_remap_businesswire(
 def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
     result = dedupe_businesswire_url_variants(db)
     return BusinessWireDedupeResponse(
+        scanned_articles=int(result["scanned_articles"]),
+        duplicate_groups=int(result["duplicate_groups"]),
+        merged_articles=int(result["merged_articles"]),
+        raw_items_relinked=int(result["raw_items_relinked"]),
+        ticker_rows_relinked=int(result["ticker_rows_relinked"]),
+        ticker_rows_updated=int(result["ticker_rows_updated"]),
+        ticker_rows_deleted=int(result["ticker_rows_deleted"]),
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/dedupe/title",
+    response_model=TitleDedupeResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def admin_dedupe_by_title(db: Session = Depends(get_db)):
+    result = dedupe_articles_by_title(db)
+    return TitleDedupeResponse(
         scanned_articles=int(result["scanned_articles"]),
         duplicate_groups=int(result["duplicate_groups"]),
         merged_articles=int(result["merged_articles"]),

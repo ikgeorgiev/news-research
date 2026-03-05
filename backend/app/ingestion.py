@@ -148,6 +148,16 @@ class BusinessWireUrlDedupeStats(TypedDict):
     ticker_rows_deleted: int
 
 
+class TitleDedupeStats(TypedDict):
+    scanned_articles: int
+    duplicate_groups: int
+    merged_articles: int
+    raw_items_relinked: int
+    ticker_rows_relinked: int
+    ticker_rows_updated: int
+    ticker_rows_deleted: int
+
+
 class IngestionCycleResult(TypedDict):
     total_feeds: int
     total_items_seen: int
@@ -788,16 +798,46 @@ def _upsert_article(
     window_start = published_at - timedelta(hours=48)
     window_end = published_at + timedelta(hours=48)
 
-    def _find_title_window_match() -> Article | None:
+    def _find_title_window_match(*, exclude_source_code: str | None = None) -> Article | None:
+        conditions = [
+            Article.title_normalized_hash == title_hash,
+            Article.published_at >= window_start,
+            Article.published_at <= window_end,
+        ]
+        if exclude_source_code:
+            # Exclude any article that already has a raw feed row from this
+            # source.  This prevents a new BW story from title-matching an
+            # article that BW already owns (even if other sources also
+            # mirrored it), which would collapse distinct press releases.
+            # Also exclude articles with no raw rows at all — after retention
+            # pruning we cannot determine provenance, so conservatively skip
+            # them rather than risk merging distinct stories.
+            has_excluded_source = (
+                select(1)
+                .select_from(RawFeedItem)
+                .join(Source, Source.id == RawFeedItem.source_id)
+                .where(
+                    and_(
+                        RawFeedItem.article_id == Article.id,
+                        Source.code == exclude_source_code,
+                    )
+                )
+                .correlate(Article)
+                .exists()
+            )
+            has_any_raw = (
+                select(1)
+                .select_from(RawFeedItem)
+                .where(RawFeedItem.article_id == Article.id)
+                .correlate(Article)
+                .exists()
+            )
+            # Only match articles that have raw rows AND none from the excluded source.
+            conditions.append(has_any_raw)
+            conditions.append(~has_excluded_source)
         return db.scalar(
             select(Article)
-            .where(
-                and_(
-                    Article.title_normalized_hash == title_hash,
-                    Article.published_at >= window_start,
-                    Article.published_at <= window_end,
-                )
-            )
+            .where(and_(*conditions))
             .order_by(desc(Article.id))
             .limit(1)
         )
@@ -806,11 +846,17 @@ def _upsert_article(
     matched_by_url = article is not None
     created = False
 
-    # Business Wire can emit multiple distinct stories with the same headline
-    # and close timestamps. Keep them separate by URL.
-    if article is None and source_code != GENERAL_SOURCE_CODE:
-        article = _find_title_window_match()
-        matched_by_url = False
+    if article is None:
+        if source_code == GENERAL_SOURCE_CODE:
+            # Business Wire can emit multiple distinct stories with the same headline
+            # and close timestamps (e.g., one per fund).  Only title-match against
+            # articles from *other* sources (Yahoo, PR Newswire, etc.) so cross-feed
+            # copies merge, but separate BW press releases stay distinct.
+            article = _find_title_window_match(exclude_source_code=source_code)
+        else:
+            article = _find_title_window_match()
+        if article is not None:
+            matched_by_url = False
 
     if article is None:
         new_article = Article(
@@ -836,9 +882,13 @@ def _upsert_article(
             # Another worker inserted the same URL/title-window match first. Re-read and continue.
             article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
             matched_by_url = article is not None
-            if article is None and source_code != GENERAL_SOURCE_CODE:
-                article = _find_title_window_match()
-                matched_by_url = False
+            if article is None:
+                if source_code == GENERAL_SOURCE_CODE:
+                    article = _find_title_window_match(exclude_source_code=source_code)
+                else:
+                    article = _find_title_window_match()
+                if article is not None:
+                    matched_by_url = False
             if article is None:
                 raise
 
@@ -1639,6 +1689,156 @@ def dedupe_businesswire_url_variants(db: Session) -> BusinessWireUrlDedupeStats:
             db.flush()
             db.delete(duplicate)
             merged_articles += 1
+
+    db.commit()
+    return {
+        "scanned_articles": scanned_articles,
+        "duplicate_groups": duplicate_groups,
+        "merged_articles": merged_articles,
+        "raw_items_relinked": raw_items_relinked,
+        "ticker_rows_relinked": ticker_rows_relinked,
+        "ticker_rows_updated": ticker_rows_updated,
+        "ticker_rows_deleted": ticker_rows_deleted,
+    }
+
+
+def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> TitleDedupeStats:
+    """Merge articles that share the same normalized title within a time window."""
+    all_articles = db.scalars(
+        select(Article).order_by(Article.id.asc())
+    ).all()
+
+    grouped: dict[str, list[Article]] = {}
+    for article in all_articles:
+        key = article.title_normalized_hash
+        grouped.setdefault(key, []).append(article)
+
+    scanned_articles = len(all_articles)
+    duplicate_groups = 0
+    merged_articles = 0
+    raw_items_relinked = 0
+    ticker_rows_relinked = 0
+    ticker_rows_updated = 0
+    ticker_rows_deleted = 0
+
+    for _title_hash, articles in grouped.items():
+        if len(articles) <= 1:
+            continue
+
+        # Within each title group, cluster by publish-time window.
+        # Sort by publish time so we can use a sliding window where every
+        # member is within window_hours of every other member.
+        sorted_articles = sorted(
+            articles,
+            key=lambda a: _to_utc(a.published_at or a.created_at),
+        )
+        clusters: list[list[Article]] = []
+        for article in sorted_articles:
+            pub = _to_utc(article.published_at or article.created_at)
+            placed = False
+            for cluster in clusters:
+                earliest = _to_utc(cluster[0].published_at or cluster[0].created_at)
+                if (pub - earliest).total_seconds() <= window_hours * 3600:
+                    cluster.append(article)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([article])
+
+        for cluster in clusters:
+            if len(cluster) <= 1:
+                continue
+
+            article_ids = [row.id for row in cluster]
+
+            # Skip clusters where any article has Business Wire provenance or
+            # has no raw rows at all (conservatively assume pruned rows could
+            # have been BW).  BW regularly publishes distinct press releases
+            # with identical headlines (one per fund), and those must not be
+            # merged.
+            cluster_raw_rows = db.scalars(
+                select(RawFeedItem).where(RawFeedItem.article_id.in_(article_ids))
+            ).all()
+            raw_by_article: dict[int, set[int]] = {}
+            for raw_row in cluster_raw_rows:
+                raw_by_article.setdefault(raw_row.article_id, set()).add(raw_row.source_id)
+            bw_source_id = db.scalar(
+                select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
+            )
+            has_bw_risk = False
+            for aid in article_ids:
+                source_ids = raw_by_article.get(aid, set())
+                if not source_ids:
+                    # No raw rows — after retention pruning we can't tell
+                    # the provenance, so conservatively treat as BW.
+                    has_bw_risk = True
+                    break
+                if bw_source_id in source_ids:
+                    has_bw_risk = True
+                    break
+            if has_bw_risk:
+                continue
+
+            duplicate_groups += 1
+            ticker_rows = db.scalars(
+                select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
+            ).all()
+            ticker_rows_by_article: dict[int, list[ArticleTicker]] = {}
+            for ticker_row in ticker_rows:
+                ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(ticker_row)
+
+            raw_rows = cluster_raw_rows
+
+            def _rank(row: Article) -> tuple[int, int, float, int]:
+                ticker_count = len(ticker_rows_by_article.get(row.id, []))
+                summary_len = len(row.summary or "")
+                published = row.published_at or row.created_at
+                return ticker_count, summary_len, _to_utc(published).timestamp(), row.id
+
+            winner = max(cluster, key=_rank)
+            duplicates = [row for row in cluster if row.id != winner.id]
+            if not duplicates:
+                continue
+
+            winner_tickers: dict[int, ArticleTicker] = {
+                row.ticker_id: row for row in ticker_rows_by_article.get(winner.id, [])
+            }
+
+            duplicate_ids = {row.id for row in duplicates}
+            for raw_row in raw_rows:
+                if raw_row.article_id not in duplicate_ids:
+                    continue
+                raw_row.article_id = winner.id
+                raw_items_relinked += 1
+
+            for duplicate in duplicates:
+                dup_summary = duplicate.summary or ""
+                win_summary = winner.summary or ""
+                if dup_summary and (not win_summary or len(dup_summary) > len(win_summary)):
+                    winner.summary = duplicate.summary
+                if duplicate.published_at and (
+                    winner.published_at is None or duplicate.published_at > winner.published_at
+                ):
+                    winner.published_at = duplicate.published_at
+
+                for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
+                    existing = winner_tickers.get(ticker_row.ticker_id)
+                    if existing is None:
+                        ticker_row.article_id = winner.id
+                        winner_tickers[ticker_row.ticker_id] = ticker_row
+                        ticker_rows_relinked += 1
+                        continue
+
+                    if ticker_row.confidence > existing.confidence:
+                        existing.confidence = ticker_row.confidence
+                        existing.match_type = ticker_row.match_type
+                        ticker_rows_updated += 1
+                    db.delete(ticker_row)
+                    ticker_rows_deleted += 1
+
+                db.flush()
+                db.delete(duplicate)
+                merged_articles += 1
 
     db.commit()
     return {
