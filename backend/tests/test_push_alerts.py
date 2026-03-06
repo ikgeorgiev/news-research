@@ -299,9 +299,12 @@ def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(mon
     monkeypatch.setattr("app.push_alerts._send_push_notification", lambda *_args, **_kwargs: ("success", None))
     second_try = check_and_send_alerts(db, settings_obj)
     db.refresh(sub)
+    second_after = db.scalar(select(Article).where(Article.id == second.id))
 
     assert second_try["sent"] == 1
     assert int(sub.last_notified_json.get("all", 0) or 0) == second.id
+    assert second_after is not None
+    assert second_after.first_alert_sent_at is not None
 
     db.close()
 

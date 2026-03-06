@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 from html import unescape
 from pathlib import Path
 from typing import TypedDict
@@ -17,16 +18,31 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
 import requests
-from sqlalchemy import and_, delete, desc, func, select, tuple_
+from sqlalchemy import and_, delete, desc, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
+from app.models import (
+    Article,
+    ArticleTicker,
+    FeedPollState,
+    IngestionRun,
+    RawFeedItem,
+    Source,
+    Ticker,
+)
 from app.push_alerts import check_and_send_alerts
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
-from app.utils import canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_json_safe
+from app.utils import (
+    canonicalize_url,
+    clean_summary_text,
+    normalize_title,
+    parse_datetime,
+    sha256_str,
+    to_json_safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +59,9 @@ SOURCE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
 SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
 SOURCE_PAGE_CACHE_MAX_ITEMS = 1024
 
-EXCHANGE_PATTERN = re.compile(r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b")
+EXCHANGE_PATTERN = re.compile(
+    r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b"
+)
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
 HTML_SCRIPT_STYLE_PATTERN = re.compile(
@@ -89,6 +107,189 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
     "FUND",
     "IDE",
 }
+MIN_PERSIST_CONFIDENCE = 0.65  # Above token (0.62), below validated_token (0.68)
+
+# Words too generic to validate a CEF match in article text.
+_FUND_KEYWORD_STOPWORDS = frozenset(
+    {
+        "fund",
+        "trust",
+        "income",
+        "bond",
+        "municipal",
+        "muni",
+        "high",
+        "yield",
+        "total",
+        "return",
+        "global",
+        "equity",
+        "premium",
+        "credit",
+        "capital",
+        "investment",
+        "investments",
+        "management",
+        "advisors",
+        "advisers",
+        "asset",
+        "securities",
+        "opportunities",
+        "opportunity",
+        "strategic",
+        "strategy",
+        "strategies",
+        "select",
+        "quality",
+        "enhanced",
+        "diversified",
+        "dynamic",
+        "value",
+        "growth",
+        "limited",
+        "duration",
+        "term",
+        "corp",
+        "corporation",
+        "company",
+        "inc",
+        "llc",
+        "llp",
+        "the",
+        "and",
+        "of",
+        "for",
+        "new",
+        "rate",
+        "floating",
+        "short",
+    }
+)
+_SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
+    {
+        "ag",
+        "co",
+        "ii",
+        "iii",
+        "inc",
+        "llc",
+        "llp",
+        "lp",
+        "ltd",
+        "plc",
+        "pte",
+        "sa",
+    }
+)
+_ALLOWED_TWO_CHAR_SPONSOR_KEYWORDS = frozenset({"c1"})
+
+
+def _is_short_sponsor_keyword(
+    raw_word: str, cleaned: str, *, is_leading_sponsor_word: bool
+) -> bool:
+    raw_clean = raw_word.strip(".,;()\"'")
+    if len(cleaned) < 2 or len(cleaned) > 3:
+        return False
+    if cleaned in _FUND_KEYWORD_STOPWORDS:
+        return False
+    if cleaned in _SHORT_SPONSOR_KEYWORD_STOPWORDS:
+        return False
+    if not raw_clean.isalnum():
+        return False
+    if not any(char.isalpha() for char in raw_clean):
+        return False
+    if raw_clean.upper() != raw_clean:
+        return False
+    if len(cleaned) == 2:
+        return cleaned in _ALLOWED_TWO_CHAR_SPONSOR_KEYWORDS
+    # Keep 3-letter sponsor acronyms only when they act as the primary
+    # sponsor designator, not trailing geography or parenthetical fragments.
+    return is_leading_sponsor_word
+
+
+@lru_cache(maxsize=4096)
+def _validation_keyword_pattern(keyword: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
+    )
+
+
+def _text_matches_validation_keywords(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    matched_keywords = [
+        keyword
+        for keyword in keywords
+        if _validation_keyword_pattern(keyword).search(text_lower) is not None
+    ]
+    if not matched_keywords:
+        return False
+    if any(" " in keyword for keyword in matched_keywords):
+        return True
+    # One short sponsor-style acronym can be enough (MFS/OFS/C1), but long-form
+    # names need more than one matched term so brand-only press releases do not
+    # validate bare ticker tokens.
+    if any(len(keyword) <= 3 for keyword in matched_keywords):
+        return True
+    return len(set(matched_keywords)) >= 2
+
+
+def _build_symbol_keywords(
+    ticker_rows: list,
+) -> dict[str, frozenset[str]]:
+    """Build per-symbol validation keywords from fund_name plus short sponsor acronyms."""
+    result: dict[str, frozenset[str]] = {}
+    for row in ticker_rows:
+        symbol = row[1]
+        symbol_lower = symbol.lower()
+        fund_name = row[2] if len(row) > 2 else None
+        sponsor = row[3] if len(row) > 3 else None
+        keywords: set[str] = set()
+        if fund_name:
+            cleaned_fund_words: list[str] = []
+            word_supports_phrase: list[bool] = []
+            for idx, raw_word in enumerate(fund_name.split()):
+                cleaned = raw_word.strip(".,;()\"'").lower()
+                if cleaned == symbol_lower:
+                    continue
+                cleaned_fund_words.append(cleaned)
+                is_short_keyword = _is_short_sponsor_keyword(
+                    raw_word,
+                    cleaned,
+                    is_leading_sponsor_word=idx == 0,
+                )
+                is_distinctive_keyword = (
+                    len(cleaned) >= 4
+                    and cleaned not in _FUND_KEYWORD_STOPWORDS
+                )
+                if (
+                    is_distinctive_keyword
+                ):
+                    keywords.add(cleaned)
+                elif is_short_keyword:
+                    keywords.add(cleaned)
+                word_supports_phrase.append(is_distinctive_keyword or is_short_keyword)
+            for idx in range(len(cleaned_fund_words) - 1):
+                if not (word_supports_phrase[idx] or word_supports_phrase[idx + 1]):
+                    continue
+                first = cleaned_fund_words[idx]
+                second = cleaned_fund_words[idx + 1]
+                keywords.add(f"{first} {second}")
+        if sponsor:
+            for idx, raw_word in enumerate(sponsor.split()):
+                cleaned = raw_word.strip(".,;()\"'").lower()
+                if cleaned == symbol_lower:
+                    continue
+                if _is_short_sponsor_keyword(
+                    raw_word,
+                    cleaned,
+                    is_leading_sponsor_word=idx == 0,
+                ):
+                    keywords.add(cleaned)
+        result[symbol.upper()] = frozenset(keywords)
+    return result
+
+
 _source_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
 _source_page_cache_lock = threading.Lock()
 _tickers_csv_mtime_cache: dict[str, float] = {}
@@ -107,7 +308,9 @@ class SourcePageConfig:
 PAGE_FETCH_CONFIGS: dict[str, SourcePageConfig] = {
     "businesswire": SourcePageConfig("businesswire", "businesswire.com", "bw_table"),
     "prnewswire": SourcePageConfig("prnewswire", "prnewswire.com", "prn_table"),
-    "globenewswire": SourcePageConfig("globenewswire", "globenewswire.com", "gnw_table"),
+    "globenewswire": SourcePageConfig(
+        "globenewswire", "globenewswire.com", "gnw_table"
+    ),
 }
 
 
@@ -190,7 +393,9 @@ def _acquire_dedupe_locks(db: Session, url_hash: str, title_hash: str) -> None:
         return
 
     # Acquire in sorted order to avoid deadlock when multiple workers lock same keys.
-    for key in sorted({_hash_hex_to_signed_bigint(url_hash), _hash_hex_to_signed_bigint(title_hash)}):
+    for key in sorted(
+        {_hash_hex_to_signed_bigint(url_hash), _hash_hex_to_signed_bigint(title_hash)}
+    ):
         db.execute(select(func.pg_advisory_xact_lock(key)))
 
 
@@ -213,16 +418,17 @@ def _fetch_feed_with_retries(
             status_code = int(getattr(response, "status_code", 200) or 200)
             if status_code == 429:
                 retry_after = _parse_retry_after_seconds(
-                    getattr(getattr(response, "headers", None), "get", lambda _k: None)("Retry-After")
+                    getattr(getattr(response, "headers", None), "get", lambda _k: None)(
+                        "Retry-After"
+                    )
                 )
                 if attempt >= max_attempts:
                     response.raise_for_status()
                 sleep_seconds = (
                     retry_after
                     if retry_after is not None
-                    else (backoff_seconds * (2 ** (attempt - 1))) + random.uniform(
-                        0.0, max(0.0, backoff_jitter_seconds)
-                    )
+                    else (backoff_seconds * (2 ** (attempt - 1)))
+                    + random.uniform(0.0, max(0.0, backoff_jitter_seconds))
                 )
                 logger.warning(
                     "Feed request attempt %s/%s got 429 for %s; retry_after=%s sleep=%.3fs",
@@ -276,7 +482,12 @@ def _parse_retry_after_seconds(header_value: str | None) -> float | None:
         return None
     if retry_at.tzinfo is None:
         retry_at = retry_at.replace(tzinfo=timezone.utc)
-    return max(0.0, (retry_at.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds())
+    return max(
+        0.0,
+        (
+            retry_at.astimezone(timezone.utc) - datetime.now(timezone.utc)
+        ).total_seconds(),
+    )
 
 
 def _to_utc(value: datetime) -> datetime:
@@ -286,7 +497,9 @@ def _to_utc(value: datetime) -> datetime:
 
 
 def _get_or_create_feed_poll_state(db: Session, feed_url: str) -> FeedPollState:
-    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1))
+    state = db.scalar(
+        select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1)
+    )
     if state is not None:
         return state
 
@@ -298,7 +511,9 @@ def _get_or_create_feed_poll_state(db: Session, feed_url: str) -> FeedPollState:
             db.flush()
         return candidate
     except IntegrityError:
-        state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1))
+        state = db.scalar(
+            select(FeedPollState).where(FeedPollState.feed_url == feed_url).limit(1)
+        )
         if state is None:
             raise
         return state
@@ -315,7 +530,9 @@ def _get_feed_conditional_headers(feed_state: FeedPollState | None) -> dict[str,
     return headers
 
 
-def _update_feed_http_cache(feed_state: FeedPollState, response: requests.Response) -> None:
+def _update_feed_http_cache(
+    feed_state: FeedPollState, response: requests.Response
+) -> None:
     # Keep this defensive: unit tests use fake response objects that may not have headers/status_code.
     headers = getattr(response, "headers", None)
     if headers is None or not hasattr(headers, "get"):
@@ -339,7 +556,7 @@ def _compute_feed_failure_backoff_seconds(
     if base <= 0.0 or cap <= 0.0:
         return 0.0
     exponent = max(0, int(failure_count) - 1)
-    return min(base * (2 ** exponent), cap)
+    return min(base * (2**exponent), cap)
 
 
 def _mark_feed_failure_backoff(
@@ -357,7 +574,9 @@ def _mark_feed_failure_backoff(
     )
     feed_state.failure_count = next_failure_count
     feed_state.last_failure_at = now_utc
-    feed_state.backoff_until = now_utc + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now_utc
+    feed_state.backoff_until = (
+        now_utc + timedelta(seconds=delay_seconds) if delay_seconds > 0 else now_utc
+    )
 
 
 def _reset_feed_failure_backoff(feed_state: FeedPollState) -> None:
@@ -478,7 +697,10 @@ def _prefetch_recorded_raw_keys(
             guid
             for guid in db.scalars(
                 select(RawFeedItem.raw_guid).where(
-                    and_(RawFeedItem.source_id == source_id, RawFeedItem.raw_guid.in_(list(guids)))
+                    and_(
+                        RawFeedItem.source_id == source_id,
+                        RawFeedItem.raw_guid.in_(list(guids)),
+                    )
                 )
             ).all()
             if guid
@@ -490,11 +712,15 @@ def _prefetch_recorded_raw_keys(
             select(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).where(
                 and_(
                     RawFeedItem.source_id == source_id,
-                    tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(list(pairs)),
+                    tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(
+                        list(pairs)
+                    ),
                 )
             )
         ).all()
-        existing_pairs = {(str(link), pub_date) for link, pub_date in rows if link and pub_date}
+        existing_pairs = {
+            (str(link), pub_date) for link, pub_date in rows if link and pub_date
+        }
 
     return existing_guids, existing_pairs
 
@@ -522,7 +748,9 @@ def reconcile_stale_ingestion_runs(
     if not stale_runs:
         return 0
 
-    reason = f"Marked failed after exceeding stale run timeout ({stale_after_seconds}s)."
+    reason = (
+        f"Marked failed after exceeding stale run timeout ({stale_after_seconds}s)."
+    )
     for run in stale_runs:
         run.status = "failed"
         run.finished_at = current_time
@@ -583,7 +811,9 @@ def _parse_context_symbols(feed_url: str) -> list[str]:
     values = parse_qs(parsed.query).get("s", [])
     symbols: list[str] = []
     for value in values:
-        symbols.extend([token.strip().upper() for token in value.split(",") if token.strip()])
+        symbols.extend(
+            [token.strip().upper() for token in value.split(",") if token.strip()]
+        )
     return symbols
 
 
@@ -619,7 +849,9 @@ def _cache_source_page(url: str, fetched_at: float, html_text: str | None) -> No
             _source_page_cache.popitem(last=False)
 
 
-def _fetch_source_page_html(url: str, timeout_seconds: int, config: SourcePageConfig) -> str | None:
+def _fetch_source_page_html(
+    url: str, timeout_seconds: int, config: SourcePageConfig
+) -> str | None:
     fetch_url = _canonical_article_url(url)
     if not _is_source_article_url(fetch_url, config.hostname_suffix):
         return None
@@ -655,10 +887,14 @@ def _fetch_source_page_html(url: str, timeout_seconds: int, config: SourcePageCo
 
 
 def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
-    return _fetch_source_page_html(url, timeout_seconds, PAGE_FETCH_CONFIGS["businesswire"])
+    return _fetch_source_page_html(
+        url, timeout_seconds, PAGE_FETCH_CONFIGS["businesswire"]
+    )
 
 
-def _extract_table_cell_symbols_from_html(html_text: str, known_symbols: set[str]) -> set[str]:
+def _extract_table_cell_symbols_from_html(
+    html_text: str, known_symbols: set[str]
+) -> set[str]:
     hits: set[str] = set()
     for raw_symbol in TABLE_CELL_SYMBOL_PATTERN.findall(html_text):
         symbol = raw_symbol.upper().strip()
@@ -685,21 +921,33 @@ def _extract_source_fallback_tickers(
     known_symbols: set[str],
     timeout_seconds: int,
     config: SourcePageConfig,
+    *,
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
 ) -> dict[str, tuple[str, float]]:
     html_text = _fetch_source_page_html(link, timeout_seconds, config)
     if not html_text:
         return {}
 
     plain_text = _html_to_plain_text(html_text)
-    enriched_summary = " ".join([part for part in [summary, plain_text] if part]).strip()
+    enriched_summary = " ".join(
+        [part for part in [summary, plain_text] if part]
+    ).strip()
     hits = _extract_entry_tickers(
         title,
         enriched_summary,
         link,
         feed_url,
         known_symbols,
-        include_token=False,
+        include_token=True,
+        symbol_keywords=symbol_keywords,
     )
+    # Fetched pages should be able to rescue validated plain-token matches from
+    # richer body text, but should not add new unvalidated token-only hits.
+    hits = {
+        symbol: hit
+        for symbol, hit in hits.items()
+        if hit[0] != "token"
+    }
 
     for symbol in _extract_table_cell_symbols_from_html(html_text, known_symbols):
         existing = hits.get(symbol)
@@ -716,10 +964,18 @@ def _extract_businesswire_fallback_tickers(
     feed_url: str,
     known_symbols: set[str],
     timeout_seconds: int,
+    *,
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
 ) -> dict[str, tuple[str, float]]:
     return _extract_source_fallback_tickers(
-        title, summary, link, feed_url, known_symbols, timeout_seconds,
+        title,
+        summary,
+        link,
+        feed_url,
+        known_symbols,
+        timeout_seconds,
         PAGE_FETCH_CONFIGS["businesswire"],
+        symbol_keywords=symbol_keywords,
     )
 
 
@@ -731,6 +987,7 @@ def _extract_entry_tickers(
     known_symbols: set[str],
     *,
     include_token: bool = True,
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
 ) -> dict[str, tuple[str, float]]:
     hits: dict[str, tuple[str, float]] = {}
 
@@ -749,12 +1006,25 @@ def _extract_entry_tickers(
         add(context_symbols[0], "context", 0.93)
 
     text = " ".join([title or "", summary or "", link or ""])
+    text_lower = text.lower() if symbol_keywords is not None else None
 
     for symbol in EXCHANGE_PATTERN.findall(text):
         add(symbol.upper(), "exchange", 0.88)
 
     for symbol in PAREN_SYMBOL_PATTERN.findall(text):
-        add(symbol.upper(), "paren", 0.75)
+        upper = symbol.upper()
+        if upper in STOPWORDS:
+            # Allow real CEF tickers through if fund name validates.
+            if (
+                symbol_keywords is not None
+                and text_lower is not None
+                and upper in known_symbols
+            ):
+                kws = symbol_keywords.get(upper, frozenset())
+                if kws and _text_matches_validation_keywords(text_lower, kws):
+                    add(upper, "paren", 0.75)
+            continue
+        add(upper, "paren", 0.75)
 
     if include_token:
         for symbol in TOKEN_PATTERN.findall(text):
@@ -763,14 +1033,45 @@ def _extract_entry_tickers(
                 continue
             if upper in AMBIGUOUS_TOKEN_SYMBOLS:
                 continue
+            # Validate token against fund name/sponsor keywords when available.
+            if symbol_keywords is not None and text_lower is not None:
+                kws = symbol_keywords.get(upper, frozenset())
+                if kws and _text_matches_validation_keywords(text_lower, kws):
+                    add(upper, "validated_token", 0.68)
+                    continue
             add(upper, "token", 0.62)
 
     return hits
 
 
-def _should_persist_entry(source_code: str, ticker_hits: dict[str, tuple[str, float]]) -> bool:
-    # Persist all Business Wire items (general stream) and ticker-mapped items from other sources.
-    return source_code == GENERAL_SOURCE_CODE or bool(ticker_hits)
+def _max_ticker_confidence(hits: dict[str, tuple[str, float]]) -> float:
+    if not hits:
+        return 0.0
+    return max(conf for _, conf in hits.values())
+
+
+def _merge_ticker_hits(
+    target: dict[str, tuple[str, float]],
+    extra_hits: dict[str, tuple[str, float]],
+) -> None:
+    for symbol, (match_type, confidence) in extra_hits.items():
+        existing = target.get(symbol)
+        if existing is None or confidence > existing[1]:
+            target[symbol] = (match_type, confidence)
+
+
+def _should_persist_entry(
+    source_code: str, ticker_hits: dict[str, tuple[str, float]]
+) -> bool:
+    # Persist all Business Wire items (general stream).
+    if source_code == GENERAL_SOURCE_CODE:
+        return True
+    if not ticker_hits:
+        return False
+    # Require at least one match above bare-token confidence to filter out
+    # false positives from common abbreviations (CGO, PMO, FT, etc.).
+    max_confidence = _max_ticker_confidence(ticker_hits)
+    return max_confidence >= MIN_PERSIST_CONFIDENCE
 
 
 def _upsert_article(
@@ -798,7 +1099,9 @@ def _upsert_article(
     window_start = published_at - timedelta(hours=48)
     window_end = published_at + timedelta(hours=48)
 
-    def _find_title_window_match(*, exclude_source_code: str | None = None) -> Article | None:
+    def _find_title_window_match(
+        *, exclude_source_code: str | None = None
+    ) -> Article | None:
         conditions = [
             Article.title_normalized_hash == title_hash,
             Article.published_at >= window_start,
@@ -836,10 +1139,7 @@ def _upsert_article(
             conditions.append(has_any_raw)
             conditions.append(~has_excluded_source)
         return db.scalar(
-            select(Article)
-            .where(and_(*conditions))
-            .order_by(desc(Article.id))
-            .limit(1)
+            select(Article).where(and_(*conditions)).order_by(desc(Article.id)).limit(1)
         )
 
     article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
@@ -880,7 +1180,9 @@ def _upsert_article(
             created = True
         except IntegrityError:
             # Another worker inserted the same URL/title-window match first. Re-read and continue.
-            article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
+            article = db.scalar(
+                select(Article).where(Article.canonical_url_hash == url_hash)
+            )
             matched_by_url = article is not None
             if article is None:
                 if source_code == GENERAL_SOURCE_CODE:
@@ -896,7 +1198,9 @@ def _upsert_article(
         raise RuntimeError("article upsert failed to resolve target row")
 
     if not created:
-        should_overwrite_on_url_match = (not matched_by_url) or allow_url_match_overwrite
+        should_overwrite_on_url_match = (
+            not matched_by_url
+        ) or allow_url_match_overwrite
         if should_overwrite_on_url_match:
             article.title = title
             article.source_name = source_name
@@ -907,13 +1211,17 @@ def _upsert_article(
             if matched_by_url and allow_url_match_overwrite:
                 # For exact URL matches, trust the feed payload for this URL.
                 article.summary = summary
-            elif (not matched_by_url) and (not article.summary or len(summary) > len(article.summary)):
+            elif (not matched_by_url) and (
+                not article.summary or len(summary) > len(article.summary)
+            ):
                 # Mirrors (matched_by_url=True, allow_url_match_overwrite=False) intentionally
                 # skip summary updates so they don't clobber the canonical source's richer text.
                 article.summary = summary
         if should_overwrite_on_url_match:
             article_published = article.published_at
-            if article_published is None or _to_utc(published_at) > _to_utc(article_published):
+            if article_published is None or _to_utc(published_at) > _to_utc(
+                article_published
+            ):
                 article.published_at = published_at
 
     return article, created, matched_by_url
@@ -934,7 +1242,9 @@ def _upsert_article_tickers(
     if existing_rows is None:
         existing = {
             row.ticker_id: row
-            for row in db.scalars(select(ArticleTicker).where(ArticleTicker.article_id == article_id)).all()
+            for row in db.scalars(
+                select(ArticleTicker).where(ArticleTicker.article_id == article_id)
+            ).all()
         }
     else:
         existing = existing_rows
@@ -1000,6 +1310,7 @@ def ingest_feed(
     enable_conditional_get: bool = True,
     failure_backoff_base_seconds: float = 30.0,
     failure_backoff_max_seconds: float = 600.0,
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
 ) -> IngestFeedResult:
     run = IngestionRun(
         source_id=source.id,
@@ -1024,10 +1335,16 @@ def ingest_feed(
         backoff_until = feed_state.backoff_until
         if backoff_until is not None and _to_utc(backoff_until) > now_utc:
             status = "skipped_backoff"
-            error_text = f"Feed is in backoff until {_to_utc(backoff_until).isoformat()}"
+            error_text = (
+                f"Feed is in backoff until {_to_utc(backoff_until).isoformat()}"
+            )
             committed_items_inserted = 0
         else:
-            conditional_headers = _get_feed_conditional_headers(feed_state) if enable_conditional_get else {}
+            conditional_headers = (
+                _get_feed_conditional_headers(feed_state)
+                if enable_conditional_get
+                else {}
+            )
             response = _fetch_feed_with_retries(
                 feed_url=feed_url,
                 timeout_seconds=timeout_seconds,
@@ -1047,7 +1364,9 @@ def ingest_feed(
                 parsed = feedparser.parse(response.content)
 
                 source_name = source.name
-                feed_title = parsed.feed.get("title") if isinstance(parsed.feed, dict) else None
+                feed_title = (
+                    parsed.feed.get("title") if isinstance(parsed.feed, dict) else None
+                )
                 if source.code != "yahoo" and feed_title:
                     source_name = _clamp_label(str(feed_title))
 
@@ -1083,8 +1402,13 @@ def ingest_feed(
                     else:
                         is_exact_source_url = raw_link == article_url
 
-                    published_at = parse_datetime(entry.get("published") or entry.get("updated")) or now_utc
-                    raw_guid = str(entry.get("id") or entry.get("guid") or "").strip() or None
+                    published_at = (
+                        parse_datetime(entry.get("published") or entry.get("updated"))
+                        or now_utc
+                    )
+                    raw_guid = (
+                        str(entry.get("id") or entry.get("guid") or "").strip() or None
+                    )
                     prepared_entries.append(
                         PreparedFeedEntry(
                             entry=entry,
@@ -1116,27 +1440,46 @@ def ingest_feed(
 
                         # Isolate malformed entries so one bad payload does not roll back the full feed run.
                         with db.begin_nested():
-                            if prepared.raw_guid and prepared.raw_guid in recorded_guids:
+                            if (
+                                prepared.raw_guid
+                                and prepared.raw_guid in recorded_guids
+                            ):
                                 continue
-                            if (prepared.raw_link, prepared.published_at) in recorded_pairs:
+                            if (
+                                prepared.raw_link,
+                                prepared.published_at,
+                            ) in recorded_pairs:
                                 continue
 
                             raw_summary = (
-                                str(prepared.entry.get("summary") or prepared.entry.get("description") or "").strip()
+                                str(
+                                    prepared.entry.get("summary")
+                                    or prepared.entry.get("description")
+                                    or ""
+                                ).strip()
                                 or None
                             )
                             summary = clean_summary_text(raw_summary)
 
-                            entry_source_name = _extract_provider(prepared.entry, source_name)
+                            entry_source_name = _extract_provider(
+                                prepared.entry, source_name
+                            )
                             ticker_hits = _extract_entry_tickers(
                                 prepared.title,
                                 summary or "",
                                 prepared.raw_link,
                                 feed_url,
                                 known_symbols,
+                                symbol_keywords=symbol_keywords,
                             )
-                            if not ticker_hits and page_config is not None:
-                                ticker_hits = _extract_source_fallback_tickers(
+                            # Run page-fetch fallback when no hits or all hits are
+                            # below the persist threshold (e.g. token-only at 0.62).
+                            _max_hit_conf = _max_ticker_confidence(ticker_hits)
+                            if (
+                                _max_hit_conf < MIN_PERSIST_CONFIDENCE
+                                and page_config is not None
+                            ):
+                                fallback_hits = _extract_source_fallback_tickers(
                                     prepared.title,
                                     summary or "",
                                     prepared.raw_link,
@@ -1144,18 +1487,33 @@ def ingest_feed(
                                     known_symbols,
                                     timeout_seconds,
                                     page_config,
+                                    symbol_keywords=symbol_keywords,
                                 )
+                                # Merge: fallback wins when it has higher confidence.
+                                _merge_ticker_hits(ticker_hits, fallback_hits)
 
-                            allow_existing_unmapped = False
-                            if not ticker_hits and source.code != GENERAL_SOURCE_CODE:
+                            should_persist_tickers = _should_persist_entry(
+                                source.code, ticker_hits
+                            )
+                            allow_existing_exact_url = False
+                            if (
+                                not should_persist_tickers
+                                and source.code != GENERAL_SOURCE_CODE
+                                and prepared.is_exact_source_url
+                            ):
                                 existing_article_id = db.scalar(
                                     select(Article.id)
-                                    .where(Article.canonical_url_hash == sha256_str(prepared.article_url))
+                                    .where(
+                                        Article.canonical_url_hash
+                                        == sha256_str(prepared.article_url)
+                                    )
                                     .limit(1)
                                 )
-                                allow_existing_unmapped = existing_article_id is not None
+                                allow_existing_exact_url = (
+                                    existing_article_id is not None
+                                )
 
-                            if not _should_persist_entry(source.code, ticker_hits) and not allow_existing_unmapped:
+                            if not should_persist_tickers and not allow_existing_exact_url:
                                 continue
 
                             article, created, matched_by_url = _upsert_article(
@@ -1171,12 +1529,15 @@ def ingest_feed(
                             )
                             created_article = created
 
+                            effective_ticker_hits = (
+                                ticker_hits if should_persist_tickers else {}
+                            )
                             # New articles never have mappings yet; skip the SELECT in _upsert_article_tickers().
                             existing_rows = {} if created else None
                             _upsert_article_tickers(
                                 db,
                                 article.id,
-                                ticker_hits,
+                                effective_ticker_hits,
                                 symbol_to_id,
                                 existing_rows=existing_rows,
                                 # Prune only when the source entry URL exactly matches the article URL.
@@ -1186,13 +1547,15 @@ def ingest_feed(
                                     source.code != GENERAL_SOURCE_CODE
                                     and matched_by_url
                                     and prepared.is_exact_source_url
+                                    and bool(effective_ticker_hits)
                                 ),
                             )
 
                             payload = {
                                 "title": prepared.raw_title,
                                 "link": prepared.raw_link,
-                                "published": prepared.entry.get("published") or prepared.entry.get("updated"),
+                                "published": prepared.entry.get("published")
+                                or prepared.entry.get("updated"),
                                 "summary": raw_summary,
                                 "source": entry_source_name,
                             }
@@ -1223,9 +1586,7 @@ def ingest_feed(
 
                     except Exception as entry_exc:
                         entry_errors += 1
-                        error_text = (
-                            f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
-                        )
+                        error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
                         continue
 
                 db.commit()
@@ -1263,9 +1624,7 @@ def ingest_feed(
     }
 
 
-def run_ingestion_cycle(
-    db: Session, settings: Settings
-) -> IngestionCycleResult:
+def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult:
     stale_runs_fixed = reconcile_stale_ingestion_runs(
         db,
         stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
@@ -1296,9 +1655,14 @@ def run_ingestion_cycle(
         ).all()
     }
 
-    ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
-    symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
+    ticker_rows = db.execute(
+        select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
+            Ticker.active.is_(True)
+        )
+    ).all()
+    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
     known_symbols = frozenset(symbol_to_id.keys())
+    symbol_keywords = _build_symbol_keywords(ticker_rows)
 
     per_feed: list[IngestFeedResult] = []
     total_seen = 0
@@ -1308,7 +1672,11 @@ def run_ingestion_cycle(
     max_workers = settings.ingestion_max_workers
     enable_conditional_get = settings.ingestion_enable_conditional_get
     bind = db.get_bind()
-    dialect_name = getattr(getattr(bind, "dialect", None), "name", None) if bind is not None else None
+    dialect_name = (
+        getattr(getattr(bind, "dialect", None), "name", None)
+        if bind is not None
+        else None
+    )
     if dialect_name != "postgresql":
         # SQLite in-memory tests must remain single-threaded; additional sessions may attach to a different DB.
         max_workers = 1
@@ -1322,7 +1690,9 @@ def run_ingestion_cycle(
             tasks.append((source_row.id, source_row.code, feed_url))
     source_task_locks = {source_id: threading.Lock() for source_id, _, _ in tasks}
 
-    def _ingest_task(source_id: int, source_code: str, feed_url: str) -> IngestFeedResult:
+    def _ingest_task(
+        source_id: int, source_code: str, feed_url: str
+    ) -> IngestFeedResult:
         source_task_lock = source_task_locks[source_id]
         # Keep feeds from the same source serialized even in parallel mode.
         # Raw dedupe keys are source-scoped and pre-fetched per feed, so running
@@ -1352,14 +1722,19 @@ def run_ingestion_cycle(
                     enable_conditional_get=enable_conditional_get,
                     failure_backoff_base_seconds=settings.feed_failure_backoff_base_seconds,
                     failure_backoff_max_seconds=settings.feed_failure_backoff_max_seconds,
+                    symbol_keywords=symbol_keywords,
                 )
 
             # Parallel workers: each task uses its own DB session.
             if bind is None:
-                raise RuntimeError("DB bind is missing; cannot create per-worker sessions")
+                raise RuntimeError(
+                    "DB bind is missing; cannot create per-worker sessions"
+                )
             worker_factory = sessionmaker(autoflush=False, autocommit=False, bind=bind)
             with worker_factory() as worker_db:
-                source_row = worker_db.scalar(select(Source).where(Source.id == source_id))
+                source_row = worker_db.scalar(
+                    select(Source).where(Source.id == source_id)
+                )
                 if source_row is None:
                     return {
                         "source": source_code,
@@ -1382,6 +1757,7 @@ def run_ingestion_cycle(
                     enable_conditional_get=enable_conditional_get,
                     failure_backoff_base_seconds=settings.feed_failure_backoff_base_seconds,
                     failure_backoff_max_seconds=settings.feed_failure_backoff_max_seconds,
+                    symbol_keywords=symbol_keywords,
                 )
 
     results: list[IngestFeedResult] = []
@@ -1391,7 +1767,10 @@ def run_ingestion_cycle(
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {
-                executor.submit(_ingest_task, source_id, source_code, feed_url): (source_code, feed_url)
+                executor.submit(_ingest_task, source_id, source_code, feed_url): (
+                    source_code,
+                    feed_url,
+                )
                 for source_id, source_code, feed_url in tasks
             }
             for future in as_completed(future_to_task):
@@ -1411,7 +1790,9 @@ def run_ingestion_cycle(
                     )
 
     # Keep results deterministic for logs/reports.
-    per_feed = sorted(results, key=lambda r: (r.get("source", ""), r.get("feed_url", "")))
+    per_feed = sorted(
+        results, key=lambda r: (r.get("source", ""), r.get("feed_url", ""))
+    )
     for result in per_feed:
         total_seen += int(result["items_seen"])
         total_inserted += int(result["items_inserted"])
@@ -1423,7 +1804,9 @@ def run_ingestion_cycle(
     if ticker_changed:
         for code in PAGE_FETCH_CONFIGS:
             source_remaps.append(
-                remap_source_articles(db, settings, source_code=code, limit=500, only_unmapped=True)
+                remap_source_articles(
+                    db, settings, source_code=code, limit=500, only_unmapped=True
+                )
             )
     prune_interval_seconds = settings.raw_feed_prune_interval_seconds
     if _should_run_raw_feed_prune(prune_interval_seconds):
@@ -1495,9 +1878,14 @@ def remap_source_articles(
             "only_unmapped": only_unmapped,
         }
 
-    ticker_rows = db.execute(select(Ticker.id, Ticker.symbol).where(Ticker.active.is_(True))).all()
-    symbol_to_id = {symbol.upper(): ticker_id for ticker_id, symbol in ticker_rows}
+    ticker_rows = db.execute(
+        select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
+            Ticker.active.is_(True)
+        )
+    ).all()
+    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
     known_symbols = set(symbol_to_id.keys())
+    symbol_keywords = _build_symbol_keywords(ticker_rows)
 
     mapped_exists = (
         select(1)
@@ -1525,16 +1913,22 @@ def remap_source_articles(
         query = query.where(~mapped_exists)
 
     rows = db.scalars(
-        query.order_by(Article.published_at.desc().nullslast(), Article.id.desc()).limit(limit)
+        query.order_by(
+            Article.published_at.desc().nullslast(), Article.id.desc()
+        ).limit(limit)
     ).all()
     article_ids = [row.id for row in rows]
-    ticker_rows_by_article: dict[int, dict[int, ArticleTicker]] = {article_id: {} for article_id in article_ids}
+    ticker_rows_by_article: dict[int, dict[int, ArticleTicker]] = {
+        article_id: {} for article_id in article_ids
+    }
     if article_ids:
         existing_rows = db.scalars(
             select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
         ).all()
         for ticker_row in existing_rows:
-            ticker_rows_by_article.setdefault(ticker_row.article_id, {})[ticker_row.ticker_id] = ticker_row
+            ticker_rows_by_article.setdefault(ticker_row.article_id, {})[
+                ticker_row.ticker_id
+            ] = ticker_row
 
     processed = 0
     articles_with_hits = 0
@@ -1549,9 +1943,10 @@ def remap_source_articles(
             row.canonical_url,
             "",
             known_symbols,
+            symbol_keywords=symbol_keywords,
         )
-        if not ticker_hits:
-            ticker_hits = _extract_source_fallback_tickers(
+        if _max_ticker_confidence(ticker_hits) < MIN_PERSIST_CONFIDENCE:
+            fallback_hits = _extract_source_fallback_tickers(
                 row.title,
                 summary,
                 row.canonical_url,
@@ -1559,8 +1954,15 @@ def remap_source_articles(
                 known_symbols,
                 settings.request_timeout_seconds,
                 config,
+                symbol_keywords=symbol_keywords,
             )
+            _merge_ticker_hits(ticker_hits, fallback_hits)
         if not ticker_hits:
+            continue
+        if (
+            source_code != GENERAL_SOURCE_CODE
+            and _max_ticker_confidence(ticker_hits) < MIN_PERSIST_CONFIDENCE
+        ):
             continue
 
         articles_with_hits += 1
@@ -1568,7 +1970,8 @@ def remap_source_articles(
         new_ids = {
             symbol_to_id[symbol]
             for symbol in ticker_hits.keys()
-            if symbol in symbol_to_id and symbol_to_id[symbol] not in existing_for_article
+            if symbol in symbol_to_id
+            and symbol_to_id[symbol] not in existing_for_article
         }
         if new_ids:
             remapped_articles += 1
@@ -1627,7 +2030,9 @@ def dedupe_businesswire_url_variants(db: Session) -> BusinessWireUrlDedupeStats:
         ).all()
         ticker_rows_by_article: dict[int, list[ArticleTicker]] = {}
         for ticker_row in ticker_rows:
-            ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(ticker_row)
+            ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(
+                ticker_row
+            )
 
         raw_rows = db.scalars(
             select(RawFeedItem).where(RawFeedItem.article_id.in_(article_ids))
@@ -1666,10 +2071,28 @@ def dedupe_businesswire_url_variants(db: Session) -> BusinessWireUrlDedupeStats:
         for duplicate in duplicates:
             duplicate_summary = duplicate.summary or ""
             winner_summary = winner.summary or ""
-            if duplicate_summary and (not winner_summary or len(duplicate_summary) > len(winner_summary)):
+            if duplicate_summary and (
+                not winner_summary or len(duplicate_summary) > len(winner_summary)
+            ):
                 winner.summary = duplicate.summary
-            if duplicate.published_at and (winner.published_at is None or duplicate.published_at > winner.published_at):
+            if duplicate.published_at and (
+                winner.published_at is None
+                or duplicate.published_at > winner.published_at
+            ):
                 winner.published_at = duplicate.published_at
+            duplicate_first_seen = duplicate.first_seen_at or duplicate.created_at
+            winner_first_seen = winner.first_seen_at or winner.created_at
+            if duplicate_first_seen and (
+                winner_first_seen is None
+                or _to_utc(duplicate_first_seen) < _to_utc(winner_first_seen)
+            ):
+                winner.first_seen_at = duplicate_first_seen
+            if duplicate.first_alert_sent_at and (
+                winner.first_alert_sent_at is None
+                or _to_utc(duplicate.first_alert_sent_at)
+                < _to_utc(winner.first_alert_sent_at)
+            ):
+                winner.first_alert_sent_at = duplicate.first_alert_sent_at
 
             for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
                 existing = winner_tickers.get(ticker_row.ticker_id)
@@ -1702,11 +2125,11 @@ def dedupe_businesswire_url_variants(db: Session) -> BusinessWireUrlDedupeStats:
     }
 
 
-def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> TitleDedupeStats:
+def dedupe_articles_by_title(
+    db: Session, *, window_hours: int = 48
+) -> TitleDedupeStats:
     """Merge articles that share the same normalized title within a time window."""
-    all_articles = db.scalars(
-        select(Article).order_by(Article.id.asc())
-    ).all()
+    all_articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
 
     grouped: dict[str, list[Article]] = {}
     for article in all_articles:
@@ -1761,7 +2184,9 @@ def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> TitleDed
             ).all()
             raw_by_article: dict[int, set[int]] = {}
             for raw_row in cluster_raw_rows:
-                raw_by_article.setdefault(raw_row.article_id, set()).add(raw_row.source_id)
+                raw_by_article.setdefault(raw_row.article_id, set()).add(
+                    raw_row.source_id
+                )
             bw_source_id = db.scalar(
                 select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
             )
@@ -1785,7 +2210,9 @@ def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> TitleDed
             ).all()
             ticker_rows_by_article: dict[int, list[ArticleTicker]] = {}
             for ticker_row in ticker_rows:
-                ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(ticker_row)
+                ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(
+                    ticker_row
+                )
 
             raw_rows = cluster_raw_rows
 
@@ -1814,12 +2241,28 @@ def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> TitleDed
             for duplicate in duplicates:
                 dup_summary = duplicate.summary or ""
                 win_summary = winner.summary or ""
-                if dup_summary and (not win_summary or len(dup_summary) > len(win_summary)):
+                if dup_summary and (
+                    not win_summary or len(dup_summary) > len(win_summary)
+                ):
                     winner.summary = duplicate.summary
                 if duplicate.published_at and (
-                    winner.published_at is None or duplicate.published_at > winner.published_at
+                    winner.published_at is None
+                    or duplicate.published_at > winner.published_at
                 ):
                     winner.published_at = duplicate.published_at
+                duplicate_first_seen = duplicate.first_seen_at or duplicate.created_at
+                winner_first_seen = winner.first_seen_at or winner.created_at
+                if duplicate_first_seen and (
+                    winner_first_seen is None
+                    or _to_utc(duplicate_first_seen) < _to_utc(winner_first_seen)
+                ):
+                    winner.first_seen_at = duplicate_first_seen
+                if duplicate.first_alert_sent_at and (
+                    winner.first_alert_sent_at is None
+                    or _to_utc(duplicate.first_alert_sent_at)
+                    < _to_utc(winner.first_alert_sent_at)
+                ):
+                    winner.first_alert_sent_at = duplicate.first_alert_sent_at
 
                 for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
                     existing = winner_tickers.get(ticker_row.ticker_id)
@@ -1860,5 +2303,281 @@ def remap_businesswire_articles(
     only_unmapped: bool = True,
 ) -> SourceRemapStats:
     return remap_source_articles(
-        db, settings, source_code="businesswire", limit=limit, only_unmapped=only_unmapped,
+        db,
+        settings,
+        source_code="businesswire",
+        limit=limit,
+        only_unmapped=only_unmapped,
     )
+
+
+class PurgeFalsePositiveStats(TypedDict):
+    scanned_articles: int
+    purged_articles: int
+    deleted_article_tickers: int
+    deleted_raw_feed_items: int
+
+
+def _reextract_purge_article_tickers(
+    article: Article,
+    raw_contexts: list[tuple[str, str | None, str | None]],
+    known_symbols: set[str],
+    timeout_seconds: int,
+    *,
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
+) -> dict[str, tuple[str, float]]:
+    primary_link = article.canonical_url
+    primary_feed_url = ""
+    for _source_code, raw_link, feed_url in raw_contexts:
+        if raw_link:
+            primary_link = raw_link
+        if feed_url:
+            primary_feed_url = feed_url
+        if raw_link or feed_url:
+            break
+
+    hits = _extract_entry_tickers(
+        article.title,
+        article.summary or "",
+        primary_link,
+        primary_feed_url,
+        known_symbols,
+        symbol_keywords=symbol_keywords,
+    )
+    if _max_ticker_confidence(hits) >= MIN_PERSIST_CONFIDENCE:
+        return hits
+
+    for source_code, raw_link, feed_url in raw_contexts:
+        config = PAGE_FETCH_CONFIGS.get(source_code)
+        if config is None:
+            continue
+        fallback_hits = _extract_source_fallback_tickers(
+            article.title,
+            article.summary or "",
+            raw_link or article.canonical_url,
+            feed_url or "",
+            known_symbols,
+            timeout_seconds,
+            config,
+            symbol_keywords=symbol_keywords,
+        )
+        _merge_ticker_hits(hits, fallback_hits)
+        if _max_ticker_confidence(hits) >= MIN_PERSIST_CONFIDENCE:
+            break
+
+    return hits
+
+
+def purge_token_only_articles(
+    db: Session,
+    *,
+    dry_run: bool = True,
+    limit: int = 2000,
+    timeout_seconds: int = 20,
+) -> PurgeFalsePositiveStats:
+    """Remove articles that were only matched via unvalidated token patterns.
+
+    Targets non-Business Wire articles whose highest-confidence ticker match
+    is below MIN_PERSIST_CONFIDENCE (i.e. bare token matches that would no
+    longer be persisted under the current rules).
+    """
+    # Load symbol keywords for re-evaluation.
+    ticker_rows = db.execute(
+        select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
+            Ticker.active.is_(True)
+        )
+    ).all()
+    symbol_keywords = _build_symbol_keywords(ticker_rows)
+    known_symbols = frozenset(row[1].upper() for row in ticker_rows)
+
+    # Find non-Business Wire articles that have ticker mappings.
+    # Use NOT EXISTS instead of NOT IN to avoid NULL-sensitivity issues
+    # (raw_feed_items.article_id is nullable).
+    bw_source_id = db.scalar(
+        select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
+    )
+    mapped_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(ArticleTicker.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )
+    low_confidence_exists = (
+        select(func.max(ArticleTicker.confidence))
+        .where(ArticleTicker.article_id == Article.id)
+        .correlate(Article)
+        .scalar_subquery()
+    )
+    has_any_raw = (
+        select(1)
+        .select_from(RawFeedItem)
+        .where(RawFeedItem.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )
+
+    bw_exists = (
+        (
+            select(1)
+            .select_from(RawFeedItem)
+            .where(
+                and_(
+                    RawFeedItem.article_id == Article.id,
+                    RawFeedItem.source_id == bw_source_id,
+                )
+            )
+            .correlate(Article)
+            .exists()
+        )
+        if bw_source_id is not None
+        else None
+    )
+
+    scanned = 0
+    purged = 0
+    deleted_at = 0
+    deleted_rfi = 0
+    # In dry_run mode, articles with NULL published_at always pass the cursor
+    # filter (NULLS LAST) and would be re-scanned every batch.  Track their
+    # IDs to avoid inflating counts.
+    seen_ids: set[int] = set()
+
+    batch_size = min(max(limit, 200), 1000)
+    cursor_published_at: datetime | None = None
+    cursor_id: int | None = None
+
+    while purged < limit:
+        query = (
+            select(Article)
+            .where(mapped_exists)
+            .where(has_any_raw)
+            .where(low_confidence_exists < MIN_PERSIST_CONFIDENCE)
+        )
+        if bw_exists is not None:
+            query = query.where(~bw_exists)
+        if cursor_id is not None:
+            if cursor_published_at is None:
+                query = query.where(
+                    and_(
+                        Article.published_at.is_(None),
+                        Article.id < cursor_id,
+                    )
+                )
+            else:
+                query = query.where(
+                    or_(
+                        Article.published_at.is_(None),
+                        Article.published_at < cursor_published_at,
+                        and_(
+                            Article.published_at == cursor_published_at,
+                            Article.id < cursor_id,
+                        ),
+                    )
+                )
+        articles = db.scalars(
+            query.order_by(
+                Article.published_at.desc().nullslast(), Article.id.desc()
+            ).limit(batch_size)
+        ).all()
+        if not articles:
+            break
+
+        article_ids = [article.id for article in articles]
+        raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = (
+            {}
+        )
+        raw_context_rows = db.execute(
+            select(
+                RawFeedItem.article_id,
+                Source.code,
+                RawFeedItem.raw_link,
+                RawFeedItem.feed_url,
+            )
+            .join(Source, Source.id == RawFeedItem.source_id)
+            .where(RawFeedItem.article_id.in_(article_ids))
+            .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
+        ).all()
+        for article_id, source_code, raw_link, feed_url in raw_context_rows:
+            raw_contexts_by_article.setdefault(article_id, []).append(
+                (source_code, raw_link, feed_url)
+            )
+
+        for article in articles:
+            if article.id in seen_ids:
+                continue
+            seen_ids.add(article.id)
+            scanned += 1
+
+            raw_contexts = raw_contexts_by_article.get(article.id, [])
+            if not raw_contexts:
+                # No raw rows means provenance is unknown after retention pruning.
+                # Conservatively skip instead of treating the article as non-BW.
+                continue
+            if any(
+                source_code == GENERAL_SOURCE_CODE
+                for source_code, _, _ in raw_contexts
+            ):
+                continue
+
+            # Re-evaluate tickers with the same fallback extraction rules used
+            # during ingestion for sources that support page fetch.
+            hits = _reextract_purge_article_tickers(
+                article,
+                raw_contexts,
+                known_symbols,
+                timeout_seconds,
+                symbol_keywords=symbol_keywords,
+            )
+            max_conf = _max_ticker_confidence(hits)
+
+            if max_conf >= MIN_PERSIST_CONFIDENCE:
+                continue
+
+            # This article would no longer be persisted — purge it.
+            if not dry_run:
+                at_count = db.execute(
+                    delete(ArticleTicker).where(ArticleTicker.article_id == article.id)
+                ).rowcount
+                rfi_count = db.execute(
+                    delete(RawFeedItem).where(RawFeedItem.article_id == article.id)
+                ).rowcount
+                db.execute(delete(Article).where(Article.id == article.id))
+                deleted_at += at_count
+                deleted_rfi += rfi_count
+            else:
+                at_count = (
+                    db.scalar(
+                        select(func.count())
+                        .select_from(ArticleTicker)
+                        .where(ArticleTicker.article_id == article.id)
+                    )
+                    or 0
+                )
+                rfi_count = (
+                    db.scalar(
+                        select(func.count())
+                        .select_from(RawFeedItem)
+                        .where(RawFeedItem.article_id == article.id)
+                    )
+                    or 0
+                )
+                deleted_at += at_count
+                deleted_rfi += rfi_count
+            purged += 1
+            if purged >= limit:
+                break
+
+        last_article = articles[-1]
+        cursor_published_at = last_article.published_at
+        cursor_id = last_article.id
+
+    if not dry_run:
+        db.commit()
+
+    return {
+        "scanned_articles": scanned,
+        "purged_articles": purged,
+        "deleted_article_tickers": deleted_at,
+        "deleted_raw_feed_items": deleted_rfi,
+    }

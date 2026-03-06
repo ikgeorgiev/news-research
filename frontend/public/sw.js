@@ -25,19 +25,7 @@ self.addEventListener("push", (event) => {
         url,
       }
 
-      const clients = await self.clients.matchAll({
-        type: "window",
-        includeUncontrolled: true,
-      })
-      const visibleClient = clients.find((client) => client.visibilityState === "visible")
-      if (visibleClient) {
-        visibleClient.postMessage({
-          type: "push-notification",
-          payload: data,
-        })
-        return
-      }
-
+      // Always show OS notification (tag dedupes across tabs)
       await self.registration.showNotification(title, {
         body,
         icon: "/icon.svg",
@@ -47,6 +35,19 @@ self.addEventListener("push", (event) => {
         requireInteraction: true,
         data,
       })
+
+      // Notify one visible tab so it can update its feed (avoid N duplicate fetches)
+      const clients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      })
+      const visibleClient = clients.find((c) => c.visibilityState === "visible")
+      if (visibleClient) {
+        visibleClient.postMessage({
+          type: "push-notification",
+          payload: data,
+        })
+      }
     })()
   )
 })
@@ -61,15 +62,16 @@ self.addEventListener("notificationclick", (event) => {
         includeUncontrolled: true,
       })
 
-      for (const client of clients) {
-        if ("focus" in client) {
-          client.postMessage({
-            type: "push-notification-click",
-            payload: event.notification?.data || {},
-          })
-          await client.focus()
-          return
-        }
+      // Prefer an already-visible tab; fall back to the first available
+      const visibleClient = clients.find((c) => c.visibilityState === "visible")
+      const target = visibleClient || clients.find((c) => "focus" in c)
+      if (target) {
+        target.postMessage({
+          type: "push-notification-click",
+          payload: event.notification?.data || {},
+        })
+        await target.focus()
+        return
       }
 
       if (self.clients.openWindow) {

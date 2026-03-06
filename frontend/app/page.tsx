@@ -14,10 +14,12 @@ import { NewsItem, PushAlertScopes, TickerItem } from "@/lib/types"
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
+const ALERT_POLL_MS = 60_000
 const ALERT_COOLDOWN_MS = 60_000
 const ALERT_BATCH_SIZE = 10
 const MAX_PERSISTED_READ_IDS = 20_000
 const MAX_PERSISTED_STARRED_IDS = 10_000
+const MAX_PERSISTED_LOCAL_ALERT_IDS = 5_000
 const NEWS_IDS_PAGE_SIZE = 1000
 
 type Watchlist = {
@@ -26,6 +28,17 @@ type Watchlist = {
   provider?: string
   q?: string
   tickers?: string[]
+}
+
+type AlertScopeQuery = {
+  key: string
+  params: {
+    tickers?: string[]
+    provider?: string
+    includeUnmappedFromProvider?: string
+    q?: string
+    limit: number
+  }
 }
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
@@ -65,6 +78,35 @@ function persistValue(key: string, value: string): void {
   } catch (err) {
     console.warn(`Failed to persist ${key} to localStorage`, err)
   }
+}
+
+function trimLocalAlertSentMap(
+  input: Record<string, string>,
+  maxSize: number,
+): Record<string, string> {
+  const entries = Object.entries(input)
+    .filter(([key, value]) => /^\d+$/.test(key) && !Number.isNaN(Date.parse(value)))
+    .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
+
+  if (entries.length <= maxSize) {
+    return Object.fromEntries(entries)
+  }
+  return Object.fromEntries(entries.slice(0, maxSize))
+}
+
+function applyLocalAlertSentTimes(
+  items: NewsItem[],
+  localAlertSentAt: Record<string, string>,
+): NewsItem[] {
+  let changed = false
+  const patched = items.map((item) => {
+    if (item.alert_sent_at) return item
+    const localSentAt = localAlertSentAt[String(item.id)]
+    if (!localSentAt) return item
+    changed = true
+    return { ...item, alert_sent_at: localSentAt }
+  })
+  return changed ? patched : items
 }
 
 function formatDetailedDate(iso: string | null | undefined): string {
@@ -132,6 +174,41 @@ function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
+function buildAlertScopeQueries(
+  alertIncludeAllNews: boolean,
+  alertWatchlistIds: Set<string>,
+  customWatchlists: Watchlist[],
+): AlertScopeQuery[] {
+  const scopes: AlertScopeQuery[] = []
+  if (alertIncludeAllNews) {
+    scopes.push({
+      key: "all",
+      params: {
+        includeUnmappedFromProvider: "Business Wire",
+        limit: 40,
+      },
+    })
+  }
+
+  const watchlistsById = new Map(customWatchlists.map((wl) => [wl.id, wl]))
+  for (const watchlistId of alertWatchlistIds) {
+    const wl = watchlistsById.get(watchlistId)
+    if (!wl) continue
+    const wlTickers = wl.tickers && wl.tickers.length > 0 ? [...wl.tickers] : undefined
+    scopes.push({
+      key: `watchlist:${watchlistId}`,
+      params: {
+        tickers: wlTickers,
+        provider: wl.provider || undefined,
+        q: wl.q || undefined,
+        limit: 40,
+      },
+    })
+  }
+
+  return scopes
+}
+
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
@@ -181,6 +258,9 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null)
   
   const [mounted, setMounted] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState<boolean>(
+    () => typeof document === "undefined" || document.visibilityState === "visible"
+  )
   const feedGenerationRef = useRef(0)
   const feedContainerRef = useRef<HTMLElement | null>(null)
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
@@ -195,10 +275,13 @@ export default function Page() {
   const pushActiveRef = useRef(false)
   const [pushSupported, setPushSupported] = useState(false)
   const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
+  const alertIncludeAllNewsRef = useRef(true)
   const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
+  const alertWatchlistIdsRef = useRef<Set<string>>(new Set())
   const alertQueueRef = useRef<NewsItem[]>([])
   const alertQueuedIdsRef = useRef<Set<number>>(new Set())
   const alertScopeLastSeenRef = useRef<Record<string, number>>({})
+  const localAlertSentAtRef = useRef<Record<string, string>>({})
   const lastAlertAtRef = useRef(0)
   const alertWatchlistKey = useMemo(
     () => Array.from(alertWatchlistIds).sort().join(","),
@@ -235,6 +318,10 @@ export default function Page() {
       watchlists,
     }
   }, [alertIncludeAllNews, alertWatchlistKey, customWatchlists])
+  const alertScopeQueries = useMemo(
+    () => buildAlertScopeQueries(alertIncludeAllNews, alertWatchlistIds, customWatchlists),
+    [alertIncludeAllNews, alertWatchlistKey, customWatchlists],
+  )
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -309,6 +396,17 @@ export default function Page() {
         const parsed = Number(storedAlertLastFiredAt)
         if (Number.isFinite(parsed) && parsed > 0) {
           lastAlertAtRef.current = parsed
+        }
+      }
+
+      const storedLocalAlertSentAt = localStorage.getItem("localAlertSentAt")
+      if (storedLocalAlertSentAt) {
+        const parsed = JSON.parse(storedLocalAlertSentAt)
+        if (parsed && typeof parsed === "object") {
+          localAlertSentAtRef.current = trimLocalAlertSentMap(
+            parsed as Record<string, string>,
+            MAX_PERSISTED_LOCAL_ALERT_IDS,
+          )
         }
       }
     } catch (e) {
@@ -418,6 +516,56 @@ export default function Page() {
     } catch { /* ignore audio errors */ }
   }
 
+  const hydrateAlertSentAt = (newsItems: NewsItem[]) =>
+    applyLocalAlertSentTimes(newsItems, localAlertSentAtRef.current)
+
+  const persistLocalAlertSentAt = (articleIds: number[], sentAtIso: string) => {
+    if (articleIds.length === 0) return
+    const next = { ...localAlertSentAtRef.current }
+    for (const articleId of articleIds) {
+      if (!Number.isInteger(articleId) || articleId <= 0) continue
+      next[String(articleId)] = sentAtIso
+    }
+    localAlertSentAtRef.current = trimLocalAlertSentMap(
+      next,
+      MAX_PERSISTED_LOCAL_ALERT_IDS,
+    )
+    persistJson("localAlertSentAt", localAlertSentAtRef.current)
+  }
+
+  const advanceAlertWatermarks = (scopeKeys: string[], newsItems: NewsItem[]) => {
+    if (scopeKeys.length === 0 || newsItems.length === 0) return
+    const maxId = newsItems.reduce((max, item) => Math.max(max, item.id), 0)
+    if (maxId <= 0) return
+
+    let changed = false
+    for (const scopeKey of scopeKeys) {
+      const prevSeen = alertScopeLastSeenRef.current[scopeKey]
+      if (typeof prevSeen !== "number" || maxId > prevSeen) {
+        alertScopeLastSeenRef.current[scopeKey] = maxId
+        changed = true
+      }
+    }
+    if (changed) {
+      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
+    }
+  }
+
+  const markAlertsSentLocally = (articleIds: number[], sentAtIso: string) => {
+    if (articleIds.length === 0) return
+    persistLocalAlertSentAt(articleIds, sentAtIso)
+    const targetIds = new Set(articleIds)
+    const patch = (current: NewsItem[]) =>
+      current.map((item) =>
+        targetIds.has(item.id) && !item.alert_sent_at
+          ? { ...item, alert_sent_at: sentAtIso }
+          : item
+      )
+    setItems((prev) => patch(prev))
+    setPendingNewItems((prev) => patch(prev))
+    setGlobalItems((prev) => patch(prev))
+  }
+
   const fireNotification = (newItems: NewsItem[]) => {
     if (!notificationsEnabledRef.current) return
     if (pushActiveRef.current) return
@@ -436,6 +584,14 @@ export default function Page() {
       window.focus()
       notif.close()
     }
+    const sentAtIso = new Date().toISOString()
+    const sentIds = newItems.map((item) => item.id)
+    markAlertsSentLocally(sentIds, sentAtIso)
+  }
+
+  const clearQueuedAlerts = () => {
+    alertQueueRef.current = []
+    alertQueuedIdsRef.current.clear()
   }
 
   const flushQueuedAlerts = () => {
@@ -518,8 +674,15 @@ export default function Page() {
     notificationsEnabledRef.current = notificationsEnabled
     if (notificationsEnabled && !pushActive) {
       flushQueuedAlerts()
+    } else if (!notificationsEnabled) {
+      clearQueuedAlerts()
     }
   }, [notificationsEnabled, pushActive])
+
+  useEffect(() => {
+    alertIncludeAllNewsRef.current = alertIncludeAllNews
+    alertWatchlistIdsRef.current = alertWatchlistIds
+  }, [alertIncludeAllNews, alertWatchlistIds])
 
   // Fetch tickers once
   useEffect(() => {
@@ -547,7 +710,7 @@ export default function Page() {
       limit: 100, // Fetch a larger chunk for accurate unread calculations
       signal: controller.signal,
     })
-      .then((data) => setGlobalItems(data.items))
+      .then((data) => setGlobalItems(hydrateAlertSentAt(data.items)))
       .catch(() => {}) // Ignore errors for background global fetch
 
     return () => controller.abort()
@@ -590,7 +753,9 @@ export default function Page() {
     }
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
+      const visible = document.visibilityState === "visible"
+      setIsPageVisible(visible)
+      if (visible) {
         refreshNow()
         startTimer()
       } else {
@@ -598,10 +763,16 @@ export default function Page() {
       }
     }
 
-    const onWindowFocus = () => refreshNow()
+    const onWindowFocus = () => {
+      setIsPageVisible(true)
+      refreshNow()
+    }
 
     if (document.visibilityState === "visible") {
+      setIsPageVisible(true)
       startTimer()
+    } else {
+      setIsPageVisible(false)
     }
 
     document.addEventListener("visibilitychange", onVisibilityChange)
@@ -621,8 +792,19 @@ export default function Page() {
     const onMessage = (event: MessageEvent) => {
       const payload = event.data
       if (!payload || typeof payload !== "object") return
-      if (payload.type === "push-notification" || payload.type === "push-notification-click") {
+
+      if (payload.type === "push-notification-click") {
+        // User explicitly clicked the notification — wants to see content
         triggerRefresh("manual")
+        return
+      }
+
+      if (payload.type === "push-notification") {
+        // Determine if user is scrolled deep in the feed
+        const feedEl = feedContainerRef.current
+        const scrolledDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
+        // Scrolled deep → buffer into pending banner; at top → update inline
+        triggerRefresh(scrolledDeep ? "auto" : "manual")
       }
     }
 
@@ -633,102 +815,105 @@ export default function Page() {
   }, [mounted])
 
   // Phase 1 rule-based alerts: all-news + selected watchlists.
+  // Visible-tab only: hidden tabs would otherwise duplicate local Notifications.
   useEffect(() => {
     if (!mounted) return
+    if (!notificationsEnabled) return
     if (pushActive) return
+    if (!isPageVisible) return
     if (!alertScopesConfigured) return
 
-    type ScopeQuery = {
-      key: string
-      params: {
-        tickers?: string[]
-        provider?: string
-        includeUnmappedFromProvider?: string
-        q?: string
-        limit: number
-      }
-    }
-
-    const scopes: ScopeQuery[] = []
-    if (alertIncludeAllNews) {
-      scopes.push({
-        key: "all",
-        params: {
-          includeUnmappedFromProvider: "Business Wire",
-          limit: 40,
-        },
-      })
-    }
-
-    const watchlistsById = new Map(customWatchlists.map((wl) => [wl.id, wl]))
-    for (const watchlistId of alertWatchlistIds) {
-      const wl = watchlistsById.get(watchlistId)
-      if (!wl) continue
-      const wlTickers = wl.tickers && wl.tickers.length > 0 ? [...wl.tickers] : undefined
-      scopes.push({
-        key: `watchlist:${watchlistId}`,
-        params: {
-          tickers: wlTickers,
-          provider: wl.provider || undefined,
-          q: wl.q || undefined,
-          limit: 40,
-        },
-      })
-    }
-
-    if (scopes.length === 0) return
-
     let cancelled = false
+    let pollTimerId: number | null = null
+    let activeController: AbortController | null = null
+
+    const clearScheduledPoll = () => {
+      if (pollTimerId === null) return
+      window.clearTimeout(pollTimerId)
+      pollTimerId = null
+    }
+
+    const scheduleNextPoll = () => {
+      if (cancelled) return
+      clearScheduledPoll()
+      pollTimerId = window.setTimeout(() => {
+        pollTimerId = null
+        void run()
+      }, ALERT_POLL_MS)
+    }
+
     const run = async () => {
+      if (cancelled) return
+      if (alertScopeQueries.length === 0) {
+        scheduleNextPoll()
+        return
+      }
+
+      const controller = new AbortController()
+      activeController = controller
       const incoming: NewsItem[] = []
       const incomingIds = new Set<number>()
 
-      for (const scope of scopes) {
-        try {
-          const data = await fetchNews(scope.params)
-          if (cancelled) return
+      try {
+        for (const scope of alertScopeQueries) {
+          try {
+            const data = await fetchNews({ ...scope.params, signal: controller.signal })
+            if (cancelled || controller.signal.aborted) return
 
-          if (data.items.length === 0) continue
-          const maxId = data.items.reduce((max, item) => Math.max(max, item.id), 0)
-          if (maxId <= 0) continue
+            if (data.items.length === 0) continue
+            const maxId = data.items.reduce((max, item) => Math.max(max, item.id), 0)
+            if (maxId <= 0) continue
 
-          const prevSeen = alertScopeLastSeenRef.current[scope.key]
-          if (typeof prevSeen !== "number") {
-            // First observation of this scope seeds the watermark without alerting.
-            alertScopeLastSeenRef.current[scope.key] = maxId
-            continue
-          }
+            const prevSeen = alertScopeLastSeenRef.current[scope.key]
+            if (typeof prevSeen !== "number") {
+              // First observation of this scope seeds the watermark without alerting.
+              alertScopeLastSeenRef.current[scope.key] = maxId
+              continue
+            }
 
-          const fresh = data.items.filter((item) => item.id > prevSeen)
-          for (const item of fresh) {
-            if (incomingIds.has(item.id)) continue
-            if (alertQueuedIdsRef.current.has(item.id)) continue
-            incomingIds.add(item.id)
-            incoming.push(item)
+            const fresh = data.items.filter((item) => item.id > prevSeen)
+            for (const item of fresh) {
+              if (incomingIds.has(item.id)) continue
+              if (alertQueuedIdsRef.current.has(item.id)) continue
+              incomingIds.add(item.id)
+              incoming.push(item)
+            }
+            if (maxId > prevSeen) {
+              alertScopeLastSeenRef.current[scope.key] = maxId
+            }
+          } catch {
+            if (controller.signal.aborted) return
+            // Ignore alert polling errors and keep UI/feed flow uninterrupted.
           }
-          if (maxId > prevSeen) {
-            alertScopeLastSeenRef.current[scope.key] = maxId
-          }
-        } catch {
-          // Ignore alert polling errors and keep UI/feed flow uninterrupted.
+        }
+
+        if (cancelled || controller.signal.aborted) return
+        if (notificationsEnabled && incoming.length > 0) {
+          enqueueAlertItems(incoming)
+        } else if (notificationsEnabled) {
+          flushQueuedAlerts()
+        }
+        persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
+      } finally {
+        if (activeController === controller) {
+          activeController = null
+        }
+        if (!cancelled && !controller.signal.aborted) {
+          scheduleNextPoll()
         }
       }
-
-      if (cancelled) return
-      if (incoming.length > 0) {
-        enqueueAlertItems(incoming)
-      } else {
-        flushQueuedAlerts()
-      }
-      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
     }
 
+    // Run immediately on mount/config change, then schedule the next poll only
+    // after the current cycle finishes so alert state cannot race itself.
     void run()
 
     return () => {
       cancelled = true
+      clearScheduledPoll()
+      activeController?.abort()
     }
-  }, [mounted, pushActive, refreshTick, alertScopesConfigured, alertIncludeAllNews, alertWatchlistKey, customWatchlists])
+  }, [mounted, pushActive, notificationsEnabled, isPageVisible, alertScopesConfigured, alertScopeQueries])
 
   useEffect(() => {
     if (!mounted) return
@@ -779,6 +964,23 @@ export default function Page() {
       activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
         ? "Business Wire"
         : undefined
+    // Compute matching alert scopes using refs to avoid triggering re-fetches
+    // when alert config changes (those changes don't affect the feed query).
+    const matchingAlertScopeKeys: string[] = []
+    if (notificationsEnabledRef.current && !pushActiveRef.current) {
+      if (activeWatchlistId === "all") {
+        if (alertIncludeAllNewsRef.current && !ticker && !provider && !searchQuery) {
+          matchingAlertScopeKeys.push("all")
+        }
+      } else if (
+        alertWatchlistIdsRef.current.has(activeWatchlistId)
+        && !ticker
+        && provider === (activeWatchlist?.provider || "")
+        && searchQuery === (activeWatchlist?.q || "")
+      ) {
+        matchingAlertScopeKeys.push(`watchlist:${activeWatchlistId}`)
+      }
+    }
 
     // When user is scrolled deep, fetch in the background and buffer new items
     // instead of updating the feed directly.  We snapshot the current generation
@@ -797,8 +999,12 @@ export default function Page() {
         .then((data) => {
           // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
+          const fetchedItems = hydrateAlertSentAt(data.items)
+          // Buffered stories are already surfaced via the pending banner, so
+          // keep alert polling in sync and do not notify for them again.
+          advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
           const currentIds = new Set(itemsRef.current.map((i) => i.id))
-          const newOnes = data.items.filter((i) => !currentIds.has(i.id))
+          const newOnes = fetchedItems.filter((i) => !currentIds.has(i.id))
           const pendingIds = new Set(pendingNewItemsRef.current.map((i) => i.id))
           const freshOnes = newOnes.filter((i) => !pendingIds.has(i.id))
           if (freshOnes.length > 0) {
@@ -838,23 +1044,26 @@ export default function Page() {
     })
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
+        const fetchedItems = hydrateAlertSentAt(data.items)
         // Refresh succeeded — safe to clear pending banner.
         setPendingNewItems([])
         const currentIds = new Set(itemsRef.current.map((item) => item.id))
         const autoRefreshNewOnes = isAutoRefresh
-          ? data.items.filter((item) => !currentIds.has(item.id))
+          ? fetchedItems.filter((item) => !currentIds.has(item.id))
           : []
         if (isAutoRefresh && itemsRef.current.length > data.items.length) {
           // Keep previously loaded pages; prepend only genuinely new top stories.
           setItems((prev) => {
             const prevIds = new Set(prev.map((item) => item.id))
-            const prepend = data.items.filter((item) => !prevIds.has(item.id))
+            const prepend = fetchedItems.filter((item) => !prevIds.has(item.id))
             return prepend.length > 0 ? [...prepend, ...prev] : prev
           })
+          advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
           setNextCursor((prev) => prev ?? data.next_cursor)
           return
         }
-        setItems(data.items)
+        setItems(fetchedItems)
+        advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
         setNextCursor(data.next_cursor)
       })
       .catch((err: unknown) => {
@@ -870,7 +1079,14 @@ export default function Page() {
       })
 
     return () => controller.abort()
-  }, [ticker, provider, searchQuery, activeWatchlist, refreshTick])
+  }, [
+    ticker,
+    provider,
+    searchQuery,
+    activeWatchlist,
+    activeWatchlistId,
+    refreshTick,
+  ])
 
   const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -911,9 +1127,10 @@ export default function Page() {
         cursor: nextCursor,
       })
       if (requestGeneration !== feedGenerationRef.current) return
+      const fetchedItems = hydrateAlertSentAt(data.items)
       setItems((prev) => {
         const prevIds = new Set(prev.map((item) => item.id))
-        const append = data.items.filter((item) => !prevIds.has(item.id))
+        const append = fetchedItems.filter((item) => !prevIds.has(item.id))
         return append.length > 0 ? [...prev, ...append] : prev
       })
       setNextCursor(data.next_cursor)
@@ -1578,6 +1795,13 @@ export default function Page() {
                     {item.summary && (
                       <div className="summary-text">{item.summary}</div>
                     )}
+                    <p>
+                      <strong>Seen by system:</strong> {formatDetailedDate(item.first_seen_at)}
+                    </p>
+                    <p>
+                      <strong>Alert sent:</strong>{" "}
+                      {item.alert_sent_at ? formatDetailedDate(item.alert_sent_at) : "Pending / not sent"}
+                    </p>
                   </div>
                 )}
               </article>

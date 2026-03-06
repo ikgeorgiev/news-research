@@ -6,6 +6,8 @@ export type NewsItem = {
   provider: string
   summary: string | null
   published_at: string
+  first_seen_at: string
+  alert_sent_at: string | null
   tickers: string[]
   dedupe_group: string
 }

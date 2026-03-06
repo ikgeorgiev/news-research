@@ -73,6 +73,14 @@ class Article(Base):
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     title_normalized_hash: Mapped[str] = mapped_column(String(64), index=True)
     cluster_key: Mapped[str] = mapped_column(String(64), index=True)
+    # Time this article first entered our system.
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, index=True)
+    # First successful push-alert delivery time for this article (if any).
+    first_alert_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
 

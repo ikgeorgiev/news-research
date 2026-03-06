@@ -13,6 +13,8 @@ class NewsItem(BaseModel):
     provider: str
     summary: str | None
     published_at: datetime
+    first_seen_at: datetime
+    alert_sent_at: datetime | None
     tickers: list[str]
     dedupe_group: str
 
@@ -30,6 +32,16 @@ class NewsCountResponse(BaseModel):
 class NewsIdsResponse(BaseModel):
     ids: list[int]
     next_cursor: str | None = None
+
+
+class MarkAlertsSentRequest(BaseModel):
+    article_ids: list[int] = Field(default_factory=list)
+
+
+class MarkAlertsSentResponse(BaseModel):
+    requested: int
+    marked: int
+    first_alert_sent_at: datetime | None = None
 
 
 class TickerItem(BaseModel):
@@ -100,6 +112,14 @@ class TitleDedupeResponse(BaseModel):
     ticker_rows_relinked: int
     ticker_rows_updated: int
     ticker_rows_deleted: int
+
+
+class PurgeFalsePositiveResponse(BaseModel):
+    dry_run: bool
+    scanned_articles: int
+    purged_articles: int
+    deleted_article_tickers: int
+    deleted_raw_feed_items: int
 
 
 class ReloadTickersResponse(BaseModel):

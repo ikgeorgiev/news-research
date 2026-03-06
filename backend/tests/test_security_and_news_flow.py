@@ -6,12 +6,23 @@ import uuid
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
-from app.main import count_news, health, list_news, list_news_ids, require_admin_api_key, settings
+from app.main import (
+    app,
+    count_news,
+    health,
+    list_news,
+    list_news_ids,
+    mark_news_alerts_sent,
+    require_admin_api_key,
+    settings,
+)
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
+from app.schemas import MarkAlertsSentRequest
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import sha256_str
 
@@ -69,6 +80,19 @@ def test_require_admin_api_key_rejects_invalid_key(monkeypatch: pytest.MonkeyPat
 def test_require_admin_api_key_accepts_valid_key(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "admin_api_key", "expected-key")
     require_admin_api_key("expected-key")
+
+
+def test_mark_news_alerts_sent_route_requires_admin_api_key():
+    route = next(
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == f"{settings.api_prefix}/news/alerts/sent"
+        and "POST" in route.methods
+    )
+
+    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+    assert require_admin_api_key in dependency_calls
 
 
 def test_health_returns_degraded_when_db_check_raises(monkeypatch: pytest.MonkeyPatch):
@@ -183,6 +207,8 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
     )
     assert [item.id for item in bw_response.items] == [article.id]
     assert bw_response.items[0].provider == "Business Wire"
+    assert bw_response.items[0].first_seen_at is not None
+    assert bw_response.items[0].alert_sent_at is None
 
     yahoo_response = list_news(
         ticker=None,
@@ -308,4 +334,32 @@ def test_ticker_loader_accepts_case_insensitive_header():
     finally:
         if csv_path.exists():
             csv_path.unlink()
+    db.close()
+
+
+def test_mark_news_alerts_sent_sets_first_timestamp_once():
+    db = _make_db_session()
+    article = _seed_article(
+        db,
+        slug="alert-mark",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+
+    first = mark_news_alerts_sent(
+        MarkAlertsSentRequest(article_ids=[article.id, article.id, 999999]),
+        db=db,
+    )
+    row = db.scalar(select(Article).where(Article.id == article.id))
+    assert row is not None
+    assert first.requested == 2
+    assert first.marked == 1
+    assert row.first_alert_sent_at is not None
+
+    second = mark_news_alerts_sent(
+        MarkAlertsSentRequest(article_ids=[article.id]),
+        db=db,
+    )
+    assert second.requested == 1
+    assert second.marked == 0
+
     db.close()

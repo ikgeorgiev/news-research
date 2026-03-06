@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -17,6 +17,7 @@ from app.ingestion import (
     PAGE_FETCH_CONFIGS,
     dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
+    purge_token_only_articles,
     reconcile_stale_ingestion_runs,
     remap_businesswire_articles,
     remap_source_articles,
@@ -30,10 +31,13 @@ from app.schemas import (
     TitleDedupeResponse,
     IngestionRunItem,
     IngestionRunResponse,
+    MarkAlertsSentRequest,
+    MarkAlertsSentResponse,
     NewsCountResponse,
     NewsIdsResponse,
     NewsItem,
     NewsListResponse,
+    PurgeFalsePositiveResponse,
     ReloadTickersResponse,
     RunIngestionResponse,
     SourceRemapResponse,
@@ -60,6 +64,11 @@ MAX_NEWS_IDS_PAGE_SIZE = 5000
 def _published_at_for_response(row: Article) -> datetime:
     """Protect API serialization/cursoring from legacy rows with null published_at."""
     return row.published_at or row.created_at
+
+
+def _first_seen_at_for_response(row: Article) -> datetime:
+    """Protect serialization for legacy rows created before first_seen_at existed."""
+    return row.first_seen_at or row.created_at or _published_at_for_response(row)
 
 
 def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[str]]:
@@ -600,6 +609,8 @@ def list_news(
             provider=providers_by_article.get(row.id) or row.provider_name,
             summary=clean_summary_text(row.summary),
             published_at=_published_at_for_response(row),
+            first_seen_at=_first_seen_at_for_response(row),
+            alert_sent_at=row.first_alert_sent_at,
             tickers=tickers_by_article.get(row.id, []),
             dedupe_group=row.cluster_key,
         )
@@ -638,8 +649,37 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
         provider=providers_by_article.get(row.id) or row.provider_name,
         summary=clean_summary_text(row.summary),
         published_at=_published_at_for_response(row),
+        first_seen_at=_first_seen_at_for_response(row),
+        alert_sent_at=row.first_alert_sent_at,
         tickers=tickers_by_article.get(row.id, []),
         dedupe_group=row.cluster_key,
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/news/alerts/sent",
+    response_model=MarkAlertsSentResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def mark_news_alerts_sent(payload: MarkAlertsSentRequest, db: Session = Depends(get_db)):
+    unique_ids = sorted({int(article_id) for article_id in payload.article_ids if int(article_id) > 0})
+    if not unique_ids:
+        return MarkAlertsSentResponse(requested=0, marked=0, first_alert_sent_at=None)
+
+    sent_at = datetime.now(timezone.utc)
+    updated = db.execute(
+        update(Article)
+        .where(
+            Article.id.in_(unique_ids),
+            Article.first_alert_sent_at.is_(None),
+        )
+        .values(first_alert_sent_at=sent_at)
+    ).rowcount or 0
+    db.commit()
+    return MarkAlertsSentResponse(
+        requested=len(unique_ids),
+        marked=int(updated),
+        first_alert_sent_at=sent_at if updated else None,
     )
 
 
@@ -756,6 +796,34 @@ def admin_dedupe_by_title(db: Session = Depends(get_db)):
         ticker_rows_relinked=int(result["ticker_rows_relinked"]),
         ticker_rows_updated=int(result["ticker_rows_updated"]),
         ticker_rows_deleted=int(result["ticker_rows_deleted"]),
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/purge/false-positives",
+    response_model=PurgeFalsePositiveResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def admin_purge_false_positives(
+    dry_run: bool = Query(
+        default=True,
+        description="Preview what would be deleted without actually deleting",
+    ),
+    limit: int = Query(default=2000, ge=1, le=10000),
+    db: Session = Depends(get_db),
+):
+    result = purge_token_only_articles(
+        db,
+        dry_run=dry_run,
+        limit=limit,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    return PurgeFalsePositiveResponse(
+        dry_run=dry_run,
+        scanned_articles=result["scanned_articles"],
+        purged_articles=result["purged_articles"],
+        deleted_article_tickers=result["deleted_article_tickers"],
+        deleted_raw_feed_items=result["deleted_raw_feed_items"],
     )
 
 

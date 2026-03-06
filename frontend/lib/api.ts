@@ -113,3 +113,4 @@ export async function fetchNewsIds(params: {
 
   return response.json()
 }
+

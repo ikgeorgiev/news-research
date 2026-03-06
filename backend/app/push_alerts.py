@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -478,6 +478,14 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
                 subscription.failure_count = 0
                 subscription.last_error = None
                 subscription.last_success_at = now_utc
+                db.execute(
+                    update(Article)
+                    .where(
+                        Article.id.in_(list(article_ids)),
+                        Article.first_alert_sent_at.is_(None),
+                    )
+                    .values(first_alert_sent_at=now_utc)
+                )
                 record_push_delivery("success")
             elif status == "gone":
                 deactivated += 1
