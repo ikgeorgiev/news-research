@@ -14,13 +14,11 @@ import { NewsItem, PushAlertScopes, TickerItem } from "@/lib/types"
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
-const ALERT_POLL_MS = 60_000
-const ALERT_COOLDOWN_MS = 60_000
-const ALERT_BATCH_SIZE = 10
 const MAX_PERSISTED_READ_IDS = 20_000
 const MAX_PERSISTED_STARRED_IDS = 10_000
-const MAX_PERSISTED_LOCAL_ALERT_IDS = 5_000
 const NEWS_IDS_PAGE_SIZE = 1000
+const PUSH_SUBSCRIBED_STORAGE_KEY = "pushSubscribed"
+const LEGACY_NOTIFICATIONS_STORAGE_KEY = "notificationsEnabled"
 
 type Watchlist = {
   id: string
@@ -28,17 +26,6 @@ type Watchlist = {
   provider?: string
   q?: string
   tickers?: string[]
-}
-
-type AlertScopeQuery = {
-  key: string
-  params: {
-    tickers?: string[]
-    provider?: string
-    includeUnmappedFromProvider?: string
-    q?: string
-    limit: number
-  }
 }
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
@@ -80,33 +67,12 @@ function persistValue(key: string, value: string): void {
   }
 }
 
-function trimLocalAlertSentMap(
-  input: Record<string, string>,
-  maxSize: number,
-): Record<string, string> {
-  const entries = Object.entries(input)
-    .filter(([key, value]) => /^\d+$/.test(key) && !Number.isNaN(Date.parse(value)))
-    .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
-
-  if (entries.length <= maxSize) {
-    return Object.fromEntries(entries)
+function removePersistedValue(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch (err) {
+    console.warn(`Failed to remove ${key} from localStorage`, err)
   }
-  return Object.fromEntries(entries.slice(0, maxSize))
-}
-
-function applyLocalAlertSentTimes(
-  items: NewsItem[],
-  localAlertSentAt: Record<string, string>,
-): NewsItem[] {
-  let changed = false
-  const patched = items.map((item) => {
-    if (item.alert_sent_at) return item
-    const localSentAt = localAlertSentAt[String(item.id)]
-    if (!localSentAt) return item
-    changed = true
-    return { ...item, alert_sent_at: localSentAt }
-  })
-  return changed ? patched : items
 }
 
 function formatDetailedDate(iso: string | null | undefined): string {
@@ -174,41 +140,6 @@ function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
-function buildAlertScopeQueries(
-  alertIncludeAllNews: boolean,
-  alertWatchlistIds: Set<string>,
-  customWatchlists: Watchlist[],
-): AlertScopeQuery[] {
-  const scopes: AlertScopeQuery[] = []
-  if (alertIncludeAllNews) {
-    scopes.push({
-      key: "all",
-      params: {
-        includeUnmappedFromProvider: "Business Wire",
-        limit: 40,
-      },
-    })
-  }
-
-  const watchlistsById = new Map(customWatchlists.map((wl) => [wl.id, wl]))
-  for (const watchlistId of alertWatchlistIds) {
-    const wl = watchlistsById.get(watchlistId)
-    if (!wl) continue
-    const wlTickers = wl.tickers && wl.tickers.length > 0 ? [...wl.tickers] : undefined
-    scopes.push({
-      key: `watchlist:${watchlistId}`,
-      params: {
-        tickers: wlTickers,
-        provider: wl.provider || undefined,
-        q: wl.q || undefined,
-        limit: 40,
-      },
-    })
-  }
-
-  return scopes
-}
-
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
@@ -269,26 +200,15 @@ export default function Page() {
   const lastQueryKeyRef = useRef("")
   const lastAutoRefreshAtRef = useRef(0)
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
-  const notificationsEnabledRef = useRef(false)
-  const [pushActive, setPushActive] = useState(false)
-  const pushActiveRef = useRef(false)
-  const [pushSupported, setPushSupported] = useState(false)
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [, setPushSupported] = useState(false)
   const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
-  const alertIncludeAllNewsRef = useRef(true)
   const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
-  const alertWatchlistIdsRef = useRef<Set<string>>(new Set())
-  const alertQueueRef = useRef<NewsItem[]>([])
-  const alertQueuedIdsRef = useRef<Set<number>>(new Set())
-  const alertScopeLastSeenRef = useRef<Record<string, number>>({})
-  const localAlertSentAtRef = useRef<Record<string, string>>({})
-  const lastAlertAtRef = useRef(0)
   const alertWatchlistKey = useMemo(
     () => Array.from(alertWatchlistIds).sort().join(","),
     [alertWatchlistIds]
   )
-  const alertScopesConfigured = alertIncludeAllNews || alertWatchlistIds.size > 0
-  const activeAlertScopeNames = useMemo(() => {
+  const activePushScopeNames = useMemo(() => {
     const names: string[] = []
     if (alertIncludeAllNews) names.push("All News")
     if (alertWatchlistIds.size > 0) {
@@ -300,8 +220,8 @@ export default function Page() {
     }
     return names
   }, [alertIncludeAllNews, alertWatchlistIds, customWatchlists])
-  const activeAlertScopeCount = activeAlertScopeNames.length
-  const pushAlertScopes = useMemo<PushAlertScopes>(() => {
+  const activePushScopeCount = activePushScopeNames.length
+  const pushScopes = useMemo<PushAlertScopes>(() => {
     const watchlists = Array.from(alertWatchlistIds)
       .map((watchlistId) => customWatchlists.find((watchlist) => watchlist.id === watchlistId))
       .filter((watchlist): watchlist is Watchlist => Boolean(watchlist))
@@ -318,10 +238,6 @@ export default function Page() {
       watchlists,
     }
   }, [alertIncludeAllNews, alertWatchlistKey, customWatchlists])
-  const alertScopeQueries = useMemo(
-    () => buildAlertScopeQueries(alertIncludeAllNews, alertWatchlistIds, customWatchlists),
-    [alertIncludeAllNews, alertWatchlistKey, customWatchlists],
-  )
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -354,14 +270,8 @@ export default function Page() {
         setViewMode(storedViewMode)
       }
 
-      if (
-        localStorage.getItem("notificationsEnabled") === "true" &&
-        typeof Notification !== "undefined" &&
-        Notification.permission === "granted"
-      ) {
-        setNotificationsEnabled(true)
-        notificationsEnabledRef.current = true
-      }
+      // Push subscriptions are now the only supported notification path.
+      removePersistedValue(LEGACY_NOTIFICATIONS_STORAGE_KEY)
 
       const storedAlertIncludeAll = localStorage.getItem("alertIncludeAllNews")
       if (storedAlertIncludeAll !== null) {
@@ -377,38 +287,6 @@ export default function Page() {
         }
       }
 
-      const storedAlertScopeLastSeen = localStorage.getItem("alertScopeLastSeen")
-      if (storedAlertScopeLastSeen) {
-        const parsed = JSON.parse(storedAlertScopeLastSeen)
-        if (parsed && typeof parsed === "object") {
-          const next: Record<string, number> = {}
-          for (const [key, value] of Object.entries(parsed)) {
-            if (typeof key === "string" && typeof value === "number" && Number.isFinite(value) && value > 0) {
-              next[key] = value
-            }
-          }
-          alertScopeLastSeenRef.current = next
-        }
-      }
-
-      const storedAlertLastFiredAt = localStorage.getItem("alertLastFiredAtMs")
-      if (storedAlertLastFiredAt) {
-        const parsed = Number(storedAlertLastFiredAt)
-        if (Number.isFinite(parsed) && parsed > 0) {
-          lastAlertAtRef.current = parsed
-        }
-      }
-
-      const storedLocalAlertSentAt = localStorage.getItem("localAlertSentAt")
-      if (storedLocalAlertSentAt) {
-        const parsed = JSON.parse(storedLocalAlertSentAt)
-        if (parsed && typeof parsed === "object") {
-          localAlertSentAtRef.current = trimLocalAlertSentMap(
-            parsed as Record<string, string>,
-            MAX_PERSISTED_LOCAL_ALERT_IDS,
-          )
-        }
-      }
     } catch (e) {
       console.error("Failed to parse local storage", e)
     } finally {
@@ -417,18 +295,15 @@ export default function Page() {
   }, [])
 
   useEffect(() => {
-    pushActiveRef.current = pushActive
-  }, [pushActive])
-
-  useEffect(() => {
     let cancelled = false
 
     const refreshPushStatus = async () => {
       if (!isPushSupported()) {
         if (!cancelled) {
           setPushSupported(false)
-          setPushActive(false)
+          setPushSubscribed(false)
         }
+        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
         return
       }
       if (!cancelled) {
@@ -438,11 +313,13 @@ export default function Page() {
         const status = await getPushStatus()
         if (cancelled) return
         setPushSupported(status.supported)
-        setPushActive(status.subscribed)
+        setPushSubscribed(status.subscribed)
+        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, status.subscribed ? "true" : "false")
       } catch {
         if (!cancelled) {
-          setPushActive(false)
+          setPushSubscribed(false)
         }
+        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
       }
     }
 
@@ -472,24 +349,6 @@ export default function Page() {
       if (filtered.length === prev.size) return prev
       return new Set(filtered)
     })
-
-    const activeScopeKeys = new Set([
-      "all",
-      ...customWatchlists.map((wl) => `watchlist:${wl.id}`),
-    ])
-    let changed = false
-    const nextScopeState: Record<string, number> = {}
-    for (const [key, value] of Object.entries(alertScopeLastSeenRef.current)) {
-      if (activeScopeKeys.has(key)) {
-        nextScopeState[key] = value
-      } else {
-        changed = true
-      }
-    }
-    if (changed) {
-      alertScopeLastSeenRef.current = nextScopeState
-      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
-    }
   }, [customWatchlists])
 
   useEffect(() => {
@@ -500,140 +359,12 @@ export default function Page() {
     pendingNewItemsRef.current = pendingNewItems
   }, [pendingNewItems])
 
-  const playNotificationSound = () => {
-    try {
-      const ctx = new AudioContext()
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.frequency.value = 880
-      osc.type = "sine"
-      gain.gain.setValueAtTime(0.08, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
-      osc.start()
-      osc.stop(ctx.currentTime + 0.3)
-    } catch { /* ignore audio errors */ }
-  }
-
-  const hydrateAlertSentAt = (newsItems: NewsItem[]) =>
-    applyLocalAlertSentTimes(newsItems, localAlertSentAtRef.current)
-
-  const persistLocalAlertSentAt = (articleIds: number[], sentAtIso: string) => {
-    if (articleIds.length === 0) return
-    const next = { ...localAlertSentAtRef.current }
-    for (const articleId of articleIds) {
-      if (!Number.isInteger(articleId) || articleId <= 0) continue
-      next[String(articleId)] = sentAtIso
-    }
-    localAlertSentAtRef.current = trimLocalAlertSentMap(
-      next,
-      MAX_PERSISTED_LOCAL_ALERT_IDS,
-    )
-    persistJson("localAlertSentAt", localAlertSentAtRef.current)
-  }
-
-  const advanceAlertWatermarks = (scopeKeys: string[], newsItems: NewsItem[]) => {
-    if (scopeKeys.length === 0 || newsItems.length === 0) return
-    const maxId = newsItems.reduce((max, item) => Math.max(max, item.id), 0)
-    if (maxId <= 0) return
-
-    let changed = false
-    for (const scopeKey of scopeKeys) {
-      const prevSeen = alertScopeLastSeenRef.current[scopeKey]
-      if (typeof prevSeen !== "number" || maxId > prevSeen) {
-        alertScopeLastSeenRef.current[scopeKey] = maxId
-        changed = true
-      }
-    }
-    if (changed) {
-      persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
-    }
-  }
-
-  const markAlertsSentLocally = (articleIds: number[], sentAtIso: string) => {
-    if (articleIds.length === 0) return
-    persistLocalAlertSentAt(articleIds, sentAtIso)
-    const targetIds = new Set(articleIds)
-    const patch = (current: NewsItem[]) =>
-      current.map((item) =>
-        targetIds.has(item.id) && !item.alert_sent_at
-          ? { ...item, alert_sent_at: sentAtIso }
-          : item
-      )
-    setItems((prev) => patch(prev))
-    setPendingNewItems((prev) => patch(prev))
-    setGlobalItems((prev) => patch(prev))
-  }
-
-  const fireNotification = (newItems: NewsItem[]) => {
-    if (!notificationsEnabledRef.current) return
-    if (pushActiveRef.current) return
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return
-
-    playNotificationSound()
-
-    const count = newItems.length
-    const tickers = [...new Set(newItems.flatMap(i => i.tickers || []))]
-    const tickerText = tickers.length > 0 ? tickers.slice(0, 5).join(", ") : "General"
-    const title = `CEF News: ${count} new article${count !== 1 ? "s" : ""}`
-    const body = `${tickerText}${tickers.length > 5 ? "..." : ""}\n${newItems[0]?.title || ""}`
-
-    const notif = new Notification(title, { body, tag: "cef-news" })
-    notif.onclick = () => {
-      window.focus()
-      notif.close()
-    }
-    const sentAtIso = new Date().toISOString()
-    const sentIds = newItems.map((item) => item.id)
-    markAlertsSentLocally(sentIds, sentAtIso)
-  }
-
-  const clearQueuedAlerts = () => {
-    alertQueueRef.current = []
-    alertQueuedIdsRef.current.clear()
-  }
-
-  const flushQueuedAlerts = () => {
-    if (alertQueueRef.current.length === 0) return
-    if (!notificationsEnabledRef.current) return
-    if (pushActiveRef.current) return
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return
-
-    const now = Date.now()
-    if (now - lastAlertAtRef.current < ALERT_COOLDOWN_MS) return
-
-    const nextBatch = [...alertQueueRef.current]
-      .sort((a, b) => b.id - a.id)
-      .slice(0, ALERT_BATCH_SIZE)
-    if (nextBatch.length === 0) return
-
-    fireNotification(nextBatch)
-
-    const sentIds = new Set(nextBatch.map((item) => item.id))
-    alertQueueRef.current = alertQueueRef.current.filter((item) => !sentIds.has(item.id))
-    sentIds.forEach((id) => alertQueuedIdsRef.current.delete(id))
-
-    lastAlertAtRef.current = now
-    persistValue("alertLastFiredAtMs", String(now))
-  }
-
-  const enqueueAlertItems = (newItems: NewsItem[]) => {
-    if (newItems.length === 0) return
-    for (const item of newItems) {
-      if (alertQueuedIdsRef.current.has(item.id)) continue
-      alertQueuedIdsRef.current.add(item.id)
-      alertQueueRef.current.push(item)
-    }
-    flushQueuedAlerts()
-  }
-
-  const isScopeAlertsEnabled = (watchlistId: string): boolean => {
+  const isPushScopeEnabled = (watchlistId: string): boolean => {
     if (watchlistId === "all") return alertIncludeAllNews
     return alertWatchlistIds.has(watchlistId)
   }
 
-  const toggleScopeAlerts = (watchlistId: string) => {
+  const togglePushScope = (watchlistId: string) => {
     if (watchlistId === "all") {
       setAlertIncludeAllNews((prev) => !prev)
       return
@@ -646,10 +377,10 @@ export default function Page() {
     })
   }
 
-  const handleToggleScopeAlerts = (watchlistId: string, e?: MouseEvent) => {
+  const handleTogglePushScope = (watchlistId: string, e?: MouseEvent) => {
     e?.preventDefault()
     e?.stopPropagation()
-    toggleScopeAlerts(watchlistId)
+    togglePushScope(watchlistId)
   }
 
   const triggerRefresh = (reason: "auto" | "manual") => {
@@ -669,20 +400,6 @@ export default function Page() {
   useEffect(() => {
     persistValue("newsViewMode", viewMode)
   }, [viewMode])
-
-  useEffect(() => {
-    notificationsEnabledRef.current = notificationsEnabled
-    if (notificationsEnabled && !pushActive) {
-      flushQueuedAlerts()
-    } else if (!notificationsEnabled) {
-      clearQueuedAlerts()
-    }
-  }, [notificationsEnabled, pushActive])
-
-  useEffect(() => {
-    alertIncludeAllNewsRef.current = alertIncludeAllNews
-    alertWatchlistIdsRef.current = alertWatchlistIds
-  }, [alertIncludeAllNews, alertWatchlistIds])
 
   // Fetch tickers once
   useEffect(() => {
@@ -710,7 +427,7 @@ export default function Page() {
       limit: 100, // Fetch a larger chunk for accurate unread calculations
       signal: controller.signal,
     })
-      .then((data) => setGlobalItems(hydrateAlertSentAt(data.items)))
+      .then((data) => setGlobalItems(data.items))
       .catch(() => {}) // Ignore errors for background global fetch
 
     return () => controller.abort()
@@ -814,121 +531,19 @@ export default function Page() {
     }
   }, [mounted])
 
-  // Phase 1 rule-based alerts: all-news + selected watchlists.
-  // Visible-tab only: hidden tabs would otherwise duplicate local Notifications.
   useEffect(() => {
     if (!mounted) return
-    if (!notificationsEnabled) return
-    if (pushActive) return
-    if (!isPageVisible) return
-    if (!alertScopesConfigured) return
-
-    let cancelled = false
-    let pollTimerId: number | null = null
-    let activeController: AbortController | null = null
-
-    const clearScheduledPoll = () => {
-      if (pollTimerId === null) return
-      window.clearTimeout(pollTimerId)
-      pollTimerId = null
-    }
-
-    const scheduleNextPoll = () => {
-      if (cancelled) return
-      clearScheduledPoll()
-      pollTimerId = window.setTimeout(() => {
-        pollTimerId = null
-        void run()
-      }, ALERT_POLL_MS)
-    }
-
-    const run = async () => {
-      if (cancelled) return
-      if (alertScopeQueries.length === 0) {
-        scheduleNextPoll()
-        return
-      }
-
-      const controller = new AbortController()
-      activeController = controller
-      const incoming: NewsItem[] = []
-      const incomingIds = new Set<number>()
-
-      try {
-        for (const scope of alertScopeQueries) {
-          try {
-            const data = await fetchNews({ ...scope.params, signal: controller.signal })
-            if (cancelled || controller.signal.aborted) return
-
-            if (data.items.length === 0) continue
-            const maxId = data.items.reduce((max, item) => Math.max(max, item.id), 0)
-            if (maxId <= 0) continue
-
-            const prevSeen = alertScopeLastSeenRef.current[scope.key]
-            if (typeof prevSeen !== "number") {
-              // First observation of this scope seeds the watermark without alerting.
-              alertScopeLastSeenRef.current[scope.key] = maxId
-              continue
-            }
-
-            const fresh = data.items.filter((item) => item.id > prevSeen)
-            for (const item of fresh) {
-              if (incomingIds.has(item.id)) continue
-              if (alertQueuedIdsRef.current.has(item.id)) continue
-              incomingIds.add(item.id)
-              incoming.push(item)
-            }
-            if (maxId > prevSeen) {
-              alertScopeLastSeenRef.current[scope.key] = maxId
-            }
-          } catch {
-            if (controller.signal.aborted) return
-            // Ignore alert polling errors and keep UI/feed flow uninterrupted.
-          }
-        }
-
-        if (cancelled || controller.signal.aborted) return
-        if (notificationsEnabled && incoming.length > 0) {
-          enqueueAlertItems(incoming)
-        } else if (notificationsEnabled) {
-          flushQueuedAlerts()
-        }
-        persistJson("alertScopeLastSeen", alertScopeLastSeenRef.current)
-      } finally {
-        if (activeController === controller) {
-          activeController = null
-        }
-        if (!cancelled && !controller.signal.aborted) {
-          scheduleNextPoll()
-        }
-      }
-    }
-
-    // Run immediately on mount/config change, then schedule the next poll only
-    // after the current cycle finishes so alert state cannot race itself.
-    void run()
-
-    return () => {
-      cancelled = true
-      clearScheduledPoll()
-      activeController?.abort()
-    }
-  }, [mounted, pushActive, notificationsEnabled, isPageVisible, alertScopesConfigured, alertScopeQueries])
-
-  useEffect(() => {
-    if (!mounted) return
-    if (!notificationsEnabled) return
-    if (!pushActive) return
+    if (!pushSubscribed) return
 
     const run = async () => {
       try {
-        await syncPushScopes(pushAlertScopes)
+        await syncPushScopes(pushScopes)
       } catch {
         // Keep local UI responsive even if backend sync fails.
       }
     }
     void run()
-  }, [mounted, notificationsEnabled, pushActive, pushAlertScopes])
+  }, [mounted, pushSubscribed, pushScopes])
 
   // Fetch news when filters change
   useEffect(() => {
@@ -964,23 +579,6 @@ export default function Page() {
       activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
         ? "Business Wire"
         : undefined
-    // Compute matching alert scopes using refs to avoid triggering re-fetches
-    // when alert config changes (those changes don't affect the feed query).
-    const matchingAlertScopeKeys: string[] = []
-    if (notificationsEnabledRef.current && !pushActiveRef.current) {
-      if (activeWatchlistId === "all") {
-        if (alertIncludeAllNewsRef.current && !ticker && !provider && !searchQuery) {
-          matchingAlertScopeKeys.push("all")
-        }
-      } else if (
-        alertWatchlistIdsRef.current.has(activeWatchlistId)
-        && !ticker
-        && provider === (activeWatchlist?.provider || "")
-        && searchQuery === (activeWatchlist?.q || "")
-      ) {
-        matchingAlertScopeKeys.push(`watchlist:${activeWatchlistId}`)
-      }
-    }
 
     // When user is scrolled deep, fetch in the background and buffer new items
     // instead of updating the feed directly.  We snapshot the current generation
@@ -999,10 +597,7 @@ export default function Page() {
         .then((data) => {
           // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
-          const fetchedItems = hydrateAlertSentAt(data.items)
-          // Buffered stories are already surfaced via the pending banner, so
-          // keep alert polling in sync and do not notify for them again.
-          advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
+          const fetchedItems = data.items
           const currentIds = new Set(itemsRef.current.map((i) => i.id))
           const newOnes = fetchedItems.filter((i) => !currentIds.has(i.id))
           const pendingIds = new Set(pendingNewItemsRef.current.map((i) => i.id))
@@ -1044,7 +639,7 @@ export default function Page() {
     })
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
-        const fetchedItems = hydrateAlertSentAt(data.items)
+        const fetchedItems = data.items
         // Refresh succeeded — safe to clear pending banner.
         setPendingNewItems([])
         const currentIds = new Set(itemsRef.current.map((item) => item.id))
@@ -1058,12 +653,10 @@ export default function Page() {
             const prepend = fetchedItems.filter((item) => !prevIds.has(item.id))
             return prepend.length > 0 ? [...prepend, ...prev] : prev
           })
-          advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
           setNextCursor((prev) => prev ?? data.next_cursor)
           return
         }
         setItems(fetchedItems)
-        advanceAlertWatermarks(matchingAlertScopeKeys, fetchedItems)
         setNextCursor(data.next_cursor)
       })
       .catch((err: unknown) => {
@@ -1127,7 +720,7 @@ export default function Page() {
         cursor: nextCursor,
       })
       if (requestGeneration !== feedGenerationRef.current) return
-      const fetchedItems = hydrateAlertSentAt(data.items)
+      const fetchedItems = data.items
       setItems((prev) => {
         const prevIds = new Set(prev.map((item) => item.id))
         const append = fetchedItems.filter((item) => !prevIds.has(item.id))
@@ -1367,36 +960,39 @@ export default function Page() {
     closeContextMenu()
   }
 
-  const toggleNotifications = async () => {
-    if (notificationsEnabled) {
-      setNotificationsEnabled(false)
-      setPushActive(false)
-      persistValue("notificationsEnabled", "false")
+  const [pushError, setPushError] = useState<string | null>(null)
+
+  const togglePushSubscription = async () => {
+    if (pushSubscribed) {
+      setPushSubscribed(false)
+      persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
+      setPushError(null)
       try {
         await disablePushNotifications()
       } catch {
-        // Ignore unsubscribe failures and keep local toggle deterministic.
+        // Ignore unsubscribe failures.
       }
       return
     }
 
+    setPushError(null)
     try {
-      const result = await enablePushNotifications(pushAlertScopes)
+      const result = await enablePushNotifications(pushScopes)
       setPushSupported(isPushSupported())
-      if (result.permissionGranted) {
-        setPushActive(result.pushActive)
-        setNotificationsEnabled(true)
-        persistValue("notificationsEnabled", "true")
+      if (result.pushActive) {
+        setPushSubscribed(true)
+        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "true")
         return
       }
-    } catch {
-      // Fallback to tab-only notifications when push wiring fails.
-    }
-
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      setPushActive(false)
-      setNotificationsEnabled(true)
-      persistValue("notificationsEnabled", "true")
+      if (!result.permissionGranted) {
+        setPushError("Browser notification permission denied")
+      } else {
+        setPushError(result.reason === "push-disabled"
+          ? "Push not configured on server (VAPID keys missing)"
+          : "Push notifications not supported in this browser")
+      }
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : "Failed to enable push notifications")
     }
   }
 
@@ -1434,8 +1030,12 @@ export default function Page() {
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <button
               className="icon-button"
-              title={alertIncludeAllNews ? "Disable alerts for All News" : "Enable alerts for All News"}
-              onClick={(e) => handleToggleScopeAlerts("all", e)}
+              title={
+                alertIncludeAllNews
+                  ? "Disable push notifications for All News"
+                  : "Enable push notifications for All News"
+              }
+              onClick={(e) => handleTogglePushScope("all", e)}
               style={{
                 padding: "2px",
                 color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-muted)",
@@ -1508,17 +1108,17 @@ export default function Page() {
                   <button
                     className="icon-button"
                     title={
-                      isScopeAlertsEnabled(wl.id)
-                        ? `Disable alerts for ${wl.name}`
-                        : `Enable alerts for ${wl.name}`
+                      isPushScopeEnabled(wl.id)
+                        ? `Disable push notifications for ${wl.name}`
+                        : `Enable push notifications for ${wl.name}`
                     }
-                    onClick={(e) => handleToggleScopeAlerts(wl.id, e)}
+                    onClick={(e) => handleTogglePushScope(wl.id, e)}
                     style={{
                       padding: "2px",
-                      color: isScopeAlertsEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-muted)",
+                      color: isPushScopeEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-muted)",
                     }}
                   >
-                    <BellIcon active={isScopeAlertsEnabled(wl.id)} />
+                    <BellIcon active={isPushScopeEnabled(wl.id)} />
                   </button>
                   {wlUnreadCount > 0 && (
                     <span style={{ 
@@ -1579,8 +1179,8 @@ export default function Page() {
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="context-menu-item" onClick={() => { toggleScopeAlerts(contextMenu.watchlistId); closeContextMenu() }}>
-              {isScopeAlertsEnabled(contextMenu.watchlistId) ? "Disable Alerts" : "Enable Alerts"}
+            <div className="context-menu-item" onClick={() => { togglePushScope(contextMenu.watchlistId); closeContextMenu() }}>
+              {isPushScopeEnabled(contextMenu.watchlistId) ? "Disable Push" : "Enable Push"}
             </div>
             <div className="context-menu-separator" />
             <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
@@ -1659,36 +1259,39 @@ export default function Page() {
               </button>
               <button
                 className="icon-button"
-                onClick={toggleNotifications}
+                onClick={togglePushSubscription}
                 title={
-                  notificationsEnabled
-                    ? "Disable notifications"
-                    : pushSupported
-                      ? "Enable push notifications"
-                      : "Enable notifications"
+                  pushSubscribed
+                    ? "Disable push notifications"
+                    : "Enable push notifications"
                 }
-                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: notificationsEnabled ? "var(--accent-blue)" : "transparent", color: notificationsEnabled ? "var(--text-solid)" : "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: pushSubscribed ? "var(--accent-blue)" : pushError ? "rgba(242, 54, 69, 0.15)" : "transparent", color: pushSubscribed ? "var(--text-solid)" : pushError ? "#F23645" : "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
               >
-                <BellIcon active={notificationsEnabled} />
-                {notificationsEnabled ? (pushActive ? "Push On" : "Alerts On") : "Alerts"}
+                <BellIcon active={pushSubscribed} />
+                {pushSubscribed ? "Push On" : pushError ? "Push Failed" : "Push"}
               </button>
+              {pushError && !pushSubscribed && (
+                <span style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "200px" }} title={pushError}>
+                  {pushError}
+                </span>
+              )}
               <span
                 title={
-                  activeAlertScopeCount > 0
-                    ? `Enabled scopes: ${activeAlertScopeNames.join(", ")}`
-                    : "No alert scopes enabled"
+                  activePushScopeCount > 0
+                    ? `Enabled push scopes: ${activePushScopeNames.join(", ")}`
+                    : "No push scopes enabled"
                 }
                 style={{
                   padding: "4px 10px",
                   fontSize: "0.8rem",
                   borderRadius: "999px",
                   border: "1px solid var(--border-color)",
-                  background: activeAlertScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
-                  color: activeAlertScopeCount > 0 ? "var(--accent-blue)" : "var(--text-muted)",
+                  background: activePushScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
+                  color: activePushScopeCount > 0 ? "var(--accent-blue)" : "var(--text-muted)",
                   whiteSpace: "nowrap",
                 }}
               >
-                Alert scopes: {activeAlertScopeCount}
+                Push scopes: {activePushScopeCount}
               </span>
               <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
               <button 
