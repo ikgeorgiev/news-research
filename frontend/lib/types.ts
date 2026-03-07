@@ -43,6 +43,14 @@ export type TickerResponse = {
   total: number
 }
 
+export type Watchlist = {
+  id: string
+  name: string
+  provider?: string
+  q?: string
+  tickers?: string[]
+}
+
 export type PushSubscriptionKeys = {
   p256dh: string
   auth: string

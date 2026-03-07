@@ -2,14 +2,10 @@
 
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react"
 import { fetchNews, fetchNewsCount, fetchNewsIds, fetchTickers } from "@/lib/api"
-import {
-  disablePushNotifications,
-  enablePushNotifications,
-  getPushStatus,
-  isPushSupported,
-  syncPushScopes,
-} from "@/lib/push"
-import { NewsItem, PushAlertScopes, TickerItem } from "@/lib/types"
+import { usePushSubscription } from "@/hooks/usePushSubscription"
+import { persistJson, persistValue } from "@/lib/local-storage"
+import { markReadIdsByQuery, trimIdSet } from "@/lib/read-state"
+import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
@@ -17,26 +13,10 @@ const AUTO_REFRESH_DEDUPE_MS = 2_000
 const MAX_PERSISTED_READ_IDS = 20_000
 const MAX_PERSISTED_STARRED_IDS = 10_000
 const NEWS_IDS_PAGE_SIZE = 1000
-const PUSH_SUBSCRIBED_STORAGE_KEY = "pushSubscribed"
-const LEGACY_NOTIFICATIONS_STORAGE_KEY = "notificationsEnabled"
-
-type Watchlist = {
-  id: string
-  name: string
-  provider?: string
-  q?: string
-  tickers?: string[]
-}
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
   { id: "all", name: "All News" },
 ]
-
-function trimIdSet(input: Set<number>, maxSize: number): Set<number> {
-  if (input.size <= maxSize) return input
-  const trimmed = Array.from(input).slice(input.size - maxSize)
-  return new Set(trimmed)
-}
 
 function toSafeExternalUrl(url: string | null | undefined): string | null {
   if (!url) return null
@@ -49,30 +29,6 @@ function toSafeExternalUrl(url: string | null | undefined): string | null {
     return null
   }
   return null
-}
-
-function persistJson(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch (err) {
-    console.warn(`Failed to persist ${key} to localStorage`, err)
-  }
-}
-
-function persistValue(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value)
-  } catch (err) {
-    console.warn(`Failed to persist ${key} to localStorage`, err)
-  }
-}
-
-function removePersistedValue(key: string): void {
-  try {
-    localStorage.removeItem(key)
-  } catch (err) {
-    console.warn(`Failed to remove ${key} from localStorage`, err)
-  }
 }
 
 function formatDetailedDate(iso: string | null | undefined): string {
@@ -140,6 +96,13 @@ function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
+function createWatchlistId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `cwl_${crypto.randomUUID()}`
+  }
+  return `cwl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+}
+
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
@@ -199,45 +162,19 @@ export default function Page() {
   const pendingNewItemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
   const lastAutoRefreshAtRef = useRef(0)
-
-  const [pushSubscribed, setPushSubscribed] = useState(false)
-  const [, setPushSupported] = useState(false)
-  const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
-  const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
-  const alertWatchlistKey = useMemo(
-    () => Array.from(alertWatchlistIds).sort().join(","),
-    [alertWatchlistIds]
-  )
-  const activePushScopeNames = useMemo(() => {
-    const names: string[] = []
-    if (alertIncludeAllNews) names.push("All News")
-    if (alertWatchlistIds.size > 0) {
-      for (const watchlist of customWatchlists) {
-        if (alertWatchlistIds.has(watchlist.id)) {
-          names.push(watchlist.name)
-        }
-      }
-    }
-    return names
-  }, [alertIncludeAllNews, alertWatchlistIds, customWatchlists])
-  const activePushScopeCount = activePushScopeNames.length
-  const pushScopes = useMemo<PushAlertScopes>(() => {
-    const watchlists = Array.from(alertWatchlistIds)
-      .map((watchlistId) => customWatchlists.find((watchlist) => watchlist.id === watchlistId))
-      .filter((watchlist): watchlist is Watchlist => Boolean(watchlist))
-      .map((watchlist) => ({
-        id: watchlist.id,
-        name: watchlist.name,
-        tickers: watchlist.tickers && watchlist.tickers.length > 0 ? [...watchlist.tickers] : undefined,
-        provider: watchlist.provider || undefined,
-        q: watchlist.q || undefined,
-      }))
-
-    return {
-      include_all_news: alertIncludeAllNews,
-      watchlists,
-    }
-  }, [alertIncludeAllNews, alertWatchlistKey, customWatchlists])
+  const {
+    alertIncludeAllNews,
+    activePushScopeCount,
+    activePushScopeNames,
+    isPushScopeEnabled,
+    pushError,
+    pushSubscribed,
+    togglePushScope,
+    togglePushSubscription,
+  } = usePushSubscription({
+    customWatchlists,
+    mounted,
+  })
 
   // Load state from local storage on mount
   useEffect(() => {
@@ -269,63 +206,10 @@ export default function Page() {
       if (storedViewMode === "list" || storedViewMode === "full") {
         setViewMode(storedViewMode)
       }
-
-      // Push subscriptions are now the only supported notification path.
-      removePersistedValue(LEGACY_NOTIFICATIONS_STORAGE_KEY)
-
-      const storedAlertIncludeAll = localStorage.getItem("alertIncludeAllNews")
-      if (storedAlertIncludeAll !== null) {
-        setAlertIncludeAllNews(storedAlertIncludeAll === "true")
-      }
-
-      const storedAlertWatchlistIds = localStorage.getItem("alertWatchlistIds")
-      if (storedAlertWatchlistIds) {
-        const parsed = JSON.parse(storedAlertWatchlistIds)
-        if (Array.isArray(parsed)) {
-          const validIds = parsed.filter((id): id is string => typeof id === "string" && id.length > 0)
-          setAlertWatchlistIds(new Set(validIds))
-        }
-      }
-
     } catch (e) {
       console.error("Failed to parse local storage", e)
     } finally {
       setMounted(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    const refreshPushStatus = async () => {
-      if (!isPushSupported()) {
-        if (!cancelled) {
-          setPushSupported(false)
-          setPushSubscribed(false)
-        }
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
-        return
-      }
-      if (!cancelled) {
-        setPushSupported(true)
-      }
-      try {
-        const status = await getPushStatus()
-        if (cancelled) return
-        setPushSupported(status.supported)
-        setPushSubscribed(status.subscribed)
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, status.subscribed ? "true" : "false")
-      } catch {
-        if (!cancelled) {
-          setPushSubscribed(false)
-        }
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
-      }
-    }
-
-    void refreshPushStatus()
-    return () => {
-      cancelled = true
     }
   }, [])
 
@@ -335,47 +219,12 @@ export default function Page() {
   }, [customWatchlists])
 
   useEffect(() => {
-    persistValue("alertIncludeAllNews", String(alertIncludeAllNews))
-  }, [alertIncludeAllNews])
-
-  useEffect(() => {
-    persistJson("alertWatchlistIds", Array.from(alertWatchlistIds))
-  }, [alertWatchlistIds])
-
-  useEffect(() => {
-    const validIds = new Set(customWatchlists.map((wl) => wl.id))
-    setAlertWatchlistIds((prev) => {
-      const filtered = Array.from(prev).filter((id) => validIds.has(id))
-      if (filtered.length === prev.size) return prev
-      return new Set(filtered)
-    })
-  }, [customWatchlists])
-
-  useEffect(() => {
     itemsRef.current = items
   }, [items])
 
   useEffect(() => {
     pendingNewItemsRef.current = pendingNewItems
   }, [pendingNewItems])
-
-  const isPushScopeEnabled = (watchlistId: string): boolean => {
-    if (watchlistId === "all") return alertIncludeAllNews
-    return alertWatchlistIds.has(watchlistId)
-  }
-
-  const togglePushScope = (watchlistId: string) => {
-    if (watchlistId === "all") {
-      setAlertIncludeAllNews((prev) => !prev)
-      return
-    }
-    setAlertWatchlistIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(watchlistId)) next.delete(watchlistId)
-      else next.add(watchlistId)
-      return next
-    })
-  }
 
   const handleTogglePushScope = (watchlistId: string, e?: MouseEvent) => {
     e?.preventDefault()
@@ -530,20 +379,6 @@ export default function Page() {
       navigator.serviceWorker.removeEventListener("message", onMessage)
     }
   }, [mounted])
-
-  useEffect(() => {
-    if (!mounted) return
-    if (!pushSubscribed) return
-
-    const run = async () => {
-      try {
-        await syncPushScopes(pushScopes)
-      } catch {
-        // Keep local UI responsive even if backend sync fails.
-      }
-    }
-    void run()
-  }, [mounted, pushSubscribed, pushScopes])
 
   // Fetch news when filters change
   useEffect(() => {
@@ -832,7 +667,7 @@ export default function Page() {
     if (!newWatchlistName.trim() || selectedTickers.size === 0) return
 
     const newWl: Watchlist = {
-      id: "cwl_" + Date.now().toString(),
+      id: createWatchlistId(),
       name: newWatchlistName.trim(),
       tickers: Array.from(selectedTickers)
     }
@@ -873,25 +708,13 @@ export default function Page() {
     tickers?: string[]
     includeUnmappedFromProvider?: string
   }) => {
-    let cursor: string | undefined = undefined
-    for (;;) {
-      const data = await fetchNewsIds({
-        ...params,
-        limit: NEWS_IDS_PAGE_SIZE,
-        cursor,
-      })
-      if (data.ids.length > 0) {
-        setReadIds(prev => {
-          const next = new Set(prev)
-          data.ids.forEach(id => next.add(id))
-          return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-        })
-      }
-      if (!data.next_cursor || data.ids.length === 0) {
-        break
-      }
-      cursor = data.next_cursor
-    }
+    await markReadIdsByQuery({
+      params,
+      fetchIds: fetchNewsIds,
+      setReadIds,
+      pageSize: NEWS_IDS_PAGE_SIZE,
+      maxPersistedIds: MAX_PERSISTED_READ_IDS,
+    })
   }
 
   const handleMarkAllRead = (wlId: string) => {
@@ -958,42 +781,6 @@ export default function Page() {
   const handleUpdateFeeds = () => {
     triggerRefresh("manual")
     closeContextMenu()
-  }
-
-  const [pushError, setPushError] = useState<string | null>(null)
-
-  const togglePushSubscription = async () => {
-    if (pushSubscribed) {
-      setPushSubscribed(false)
-      persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
-      setPushError(null)
-      try {
-        await disablePushNotifications()
-      } catch {
-        // Ignore unsubscribe failures.
-      }
-      return
-    }
-
-    setPushError(null)
-    try {
-      const result = await enablePushNotifications(pushScopes)
-      setPushSupported(isPushSupported())
-      if (result.pushActive) {
-        setPushSubscribed(true)
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "true")
-        return
-      }
-      if (!result.permissionGranted) {
-        setPushError("Browser notification permission denied")
-      } else {
-        setPushError(result.reason === "push-disabled"
-          ? "Push not configured on server (VAPID keys missing)"
-          : "Push notifications not supported in this browser")
-      }
-    } catch (err) {
-      setPushError(err instanceof Error ? err.message : "Failed to enable push notifications")
-    }
   }
 
   // Close context menu on outside click or Escape

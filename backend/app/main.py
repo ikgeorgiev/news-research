@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from app.article_filters import build_article_query
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
 from app.ingestion import (
@@ -52,6 +53,7 @@ from app.schemas import (
 from app.scheduler import IngestionScheduler
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
+from app.query_utils import contains_literal_pattern, iter_chunks
 from app.utils import clean_summary_text, decode_cursor, encode_cursor
 
 logging.basicConfig(level=logging.INFO)
@@ -74,12 +76,16 @@ def _first_seen_at_for_response(row: Article) -> datetime:
 def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[str]]:
     if not article_ids:
         return {}
-    rows = db.execute(
-        select(ArticleTicker.article_id, Ticker.symbol)
-        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-        .where(ArticleTicker.article_id.in_(article_ids))
-        .order_by(ArticleTicker.article_id.asc(), Ticker.symbol.asc())
-    ).all()
+    rows = []
+    for chunk in iter_chunks(article_ids):
+        rows.extend(
+            db.execute(
+                select(ArticleTicker.article_id, Ticker.symbol)
+                .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+                .where(ArticleTicker.article_id.in_(chunk))
+                .order_by(ArticleTicker.article_id.asc(), Ticker.symbol.asc())
+            ).all()
+        )
     mapped: dict[int, list[str]] = {}
     for article_id, symbol in rows:
         mapped.setdefault(article_id, []).append(symbol)
@@ -89,19 +95,23 @@ def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[
 def _article_providers_map(db: Session, article_ids: list[int]) -> dict[int, str]:
     if not article_ids:
         return {}
-    rows = db.execute(
-        select(
-            RawFeedItem.article_id,
-            Source.name,
-            RawFeedItem.raw_link,
-            Article.canonical_url,
-            RawFeedItem.id,
+    rows = []
+    for chunk in iter_chunks(article_ids):
+        rows.extend(
+            db.execute(
+                select(
+                    RawFeedItem.article_id,
+                    Source.name,
+                    RawFeedItem.raw_link,
+                    Article.canonical_url,
+                    RawFeedItem.id,
+                )
+                .join(Source, Source.id == RawFeedItem.source_id)
+                .join(Article, Article.id == RawFeedItem.article_id)
+                .where(RawFeedItem.article_id.in_(chunk))
+                .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
+            ).all()
         )
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .join(Article, Article.id == RawFeedItem.article_id)
-        .where(RawFeedItem.article_id.in_(article_ids))
-        .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
-    ).all()
     matched: dict[int, str] = {}
     fallback: dict[int, str] = {}
     for article_id, source_name, raw_link, canonical_url, _raw_id in rows:
@@ -318,7 +328,12 @@ def list_tickers(
 ):
     query = select(Ticker).where(Ticker.active.is_(True)).order_by(Ticker.symbol.asc())
     if q:
-        query = query.where(Ticker.symbol.ilike(f"%{q.strip().upper()}%"))
+        query = query.where(
+            Ticker.symbol.ilike(
+                contains_literal_pattern(q.strip().upper()),
+                escape="\\",
+            )
+        )
 
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     rows = db.scalars(query.limit(limit).offset(offset)).all()
@@ -349,112 +364,17 @@ def _build_news_query(
     to: datetime | None = None,
 ):
     """Build a filtered Article query (without ordering, cursor, or limit)."""
-    query = select(Article)
-    publish_sort_key = func.coalesce(Article.published_at, Article.created_at)
-
-    mapped_exists = (
-        select(1)
-        .select_from(ArticleTicker)
-        .where(ArticleTicker.article_id == Article.id)
-        .correlate(Article)
-        .exists()
+    return build_article_query(
+        db,
+        ticker=ticker,
+        source=source,
+        provider=provider,
+        q=q,
+        include_unmapped=include_unmapped,
+        include_unmapped_from_provider=include_unmapped_from_provider,
+        from_=from_,
+        to=to,
     )
-
-    if ticker:
-        ticker_symbols = [t.strip().upper() for t in ticker.split(",") if t.strip()]
-        if not ticker_symbols:
-            query = query.where(mapped_exists)
-        else:
-            ticker_match_exists = (
-                select(1)
-                .select_from(ArticleTicker)
-                .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-                .where(
-                    and_(
-                        ArticleTicker.article_id == Article.id,
-                        Ticker.symbol.in_(ticker_symbols),
-                    )
-                )
-                .correlate(Article)
-                .exists()
-            )
-            query = query.where(ticker_match_exists)
-    elif include_unmapped:
-        pass
-    elif include_unmapped_from_provider:
-        include_name = include_unmapped_from_provider.strip()
-        include_source_row = db.scalar(
-            select(Source).where(func.lower(Source.name) == include_name.lower())
-        )
-        if include_source_row is None:
-            query = query.where(mapped_exists)
-        else:
-            include_provider_exists = (
-                select(1)
-                .select_from(RawFeedItem)
-                .where(
-                    and_(
-                        RawFeedItem.article_id == Article.id,
-                        RawFeedItem.source_id == include_source_row.id,
-                    )
-                )
-                .correlate(Article)
-                .exists()
-            )
-            query = query.where(
-                or_(mapped_exists, and_(~mapped_exists, include_provider_exists))
-            )
-    else:
-        query = query.where(mapped_exists)
-
-    if source:
-        query = query.where(Article.source_name.ilike(f"%{source.strip()}%"))
-
-    if provider:
-        provider_text = provider.strip()
-        source_row = db.scalar(
-            select(Source).where(func.lower(Source.name) == provider_text.lower())
-        )
-        if source_row is not None:
-            # Align provider filtering with the provider label shown in the feed:
-            # prefer source for canonical-url raw item, else latest raw item source.
-            canonical_source_id = (
-                select(RawFeedItem.source_id)
-                .where(
-                    and_(
-                        RawFeedItem.article_id == Article.id,
-                        RawFeedItem.raw_link == Article.canonical_url,
-                    )
-                )
-                .order_by(RawFeedItem.id.desc())
-                .limit(1)
-                .correlate(Article)
-                .scalar_subquery()
-            )
-            latest_source_id = (
-                select(RawFeedItem.source_id)
-                .where(RawFeedItem.article_id == Article.id)
-                .order_by(RawFeedItem.id.desc())
-                .limit(1)
-                .correlate(Article)
-                .scalar_subquery()
-            )
-            query = query.where(
-                func.coalesce(canonical_source_id, latest_source_id) == source_row.id
-            )
-        else:
-            query = query.where(Article.provider_name.ilike(f"%{provider_text}%"))
-
-    if q:
-        query = query.where(Article.title.ilike(f"%{q.strip()}%"))
-
-    if from_:
-        query = query.where(publish_sort_key >= from_)
-
-    if to:
-        query = query.where(publish_sort_key <= to)
-
-    return query
 
 
 @app.get(f"{settings.api_prefix}/news/count", response_model=NewsCountResponse)
@@ -667,14 +587,16 @@ def mark_news_alerts_sent(payload: MarkAlertsSentRequest, db: Session = Depends(
         return MarkAlertsSentResponse(requested=0, marked=0, first_alert_sent_at=None)
 
     sent_at = datetime.now(timezone.utc)
-    updated = db.execute(
-        update(Article)
-        .where(
-            Article.id.in_(unique_ids),
-            Article.first_alert_sent_at.is_(None),
-        )
-        .values(first_alert_sent_at=sent_at)
-    ).rowcount or 0
+    updated = 0
+    for chunk in iter_chunks(unique_ids):
+        updated += db.execute(
+            update(Article)
+            .where(
+                Article.id.in_(chunk),
+                Article.first_alert_sent_at.is_(None),
+            )
+            .values(first_alert_sent_at=sent_at)
+        ).rowcount or 0
     db.commit()
     return MarkAlertsSentResponse(
         requested=len(unique_ids),

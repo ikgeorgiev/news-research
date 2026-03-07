@@ -353,3 +353,70 @@ def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(monkey
     assert sub.failure_count == 2
 
     db.close()
+
+
+def test_check_and_send_alerts_persists_first_success_when_later_subscription_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = _make_db_session()
+    first = _seed_mapped_article(db, slug="persist-success-1")
+    second = _seed_mapped_article(db, slug="persist-success-2")
+
+    first_sub = PushSubscription(
+        endpoint="https://push.example/sub-persist-1",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={"include_all_news": True, "watchlists": []},
+        last_notified_json={"all": first.id},
+        manage_token_hash=sha256_str("token-1"),
+        active=True,
+    )
+    second_sub = PushSubscription(
+        endpoint="https://push.example/sub-persist-2",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={"include_all_news": True, "watchlists": []},
+        last_notified_json={"all": first.id},
+        manage_token_hash=sha256_str("token-2"),
+        active=True,
+    )
+    db.add_all([first_sub, second_sub])
+    db.commit()
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
+    )
+
+    send_attempts = {"count": 0}
+
+    def _send(*_args, **_kwargs):
+        send_attempts["count"] += 1
+        if send_attempts["count"] == 1:
+            return ("success", None)
+        raise KeyboardInterrupt("abort after first committed send")
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    with pytest.raises(KeyboardInterrupt):
+        check_and_send_alerts(db, settings_obj)
+
+    db.rollback()
+    first_sub_after = db.scalar(select(PushSubscription).where(PushSubscription.id == first_sub.id))
+    second_sub_after = db.scalar(select(PushSubscription).where(PushSubscription.id == second_sub.id))
+    second_article = db.scalar(select(Article).where(Article.id == second.id))
+
+    assert first_sub_after is not None
+    assert second_sub_after is not None
+    assert int(first_sub_after.last_notified_json.get("all", 0) or 0) == second.id
+    assert int(second_sub_after.last_notified_json.get("all", 0) or 0) == first.id
+    assert second_article is not None
+    assert second_article.first_alert_sent_at is not None
+
+    db.close()

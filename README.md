@@ -39,6 +39,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+`NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8000`).
+
 3. Open:
 
 - UI: http://localhost:3005

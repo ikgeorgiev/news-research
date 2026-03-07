@@ -7,7 +7,7 @@ import uuid
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
@@ -41,12 +41,13 @@ def _seed_article(
     published_at: datetime,
     created_at: datetime | None = None,
     canonical_url: str | None = None,
+    title: str | None = None,
 ) -> Article:
     url = canonical_url or f"https://example.com/{slug}"
     article = Article(
         canonical_url=url,
         canonical_url_hash=sha256_str(url),
-        title=f"Title {slug}",
+        title=title or f"Title {slug}",
         summary=f"Summary {slug}",
         published_at=published_at,
         source_name="Test Source",
@@ -134,6 +135,44 @@ def test_count_news_treats_empty_ticker_query_like_default_mapped_only():
     )
     assert response.total == 1
     assert unmapped_article.id != mapped_article.id
+    db.close()
+
+
+def test_list_news_keeps_empty_ticker_input_on_mapped_only_path():
+    db = _make_db_session()
+    ticker = Ticker(symbol="AAA", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+
+    mapped_article = _seed_article(
+        db,
+        slug="mapped-empty-ticker",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+    _unmapped_article = _seed_article(
+        db,
+        slug="unmapped-empty-ticker",
+        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    )
+    db.add(ArticleTicker(article_id=mapped_article.id, ticker_id=ticker.id))
+    db.commit()
+
+    response = list_news(
+        ticker=" , ",
+        source=None,
+        provider=None,
+        q=None,
+        include_unmapped=True,
+        include_unmapped_from_provider="Business Wire",
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    assert [item.id for item in response.items] == [mapped_article.id]
     db.close()
 
 
@@ -337,6 +376,31 @@ def test_ticker_loader_accepts_case_insensitive_header():
     db.close()
 
 
+def test_ticker_loader_handles_more_than_sqlite_parameter_limit():
+    db = _make_db_session()
+    temp_dir = Path("backend/tests/.tmp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = temp_dir / f"tickers-bulk-{uuid.uuid4().hex}.csv"
+    rows = ["ticker,fund_name,sponsor,active"]
+    rows.extend(
+        f"T{index:04d},Fund {index},Sponsor {index},true"
+        for index in range(1005)
+    )
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    try:
+        stats = load_tickers_from_csv(db, str(csv_path))
+        total = db.scalar(select(func.count()).select_from(Ticker)) or 0
+
+        assert stats["loaded"] == 1005
+        assert stats["created"] == 1005
+        assert total == 1005
+    finally:
+        if csv_path.exists():
+            csv_path.unlink()
+    db.close()
+
+
 def test_mark_news_alerts_sent_sets_first_timestamp_once():
     db = _make_db_session()
     article = _seed_article(
@@ -362,4 +426,78 @@ def test_mark_news_alerts_sent_sets_first_timestamp_once():
     assert second.requested == 1
     assert second.marked == 0
 
+    db.close()
+
+
+def test_mark_news_alerts_sent_chunks_large_updates():
+    db = _make_db_session()
+    published_at = datetime(2025, 1, 3, tzinfo=timezone.utc)
+    articles: list[Article] = []
+    for index in range(1005):
+        url = f"https://example.com/bulk-alert-{index}"
+        articles.append(
+            Article(
+                canonical_url=url,
+                canonical_url_hash=sha256_str(url),
+                title=f"Bulk Alert {index}",
+                summary=f"Summary {index}",
+                published_at=published_at,
+                source_name="Test Source",
+                provider_name="Test Provider",
+                content_hash=sha256_str(f"bulk-content-{index}"),
+                title_normalized_hash=sha256_str(f"bulk-title-{index}"),
+                cluster_key=sha256_str(f"bulk-cluster-{index}"),
+                created_at=published_at,
+                updated_at=published_at,
+            )
+        )
+    db.add_all(articles)
+    db.commit()
+
+    response = mark_news_alerts_sent(
+        MarkAlertsSentRequest(article_ids=[article.id for article in articles]),
+        db=db,
+    )
+    marked_total = db.scalar(
+        select(func.count())
+        .select_from(Article)
+        .where(Article.first_alert_sent_at.is_not(None))
+    ) or 0
+
+    assert response.requested == 1005
+    assert response.marked == 1005
+    assert marked_total == 1005
+    db.close()
+
+
+def test_list_news_search_treats_wildcard_chars_as_literals():
+    db = _make_db_session()
+    literal = _seed_article(
+        db,
+        slug="literal-wildcard",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        title="Yield 100%_covered",
+    )
+    _other = _seed_article(
+        db,
+        slug="plain-text",
+        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        title="Yield 100 basis points covered",
+    )
+
+    response = list_news(
+        ticker=None,
+        source=None,
+        provider=None,
+        q="%_",
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    assert [item.id for item in response.items] == [literal.id]
     db.close()

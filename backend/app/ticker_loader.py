@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Ticker
+from app.query_utils import iter_chunks
 
 
 REQUIRED_COLUMNS = {"ticker"}
@@ -38,10 +39,14 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
             return {"loaded": 0, "created": 0, "updated": 0, "unchanged": 0}
 
         unique_symbols = sorted(set(symbols))
-        existing = {
-            ticker.symbol: ticker
-            for ticker in db.scalars(select(Ticker).where(Ticker.symbol.in_(unique_symbols))).all()
-        }
+        existing: dict[str, Ticker] = {}
+        for chunk in iter_chunks(unique_symbols):
+            existing.update(
+                {
+                    ticker.symbol: ticker
+                    for ticker in db.scalars(select(Ticker).where(Ticker.symbol.in_(chunk))).all()
+                }
+            )
 
         created = 0
         updated = 0
