@@ -5,10 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.database import Base
 from app.ingestion import run_ingestion_cycle
 from app.main import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
@@ -22,13 +21,6 @@ from app.schemas import (
 )
 from app.sources import SourceFeed
 from app.utils import sha256_str
-
-
-def _make_db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
 
 
 def _seed_mapped_article(db: Session, *, slug: str) -> Article:
@@ -122,8 +114,8 @@ def test_get_push_vapid_key_disabled_when_not_configured(monkeypatch: pytest.Mon
     assert response.public_key is None
 
 
-def test_upsert_push_subscription_seeds_and_requires_manage_token(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     article = _seed_mapped_article(db, slug="seeded")
 
     monkeypatch.setattr("app.main.push_runtime_enabled", lambda _settings: True)
@@ -154,11 +146,9 @@ def test_upsert_push_subscription_seeds_and_requires_manage_token(monkeypatch: p
     assert updated.id == created.id
     assert updated.manage_token == created.manage_token
 
-    db.close()
 
-
-def test_delete_push_subscription_requires_valid_manage_token(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_delete_push_subscription_requires_valid_manage_token(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     monkeypatch.setattr("app.main.push_runtime_enabled", lambda _settings: True)
 
     created = upsert_push_subscription(
@@ -187,11 +177,9 @@ def test_delete_push_subscription_requires_valid_manage_token(monkeypatch: pytes
     assert response.deleted is True
     assert db.scalar(select(PushSubscription).where(PushSubscription.id == created.id)) is None
 
-    db.close()
 
-
-def test_check_and_send_alerts_deactivates_gone_subscription(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     first = _seed_mapped_article(db, slug="push-gone-1")
     second = _seed_mapped_article(db, slug="push-gone-2")
 
@@ -226,11 +214,9 @@ def test_check_and_send_alerts_deactivates_gone_subscription(monkeypatch: pytest
     assert sub.failure_count == 1
     assert second.id > first.id
 
-    db.close()
 
-
-def test_run_ingestion_cycle_continues_when_push_alerts_fail(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     settings_obj = SimpleNamespace(
         tickers_csv_path="data/cef_tickers.csv",
         source_enable_yahoo=False,
@@ -296,11 +282,9 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(monkeypatch: pytest
         "deactivated": 0,
     }
 
-    db.close()
 
-
-def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     first = _seed_mapped_article(db, slug="retry-1")
     second = _seed_mapped_article(db, slug="retry-2")
 
@@ -342,13 +326,12 @@ def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(mon
     assert second_after is not None
     assert second_after.first_alert_sent_at is not None
 
-    db.close()
-
 
 def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
+    db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    db = _make_db_session()
+    db = db_session
     seeded_articles = [_seed_mapped_article(db, slug=f"backlog-{idx}") for idx in range(6)]
 
     sub = PushSubscription(
@@ -410,13 +393,12 @@ def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
         "watchlist:wl-1": seeded_articles[5].id,
     }
 
-    db.close()
-
 
 def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers(
+    db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    db = _make_db_session()
+    db = db_session
     first = _seed_mapped_article(db, slug="active-baseline")
     _inactive_only = _seed_article_with_ticker(db, slug="inactive-only", symbol="AAA", active=False)
 
@@ -456,11 +438,9 @@ def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers
     assert send_calls["count"] == 0
     assert sub.last_notified_json == {"all": first.id}
 
-    db.close()
 
-
-def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(monkeypatch: pytest.MonkeyPatch):
-    db = _make_db_session()
+def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
     first = _seed_mapped_article(db, slug="repeat-error-1")
     _second = _seed_mapped_article(db, slug="repeat-error-2")
 
@@ -502,13 +482,12 @@ def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(monkey
     assert sub.active is False
     assert sub.failure_count == 2
 
-    db.close()
-
 
 def test_check_and_send_alerts_persists_first_success_when_later_subscription_aborts(
+    db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    db = _make_db_session()
+    db = db_session
     first = _seed_mapped_article(db, slug="persist-success-1")
     second = _seed_mapped_article(db, slug="persist-success-2")
 
@@ -568,5 +547,3 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
     assert int(second_sub_after.last_notified_json.get("all", 0) or 0) == first.id
     assert second_article is not None
     assert second_article.first_alert_sent_at is not None
-
-    db.close()

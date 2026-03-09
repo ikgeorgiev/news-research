@@ -6,7 +6,6 @@ import * as api from "@/lib/api"
 
 vi.mock("@/lib/api", () => ({
   fetchNews: vi.fn(),
-  fetchNewsCount: vi.fn(),
   fetchNewsIds: vi.fn(),
   fetchTickers: vi.fn(),
 }))
@@ -58,9 +57,6 @@ describe("Page refresh requests", () => {
       ids: [],
       next_cursor: null,
     })
-    mockedApi.fetchNewsCount.mockResolvedValue({
-      total: 2,
-    })
   })
 
   it("uses only the main news request for initial load and manual refresh", async () => {
@@ -73,12 +69,9 @@ describe("Page refresh requests", () => {
         limit: 40,
       })
     )
-    expect(mockedApi.fetchNewsCount).not.toHaveBeenCalled()
-
     await waitFor(() => expect(screen.getByTitle("Refresh Data")).toBeInTheDocument())
     fireEvent.click(screen.getByTitle("Refresh Data"))
 
     await waitFor(() => expect(mockedApi.fetchNews).toHaveBeenCalledTimes(2))
-    expect(mockedApi.fetchNewsCount).not.toHaveBeenCalled()
   })
 })

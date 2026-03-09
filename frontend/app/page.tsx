@@ -192,9 +192,6 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null)
   
   const [mounted, setMounted] = useState(false)
-  const [isPageVisible, setIsPageVisible] = useState<boolean>(
-    () => typeof document === "undefined" || document.visibilityState === "visible"
-  )
   const feedGenerationRef = useRef(0)
   const feedContainerRef = useRef<HTMLElement | null>(null)
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
@@ -333,7 +330,6 @@ export default function Page() {
 
     const onVisibilityChange = () => {
       const visible = document.visibilityState === "visible"
-      setIsPageVisible(visible)
       if (visible) {
         refreshNow()
         startTimer()
@@ -343,15 +339,11 @@ export default function Page() {
     }
 
     const onWindowFocus = () => {
-      setIsPageVisible(true)
       refreshNow()
     }
 
     if (document.visibilityState === "visible") {
-      setIsPageVisible(true)
       startTimer()
-    } else {
-      setIsPageVisible(false)
     }
 
     document.addEventListener("visibilitychange", onVisibilityChange)

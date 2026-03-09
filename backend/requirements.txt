@@ -7,6 +7,5 @@ requests==2.32.5
 feedparser==6.0.12
 APScheduler==3.11.1
 python-dateutil==2.9.0.post0
-alembic==1.17.2
 prometheus-client==0.23.1
 pywebpush==2.3.0

@@ -4,11 +4,9 @@ from app.ingestion import (
     MIN_PERSIST_CONFIDENCE,
     PAGE_FETCH_CONFIGS,
     _build_symbol_keywords,
-    _extract_businesswire_fallback_tickers,
     _extract_entry_tickers,
     _extract_source_fallback_tickers,
     _extract_table_cell_symbols_from_html,
-    _fetch_businesswire_page_html,
     _fetch_source_page_html,
     _is_businesswire_article_url,
     _is_source_article_url,
@@ -169,13 +167,14 @@ def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
 
     monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
 
-    hits = _extract_businesswire_fallback_tickers(
+    hits = _extract_source_fallback_tickers(
         "BNY Mellon Municipal Bond Closed-End Funds Declare Distributions",
         "",
         "https://www.businesswire.com/news/home/20260227228090/en",
         "",
         {"DSM", "LEO", "GOF"},
         timeout_seconds=5,
+        config=PAGE_FETCH_CONFIGS["businesswire"],
     )
 
     assert "DSM" in hits
@@ -211,11 +210,12 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
     monkeypatch.setattr("app.ingestion.time.time", fake_time)
     monkeypatch.setattr("app.ingestion.SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
 
-    first = _fetch_businesswire_page_html(
-        "https://www.businesswire.com/news/home/abc", 5
+    bw_config = PAGE_FETCH_CONFIGS["businesswire"]
+    first = _fetch_source_page_html(
+        "https://www.businesswire.com/news/home/abc", 5, bw_config
     )
-    second = _fetch_businesswire_page_html(
-        "https://www.businesswire.com/news/home/abc", 5
+    second = _fetch_source_page_html(
+        "https://www.businesswire.com/news/home/abc", 5, bw_config
     )
 
     assert first is None
@@ -240,7 +240,7 @@ def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page
 
     monkeypatch.setattr("app.ingestion.requests.get", fake_get)
 
-    result = _fetch_businesswire_page_html("https://evil.example.com/news/home/abc", 5)
+    result = _fetch_source_page_html("https://evil.example.com/news/home/abc", 5, PAGE_FETCH_CONFIGS["businesswire"])
 
     assert result is None
     assert calls["count"] == 0
@@ -697,13 +697,14 @@ def test_businesswire_fallback_preserves_stopword_ticker_with_keywords(monkeypat
     monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
 
     sym_kws = {"USA": frozenset({"liberty", "all-star", "equity"})}
-    hits = _extract_businesswire_fallback_tickers(
+    hits = _extract_source_fallback_tickers(
         "Liberty All-Star Equity Fund Declares Distribution",
         "",
         "https://www.businesswire.com/news/home/20260301123456/en",
         "",
         {"USA"},
         timeout_seconds=5,
+        config=PAGE_FETCH_CONFIGS["businesswire"],
         symbol_keywords=sym_kws,
     )
 

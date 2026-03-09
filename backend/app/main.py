@@ -95,14 +95,6 @@ def _first_seen_at_for_response(row: object) -> datetime:
     )
 
 
-def _sort_timestamp_for_response(row: object) -> datetime:
-    return _coalesce_row_timestamp(
-        getattr(row, "published_at", None),
-        getattr(row, "created_at", None),
-        getattr(row, "first_seen_at", None),
-    )
-
-
 def _parse_aggregated_symbols(value: object) -> list[str]:
     if value is None:
         return []
@@ -721,7 +713,7 @@ def list_news(
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
-        next_cursor = encode_cursor(_sort_timestamp_for_response(last), last.id)
+        next_cursor = encode_cursor(_published_at_for_response(last), last.id)
 
     global_summary = _build_global_summary(db) if include_global_summary else None
 

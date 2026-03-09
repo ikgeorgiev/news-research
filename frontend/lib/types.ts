@@ -29,10 +29,6 @@ export type NewsResponse = {
   global_summary?: GlobalNewsSummary | null
 }
 
-export type NewsCountResponse = {
-  total: number
-}
-
 export type NewsIdsResponse = {
   ids: number[]
   next_cursor: string | null

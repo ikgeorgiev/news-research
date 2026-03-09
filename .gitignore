@@ -40,3 +40,6 @@ dev-*.sh
 .research-src/
 dropped_yahoo_entries.json
 websub_results.json
+
+# Database files
+*.db

@@ -14,13 +14,6 @@ from app.models import Source
 from app.sources import SourceFeed, seed_sources
 
 
-def _make_db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
-
-
 def _settings(**overrides):
     defaults = {
         "tickers_csv_path": "data/cef_tickers.csv",
@@ -47,8 +40,8 @@ def _settings(**overrides):
     return SimpleNamespace(**defaults)
 
 
-def test_seed_sources_preserves_existing_enabled_state():
-    db = _make_db_session()
+def test_seed_sources_preserves_existing_enabled_state(db_session):
+    db = db_session
     existing = Source(
         code="businesswire",
         name="Old Name",
@@ -75,11 +68,10 @@ def test_seed_sources_preserves_existing_enabled_state():
     assert row.enabled is False
     assert row.name == "Business Wire"
     assert row.base_url == "https://feed.businesswire.com"
-    db.close()
 
 
-def test_run_ingestion_cycle_skips_sources_disabled_in_db(monkeypatch):
-    db = _make_db_session()
+def test_run_ingestion_cycle_skips_sources_disabled_in_db(db_session, monkeypatch):
+    db = db_session
     db.add(
         Source(
             code="businesswire",
@@ -113,7 +105,6 @@ def test_run_ingestion_cycle_skips_sources_disabled_in_db(monkeypatch):
 
     assert result["total_feeds"] == 0
     assert calls["ingest_feed"] == 0
-    db.close()
 
 
 def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):

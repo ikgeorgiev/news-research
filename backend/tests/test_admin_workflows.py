@@ -1,21 +1,11 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from app.database import Base
 from app.main import admin_dedupe_businesswire_url_variants, admin_reload_tickers, admin_remap_businesswire
 
 
-def _make_db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
-
-
-def test_admin_reload_tickers_returns_remap_payload(monkeypatch):
-    db = _make_db_session()
+def test_admin_reload_tickers_returns_remap_payload(monkeypatch, db_session):
     calls: dict[str, int | bool | list[str]] = {}
 
     def fake_load_tickers(_db: Session, _path: str) -> dict[str, int]:
@@ -51,7 +41,7 @@ def test_admin_reload_tickers_returns_remap_payload(monkeypatch):
     response = admin_reload_tickers(
         remap_unmapped=True,
         remap_limit=321,
-        db=db,
+        db=db_session,
     )
 
     assert response.loaded == 25
@@ -64,11 +54,8 @@ def test_admin_reload_tickers_returns_remap_payload(monkeypatch):
     assert calls["only_unmapped"] is True
     assert "businesswire" in calls["source_codes"]
 
-    db.close()
 
-
-def test_admin_reload_tickers_can_skip_remap(monkeypatch):
-    db = _make_db_session()
+def test_admin_reload_tickers_can_skip_remap(monkeypatch, db_session):
     calls = {"remap_called": 0}
 
     def fake_load_tickers(_db: Session, _path: str) -> dict[str, int]:
@@ -84,18 +71,15 @@ def test_admin_reload_tickers_can_skip_remap(monkeypatch):
     response = admin_reload_tickers(
         remap_unmapped=False,
         remap_limit=500,
-        db=db,
+        db=db_session,
     )
 
     assert response.loaded == 10
     assert response.remap is None
     assert calls["remap_called"] == 0
 
-    db.close()
 
-
-def test_admin_remap_businesswire_response_contract(monkeypatch):
-    db = _make_db_session()
+def test_admin_remap_businesswire_response_contract(monkeypatch, db_session):
     calls: dict[str, int | bool] = {}
 
     def fake_remap(_db: Session, _settings, *, limit: int, only_unmapped: bool):  # noqa: ANN001
@@ -110,7 +94,7 @@ def test_admin_remap_businesswire_response_contract(monkeypatch):
 
     monkeypatch.setattr("app.main.remap_businesswire_articles", fake_remap)
 
-    response = admin_remap_businesswire(limit=777, only_unmapped=False, db=db)
+    response = admin_remap_businesswire(limit=777, only_unmapped=False, db=db_session)
 
     assert response.processed == 11
     assert response.articles_with_hits == 5
@@ -119,12 +103,8 @@ def test_admin_remap_businesswire_response_contract(monkeypatch):
     assert calls["limit"] == 777
     assert calls["only_unmapped"] is False
 
-    db.close()
 
-
-def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch):
-    db = _make_db_session()
-
+def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, db_session):
     def fake_dedupe(_db: Session):  # noqa: ANN001
         return {
             "scanned_articles": 42,
@@ -138,7 +118,7 @@ def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch):
 
     monkeypatch.setattr("app.main.dedupe_businesswire_url_variants", fake_dedupe)
 
-    response = admin_dedupe_businesswire_url_variants(db=db)
+    response = admin_dedupe_businesswire_url_variants(db=db_session)
 
     assert response.scanned_articles == 42
     assert response.duplicate_groups == 6
@@ -147,5 +127,3 @@ def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch):
     assert response.ticker_rows_relinked == 3
     assert response.ticker_rows_updated == 1
     assert response.ticker_rows_deleted == 2
-
-    db.close()

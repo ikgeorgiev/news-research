@@ -888,12 +888,6 @@ def _fetch_source_page_html(
     return html_text
 
 
-def _fetch_businesswire_page_html(url: str, timeout_seconds: int) -> str | None:
-    return _fetch_source_page_html(
-        url, timeout_seconds, PAGE_FETCH_CONFIGS["businesswire"]
-    )
-
-
 def _extract_table_cell_symbols_from_html(
     html_text: str, known_symbols: set[str]
 ) -> set[str]:
@@ -957,28 +951,6 @@ def _extract_source_fallback_tickers(
             hits[symbol] = (config.table_match_type, 0.84)
 
     return hits
-
-
-def _extract_businesswire_fallback_tickers(
-    title: str,
-    summary: str,
-    link: str,
-    feed_url: str,
-    known_symbols: set[str],
-    timeout_seconds: int,
-    *,
-    symbol_keywords: dict[str, frozenset[str]] | None = None,
-) -> dict[str, tuple[str, float]]:
-    return _extract_source_fallback_tickers(
-        title,
-        summary,
-        link,
-        feed_url,
-        known_symbols,
-        timeout_seconds,
-        PAGE_FETCH_CONFIGS["businesswire"],
-        symbol_keywords=symbol_keywords,
-    )
 
 
 def _extract_entry_tickers(

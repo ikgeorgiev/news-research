@@ -7,11 +7,10 @@ from types import SimpleNamespace
 import pytest
 import requests
 from requests.structures import CaseInsensitiveDict
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.database import Base
 from app.ingestion import (
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
@@ -27,13 +26,6 @@ from app.ingestion import (
 )
 from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
 from app.utils import sha256_str
-
-
-def _make_db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
 
 
 def _seed_source(
@@ -85,8 +77,8 @@ def _seed_article(
     return article
 
 
-def test_reconcile_stale_ingestion_runs_marks_only_stale_running_rows():
-    db = _make_db_session()
+def test_reconcile_stale_ingestion_runs_marks_only_stale_running_rows(db_session):
+    db = db_session
     source = _seed_source(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -124,7 +116,6 @@ def test_reconcile_stale_ingestion_runs_marks_only_stale_running_rows():
     assert stale_after.finished_at.replace(tzinfo=timezone.utc) == now
     assert stale_after.error_text is not None
     assert fresh_after is not None and fresh_after.status == "running"
-    db.close()
 
 
 def test_fetch_feed_with_retries_succeeds_after_transient_failures(monkeypatch):
@@ -199,8 +190,8 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
     assert response.content == b"<rss />"
 
 
-def test_update_feed_http_cache_reads_requests_case_insensitive_headers():
-    db = _make_db_session()
+def test_update_feed_http_cache_reads_requests_case_insensitive_headers(db_session):
+    db = db_session
     feed_url = "https://example.com/feed-with-conditional-cache.xml"
     state = FeedPollState(feed_url=feed_url)
     db.add(state)
@@ -220,11 +211,10 @@ def test_update_feed_http_cache_reads_requests_case_insensitive_headers():
 
     assert headers["If-None-Match"] == '"abc123"'
     assert headers["If-Modified-Since"] == "Tue, 03 Mar 2026 10:00:00 GMT"
-    db.close()
 
 
-def test_ingest_feed_persists_conditional_headers_across_runs(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(db)
     sent_headers: list[dict[str, str]] = []
     attempts = {"count": 0}
@@ -294,11 +284,10 @@ def test_ingest_feed_persists_conditional_headers_across_runs(monkeypatch):
     assert sent_headers[1].get("If-None-Match") == '"persisted-etag"'
     assert sent_headers[1].get("If-Modified-Since") == "Tue, 03 Mar 2026 10:00:00 GMT"
     assert state is not None and state.etag == '"persisted-etag"'
-    db.close()
 
 
-def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_dedupes_raw_feed_rows(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(db)
     feed_entry = {
         "id": "guid-1",
@@ -348,11 +337,10 @@ def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
     assert first["status"] == "success"
     assert second["status"] == "success"
     assert len(raw_rows) == 1
-    db.close()
 
 
-def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure(monkeypatch):
-    db = _make_db_session()
+def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure(db_session, monkeypatch):
+    db = db_session
     db.add(Ticker(symbol="GOF", active=True))
     db.commit()
 
@@ -382,11 +370,11 @@ def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure
     finally:
         if csv_path.exists():
             csv_path.unlink()
-        db.close()
+    
 
 
-def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, monkeypatch):
+    db = db_session
     yahoo = _seed_source(
         db,
         code="yahoo",
@@ -464,11 +452,10 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(monkeypatch)
     )
     if businesswire.id in raw_links_by_source:
         assert raw_links_by_source[businesswire.id] == "https://www.businesswire.com/news/home/20260301000001/en"
-    db.close()
 
 
-def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(db_session, monkeypatch):
+    db = db_session
     yahoo = _seed_source(
         db,
         code="yahoo",
@@ -540,11 +527,10 @@ def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(monkeypatch
     assert result["status"] == "success"
     assert len(tickers_after) == 1
     assert tickers_after[0].ticker_id == ticker.id
-    db.close()
 
 
-def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(db_session, monkeypatch):
+    db = db_session
     yahoo = _seed_source(
         db,
         code="yahoo",
@@ -605,11 +591,10 @@ def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(monke
     assert article_after.provider_name == "Business Wire"
     assert article_after.published_at is not None
     assert article_after.published_at.replace(tzinfo=timezone.utc) == published
-    db.close()
 
 
-def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -686,11 +671,10 @@ def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(monkey
     assert article_after.summary == "New short summary"
     assert len(ticker_rows_after) == 1
     assert ticker_rows_after[0].ticker_id == new_ticker.id
-    db.close()
 
 
-def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -766,13 +750,13 @@ def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(monkeypatch
     assert article_after.summary == "New short summary"
     assert len(ticker_rows_after) == 1
     assert ticker_rows_after[0].ticker_id == ticker.id
-    db.close()
 
 
 def test_ingest_feed_exact_url_sub_threshold_hits_still_refresh_existing_article(
+    db_session,
     monkeypatch,
 ):
-    db = _make_db_session()
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -854,11 +838,10 @@ def test_ingest_feed_exact_url_sub_threshold_hits_still_refresh_existing_article
     assert ticker_rows_after[0].ticker_id == ticker.id
     assert len(raw_rows_after) == 1
     assert raw_rows_after[0].raw_guid == "prn-guid-subthreshold-refresh"
-    db.close()
 
 
-def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(db)
     entries = [
         {
@@ -906,11 +889,10 @@ def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(monkeypat
     articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
     assert result["status"] == "success"
     assert len(articles) == 2
-    db.close()
 
 
-def test_dedupe_businesswire_url_variants_merges_historical_rows():
-    db = _make_db_session()
+def test_dedupe_businesswire_url_variants_merges_historical_rows(db_session):
+    db = db_session
     yahoo = _seed_source(
         db,
         code="yahoo",
@@ -1002,11 +984,10 @@ def test_dedupe_businesswire_url_variants_merges_historical_rows():
     assert len(winner_tickers) == 1
     assert winner_tickers[0].confidence == 0.88
     assert winner_tickers[0].match_type == "exchange"
-    db.close()
 
 
-def test_dedupe_businesswire_url_variants_skips_distinct_story_ids():
-    db = _make_db_session()
+def test_dedupe_businesswire_url_variants_skips_distinct_story_ids(db_session):
+    db = db_session
     published = datetime(2026, 3, 1, tzinfo=timezone.utc)
     _seed_article(
         db,
@@ -1034,11 +1015,10 @@ def test_dedupe_businesswire_url_variants_skips_distinct_story_ids():
     assert result["duplicate_groups"] == 0
     assert result["merged_articles"] == 0
     assert len(articles) == 2
-    db.close()
 
 
-def test_ingest_feed_skips_when_feed_is_in_failure_backoff(monkeypatch):
-    db = _make_db_session()
+def test_ingest_feed_skips_when_feed_is_in_failure_backoff(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(db)
     calls = {"count": 0}
 
@@ -1083,11 +1063,10 @@ def test_ingest_feed_skips_when_feed_is_in_failure_backoff(monkeypatch):
     assert state is not None
     assert state.failure_count == 1
     assert state.backoff_until is not None
-    db.close()
 
 
-def test_prune_raw_feed_items_respects_retention_window():
-    db = _make_db_session()
+def test_prune_raw_feed_items_respects_retention_window(db_session):
+    db = db_session
     source = _seed_source(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -1129,13 +1108,13 @@ def test_prune_raw_feed_items_respects_retention_window():
 
     assert deleted == 1
     assert remaining_guids == {"fresh-guid"}
-    db.close()
 
 
 def test_purge_token_only_articles_rechecks_source_fallback_before_deleting(
+    db_session,
     monkeypatch,
 ):
-    db = _make_db_session()
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1206,11 +1185,10 @@ def test_purge_token_only_articles_rechecks_source_fallback_before_deleting(
     assert result["purged_articles"] == 0
     assert result["deleted_article_tickers"] == 0
     assert result["deleted_raw_feed_items"] == 0
-    db.close()
 
 
-def test_purge_token_only_articles_skips_unknown_provenance_articles():
-    db = _make_db_session()
+def test_purge_token_only_articles_skips_unknown_provenance_articles(db_session):
+    db = db_session
     published = datetime(2026, 3, 1, tzinfo=timezone.utc)
     article = _seed_article(
         db,
@@ -1258,11 +1236,10 @@ def test_purge_token_only_articles_skips_unknown_provenance_articles():
     assert result["deleted_raw_feed_items"] == 0
     assert remaining_article is not None
     assert len(remaining_tickers) == 1
-    db.close()
 
 
-def test_remap_source_articles_skips_sub_threshold_non_bw_hits(monkeypatch):
-    db = _make_db_session()
+def test_remap_source_articles_skips_sub_threshold_non_bw_hits(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1332,11 +1309,10 @@ def test_remap_source_articles_skips_sub_threshold_non_bw_hits(monkeypatch):
     assert result["articles_with_hits"] == 0
     assert result["remapped_articles"] == 0
     assert ticker_rows == []
-    db.close()
 
 
-def test_remap_source_articles_uses_fallback_after_low_confidence_tokens(monkeypatch):
-    db = _make_db_session()
+def test_remap_source_articles_uses_fallback_after_low_confidence_tokens(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1409,11 +1385,10 @@ def test_remap_source_articles_uses_fallback_after_low_confidence_tokens(monkeyp
     assert ticker_rows[0].ticker_id == ticker.id
     assert ticker_rows[0].match_type == "prn_table"
     assert ticker_rows[0].confidence == 0.84
-    db.close()
 
 
-def test_purge_token_only_articles_limit_applies_to_distinct_articles(monkeypatch):
-    db = _make_db_session()
+def test_purge_token_only_articles_limit_applies_to_distinct_articles(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1521,11 +1496,10 @@ def test_purge_token_only_articles_limit_applies_to_distinct_articles(monkeypatc
     assert result["purged_articles"] == 2
     assert result["deleted_article_tickers"] == 3
     assert result["deleted_raw_feed_items"] == 2
-    db.close()
 
 
-def test_purge_token_only_articles_pages_past_recent_valid_rows(monkeypatch):
-    db = _make_db_session()
+def test_purge_token_only_articles_pages_past_recent_valid_rows(db_session, monkeypatch):
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1659,12 +1633,11 @@ def test_purge_token_only_articles_pages_past_recent_valid_rows(monkeypatch):
     assert result["purged_articles"] == 1
     assert result["deleted_article_tickers"] == 1
     assert result["deleted_raw_feed_items"] == 1
-    db.close()
 
 
-def test_purge_token_only_articles_dry_run_false_deletes_rows(monkeypatch):
+def test_purge_token_only_articles_dry_run_false_deletes_rows(db_session, monkeypatch):
     """Verify the real DELETE path actually removes articles, tickers, and raw items."""
-    db = _make_db_session()
+    db = db_session
     source = _seed_source(
         db,
         code="prnewswire",
@@ -1738,12 +1711,11 @@ def test_purge_token_only_articles_dry_run_false_deletes_rows(monkeypatch):
         ).all()
         == []
     )
-    db.close()
 
 
-def test_dedupe_articles_by_title_merges_duplicates():
+def test_dedupe_articles_by_title_merges_duplicates(db_session):
     """Basic coverage: two non-BW articles with the same normalized title get merged."""
-    db = _make_db_session()
+    db = db_session
     prn_source = _seed_source(db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com")
     gnw_source = _seed_source(db, code="globenewswire", name="GlobeNewswire", base_url="https://rss.globenewswire.com")
 
@@ -1825,4 +1797,4 @@ def test_dedupe_articles_by_title_merges_duplicates():
         select(RawFeedItem).where(RawFeedItem.article_id == winner.id)
     ).all()
     assert len(raw_items) == 2
-    db.close()
+

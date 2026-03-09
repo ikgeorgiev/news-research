@@ -8,10 +8,9 @@ import uuid
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import event, func, select
+from sqlalchemy.orm import Session
 
-from app.database import Base
 from app.main import (
     app,
     count_news,
@@ -30,13 +29,6 @@ from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.schemas import MarkAlertsSentRequest
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import sha256_str
-
-
-def _make_db_session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
 
 
 def _seed_article(
@@ -110,8 +102,8 @@ def test_health_returns_degraded_when_db_check_raises(monkeypatch: pytest.Monkey
     assert response["status"] == "degraded"
 
 
-def test_count_news_treats_empty_ticker_query_like_default_mapped_only():
-    db = _make_db_session()
+def test_count_news_treats_empty_ticker_query_like_default_mapped_only(db_session: Session):
+    db = db_session
     ticker = Ticker(symbol="AAA", active=True)
     db.add(ticker)
     db.commit()
@@ -140,11 +132,10 @@ def test_count_news_treats_empty_ticker_query_like_default_mapped_only():
     )
     assert response.total == 1
     assert unmapped_article.id != mapped_article.id
-    db.close()
 
 
-def test_list_news_keeps_empty_ticker_input_on_mapped_only_path():
-    db = _make_db_session()
+def test_list_news_keeps_empty_ticker_input_on_mapped_only_path(db_session: Session):
+    db = db_session
     ticker = Ticker(symbol="AAA", active=True)
     db.add(ticker)
     db.commit()
@@ -178,11 +169,10 @@ def test_list_news_keeps_empty_ticker_input_on_mapped_only_path():
     )
 
     assert [item.id for item in response.items] == [mapped_article.id]
-    db.close()
 
 
-def test_inactive_only_ticker_mapping_is_treated_as_unmapped():
-    db = _make_db_session()
+def test_inactive_only_ticker_mapping_is_treated_as_unmapped(db_session: Session):
+    db = db_session
     active_ticker = Ticker(symbol="GOF", active=True)
     inactive_ticker = Ticker(symbol="AAA", active=False)
     db.add_all([active_ticker, inactive_ticker])
@@ -248,11 +238,10 @@ def test_inactive_only_ticker_mapping_is_treated_as_unmapped():
     assert mapped_ids.ids == [active_article.id]
     assert [item.id for item in all_news.items] == [active_article.id, inactive_only_article.id]
     assert next(item for item in all_news.items if item.id == inactive_only_article.id).tickers == []
-    db.close()
 
 
-def test_ticker_filter_excludes_inactive_only_mappings():
-    db = _make_db_session()
+def test_ticker_filter_excludes_inactive_only_mappings(db_session: Session):
+    db = db_session
     inactive_ticker = Ticker(symbol="AAA", active=False)
     db.add(inactive_ticker)
     db.commit()
@@ -278,11 +267,10 @@ def test_ticker_filter_excludes_inactive_only_mappings():
     )
 
     assert response.items == []
-    db.close()
 
 
-def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
-    db = _make_db_session()
+def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw(db_session: Session):
+    db = db_session
     businesswire = Source(
         code="businesswire",
         name="Business Wire",
@@ -368,11 +356,10 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
         db=db,
     )
     assert yahoo_response.items == []
-    db.close()
 
 
-def test_list_news_uses_single_statement_for_enriched_rows():
-    db = _make_db_session()
+def test_list_news_uses_single_statement_for_enriched_rows(db_session: Session):
+    db = db_session
     businesswire = Source(
         code="businesswire",
         name="Business Wire",
@@ -457,11 +444,10 @@ def test_list_news_uses_single_statement_for_enriched_rows():
     assert [item.id for item in response.items] == [article.id]
     assert response.items[0].provider == "Business Wire"
     assert response.items[0].tickers == ["GOF", "UTF"]
-    db.close()
 
 
-def test_get_news_item_uses_single_statement_for_enriched_row():
-    db = _make_db_session()
+def test_get_news_item_uses_single_statement_for_enriched_row(db_session: Session):
+    db = db_session
     businesswire = Source(
         code="businesswire",
         name="Business Wire",
@@ -519,11 +505,10 @@ def test_get_news_item_uses_single_statement_for_enriched_row():
     assert result.id == article.id
     assert result.provider == "Business Wire"
     assert result.tickers == ["GOF"]
-    db.close()
 
 
-def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scope():
-    db = _make_db_session()
+def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scope(db_session: Session):
+    db = db_session
     businesswire = Source(
         code="businesswire",
         name="Business Wire",
@@ -596,11 +581,10 @@ def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scop
     assert response.global_summary.total == 2
     assert response.global_summary.tracked_ids == [mapped_article.id, bw_general_article.id]
     assert response.global_summary.tracked_limit == 100
-    db.close()
 
 
-def test_list_news_cursor_paginates_consistently():
-    db = _make_db_session()
+def test_list_news_cursor_paginates_consistently(db_session: Session):
+    db = db_session
     newest = _seed_article(
         db,
         slug="newest",
@@ -641,7 +625,6 @@ def test_list_news_cursor_paginates_consistently():
         db=db,
     )
     assert [item.id for item in page_two.items] == [middle.id, oldest.id]
-    db.close()
 
 
 def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
@@ -655,8 +638,8 @@ def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
     assert _first_seen_at_for_response(row) == EPOCH_UTC
 
 
-def test_list_news_ids_supports_cursor_pagination():
-    db = _make_db_session()
+def test_list_news_ids_supports_cursor_pagination(db_session: Session):
+    db = db_session
     first = _seed_article(
         db,
         slug="first",
@@ -696,11 +679,10 @@ def test_list_news_ids_supports_cursor_pagination():
     )
     assert page_two.ids == [third.id]
     assert page_two.next_cursor is None
-    db.close()
 
 
-def test_ticker_loader_accepts_case_insensitive_header():
-    db = _make_db_session()
+def test_ticker_loader_accepts_case_insensitive_header(db_session: Session):
+    db = db_session
     temp_dir = Path("backend/tests/.tmp")
     temp_dir.mkdir(parents=True, exist_ok=True)
     csv_path = temp_dir / f"tickers-{uuid.uuid4().hex}.csv"
@@ -717,11 +699,10 @@ def test_ticker_loader_accepts_case_insensitive_header():
     finally:
         if csv_path.exists():
             csv_path.unlink()
-    db.close()
 
 
-def test_ticker_loader_handles_more_than_sqlite_parameter_limit():
-    db = _make_db_session()
+def test_ticker_loader_handles_more_than_sqlite_parameter_limit(db_session: Session):
+    db = db_session
     temp_dir = Path("backend/tests/.tmp")
     temp_dir.mkdir(parents=True, exist_ok=True)
     csv_path = temp_dir / f"tickers-bulk-{uuid.uuid4().hex}.csv"
@@ -742,11 +723,10 @@ def test_ticker_loader_handles_more_than_sqlite_parameter_limit():
     finally:
         if csv_path.exists():
             csv_path.unlink()
-    db.close()
 
 
-def test_mark_news_alerts_sent_sets_first_timestamp_once():
-    db = _make_db_session()
+def test_mark_news_alerts_sent_sets_first_timestamp_once(db_session: Session):
+    db = db_session
     article = _seed_article(
         db,
         slug="alert-mark",
@@ -770,11 +750,9 @@ def test_mark_news_alerts_sent_sets_first_timestamp_once():
     assert second.requested == 1
     assert second.marked == 0
 
-    db.close()
 
-
-def test_mark_news_alerts_sent_chunks_large_updates():
-    db = _make_db_session()
+def test_mark_news_alerts_sent_chunks_large_updates(db_session: Session):
+    db = db_session
     published_at = datetime(2025, 1, 3, tzinfo=timezone.utc)
     articles: list[Article] = []
     for index in range(1005):
@@ -811,11 +789,10 @@ def test_mark_news_alerts_sent_chunks_large_updates():
     assert response.requested == 1005
     assert response.marked == 1005
     assert marked_total == 1005
-    db.close()
 
 
-def test_list_news_search_treats_wildcard_chars_as_literals():
-    db = _make_db_session()
+def test_list_news_search_treats_wildcard_chars_as_literals(db_session: Session):
+    db = db_session
     literal = _seed_article(
         db,
         slug="literal-wildcard",
@@ -844,4 +821,3 @@ def test_list_news_search_treats_wildcard_chars_as_literals():
     )
 
     assert [item.id for item in response.items] == [literal.id]
-    db.close()
