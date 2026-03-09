@@ -357,6 +357,7 @@ def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure
     db.commit()
 
     csv_path = Path(__file__).with_name(".tmp") / "tickers-retry.csv"
+    csv_path.parent.mkdir(exist_ok=True)
     csv_path.write_text("ticker,fund_name,sponsor,active\nGOF,Guggenheim,Guggenheim,true\n", encoding="utf-8")
 
     call_count = {"count": 0}
