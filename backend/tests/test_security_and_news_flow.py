@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.main import (
     app,
-    count_news,
     EPOCH_UTC,
     _first_seen_at_for_response,
     _published_at_for_response,
@@ -93,6 +92,16 @@ def test_mark_news_alerts_sent_route_requires_admin_api_key():
     assert require_admin_api_key in dependency_calls
 
 
+def test_news_count_route_is_not_registered():
+    assert all(
+        not (
+            isinstance(route, APIRoute)
+            and route.path == f"{settings.api_prefix}/news/count"
+        )
+        for route in app.routes
+    )
+
+
 def test_health_returns_degraded_when_db_check_raises(monkeypatch: pytest.MonkeyPatch):
     def _raise() -> bool:
         raise RuntimeError("db unavailable")
@@ -100,38 +109,6 @@ def test_health_returns_degraded_when_db_check_raises(monkeypatch: pytest.Monkey
     monkeypatch.setattr("app.main.db_health_check", _raise)
     response = health()
     assert response["status"] == "degraded"
-
-
-def test_count_news_treats_empty_ticker_query_like_default_mapped_only(db_session: Session):
-    db = db_session
-    ticker = Ticker(symbol="AAA", active=True)
-    db.add(ticker)
-    db.commit()
-    db.refresh(ticker)
-
-    mapped_article = _seed_article(
-        db,
-        slug="mapped",
-        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
-    )
-    unmapped_article = _seed_article(
-        db,
-        slug="unmapped",
-        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
-    )
-    db.add(ArticleTicker(article_id=mapped_article.id, ticker_id=ticker.id))
-    db.commit()
-
-    response = count_news(
-        ticker=" , ",
-        include_unmapped=False,
-        include_unmapped_from_provider=None,
-        from_=None,
-        to=None,
-        db=db,
-    )
-    assert response.total == 1
-    assert unmapped_article.id != mapped_article.id
 
 
 def test_list_news_keeps_empty_ticker_input_on_mapped_only_path(db_session: Session):
@@ -198,13 +175,6 @@ def test_inactive_only_ticker_mapping_is_treated_as_unmapped(db_session: Session
     )
     db.commit()
 
-    mapped_count = count_news(
-        include_unmapped=False,
-        include_unmapped_from_provider=None,
-        from_=None,
-        to=None,
-        db=db,
-    )
     mapped_news = list_news(
         include_unmapped=False,
         include_unmapped_from_provider=None,
@@ -233,7 +203,6 @@ def test_inactive_only_ticker_mapping_is_treated_as_unmapped(db_session: Session
         db=db,
     )
 
-    assert mapped_count.total == 1
     assert [item.id for item in mapped_news.items] == [active_article.id]
     assert mapped_ids.ids == [active_article.id]
     assert [item.id for item in all_news.items] == [active_article.id, inactive_only_article.id]
@@ -427,15 +396,15 @@ def test_list_news_uses_single_statement_for_enriched_rows(db_session: Session):
         statements.append(statement)
 
     try:
-            response = list_news(
-                include_unmapped=True,
-                include_unmapped_from_provider=None,
-                include_global_summary=False,
-                from_=None,
-                to=None,
-                limit=10,
-                cursor=None,
-                db=db,
+        response = list_news(
+            include_unmapped=True,
+            include_unmapped_from_provider=None,
+            include_global_summary=False,
+            from_=None,
+            to=None,
+            limit=10,
+            cursor=None,
+            db=db,
         )
     finally:
         event.remove(db.get_bind(), "before_cursor_execute", capture_sql)

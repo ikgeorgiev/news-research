@@ -7,11 +7,8 @@ import {
   PushUpsertResponse,
   PushVapidKeyResponse,
 } from "./types"
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").trim().replace(/\/+$/, "")
+import { buildApiUrl } from "./api-base"
 const PUSH_MANAGE_TOKEN_KEY = "pushManageToken"
-
-const buildApiUrl = (path: string): string => (API_BASE ? `${API_BASE}${path}` : path)
 
 export type PushStatus = {
   supported: boolean

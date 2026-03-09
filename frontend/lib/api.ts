@@ -1,7 +1,5 @@
 import { NewsIdsResponse, NewsResponse, TickerResponse } from "./types"
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").trim().replace(/\/+$/, "")
-const buildApiUrl = (path: string): string => (API_BASE ? `${API_BASE}${path}` : path)
+import { buildApiUrl } from "./api-base"
 
 export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse> {
   const response = await fetch(buildApiUrl("/api/v1/tickers"), { signal, cache: "no-store" })
@@ -14,14 +12,11 @@ export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse
 export async function fetchNews(params: {
   tickers?: string[]
   provider?: string
-  includeUnmapped?: boolean
   includeUnmappedFromProvider?: string
   includeGlobalSummary?: boolean
   q?: string
   cursor?: string | null
   limit?: number
-  from?: string
-  to?: string
   signal?: AbortSignal
 }): Promise<NewsResponse> {
   const query = new URLSearchParams()
@@ -29,9 +24,6 @@ export async function fetchNews(params: {
     query.set("ticker", params.tickers.join(","))
   }
   if (params.provider) query.set("provider", params.provider)
-  if (params.includeUnmapped !== undefined) {
-    query.set("include_unmapped", String(params.includeUnmapped))
-  }
   if (params.includeUnmappedFromProvider) {
     query.set("include_unmapped_from_provider", params.includeUnmappedFromProvider)
   }
@@ -41,8 +33,6 @@ export async function fetchNews(params: {
   if (params.q) query.set("q", params.q)
   if (params.cursor) query.set("cursor", params.cursor)
   if (params.limit) query.set("limit", String(params.limit))
-  if (params.from) query.set("from", params.from)
-  if (params.to) query.set("to", params.to)
 
   const response = await fetch(buildApiUrl(`/api/v1/news?${query.toString()}`), {
     signal: params.signal,

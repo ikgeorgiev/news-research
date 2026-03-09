@@ -6,6 +6,16 @@ import { usePushSubscription } from "@/hooks/usePushSubscription"
 import { persistJson, persistValue } from "@/lib/local-storage"
 import { markReadIdsByQuery, trimIdSet } from "@/lib/read-state"
 import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
+import { BellIcon, CheckIcon, StarIcon } from "./page-icons"
+import {
+  buildFetchParams,
+  createWatchlistId,
+  dedupeById,
+  formatDetailedDate,
+  mergeUniqueIds,
+  mergeUniqueNewsItems,
+  toSafeExternalUrl,
+} from "./page-helpers"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
@@ -17,132 +27,6 @@ const NEWS_IDS_PAGE_SIZE = 1000
 const DEFAULT_WATCHLISTS: Watchlist[] = [
   { id: "all", name: "All News" },
 ]
-
-function toSafeExternalUrl(url: string | null | undefined): string | null {
-  if (!url) return null
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.toString()
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-function formatDetailedDate(iso: string | null | undefined): string {
-  if (!iso) return "Unknown"
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return "Unknown"
-  const dateStr = d.toDateString()
-  const timeStr = d.toTimeString().split(' ')[0]
-  
-  const now = new Date().getTime()
-  const then = d.getTime()
-  const sec = Math.max(1, Math.floor((now - then) / 1000))
-  let rel = ""
-  
-  if (sec < 60) {
-    rel = `${sec} secs`
-  } else {
-    const min = Math.floor(sec / 60)
-    if (min < 60) {
-      rel = `${min} mins`
-    } else {
-      const hr = Math.floor(min / 60)
-      if (hr < 24) {
-        rel = `${hr} hour${hr !== 1 ? 's' : ''}`
-      } else {
-        const day = Math.floor(hr / 24)
-        rel = `${day} day${day !== 1 ? 's' : ''}`
-      }
-    }
-  }
-
-  return `${dateStr} ${timeStr} (${rel})`
-}
-
-// Simple SVG Icons
-const StarIcon = ({ fill = "none" }: { fill?: string }) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-  </svg>
-)
-
-const CheckIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="20 6 9 17 4 12" />
-  </svg>
-)
-
-const BellIcon = ({ active = false }: { active?: boolean }) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-  </svg>
-)
-
-function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
-  const merged: NewsItem[] = []
-  const seen = new Set<number>()
-  for (const group of groups) {
-    for (const item of group) {
-      if (seen.has(item.id)) continue
-      seen.add(item.id)
-      merged.push(item)
-    }
-  }
-  return merged
-}
-
-function mergeUniqueIds(...groups: number[][]): number[] {
-  const merged: number[] = []
-  const seen = new Set<number>()
-  for (const group of groups) {
-    for (const id of group) {
-      if (seen.has(id)) continue
-      seen.add(id)
-      merged.push(id)
-    }
-  }
-  return merged
-}
-
-function buildFetchParams(
-  activeWatchlist: Watchlist | undefined,
-  activeWatchlistId: string,
-  ticker: string
-): { fetchTickers: string[] | undefined; includeGeneralFromProvider: string | undefined } {
-  let fetchTickers: string[] | undefined = undefined
-  if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
-    fetchTickers = [...activeWatchlist.tickers]
-  }
-  if (ticker) {
-    if (fetchTickers) {
-      if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
-    } else {
-      fetchTickers = [ticker]
-    }
-  }
-  const includeGeneralFromProvider =
-    activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
-      ? "Business Wire"
-      : undefined
-  return { fetchTickers, includeGeneralFromProvider }
-}
-
-function dedupeById<T extends { id: number }>(existing: T[], incoming: T[]): T[] {
-  const ids = new Set(existing.map((item) => item.id))
-  return incoming.filter((item) => !ids.has(item.id))
-}
-
-function createWatchlistId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `cwl_${crypto.randomUUID()}`
-  }
-  return `cwl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-}
 
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])

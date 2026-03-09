@@ -34,7 +34,6 @@ from app.schemas import (
     IngestionRunResponse,
     MarkAlertsSentRequest,
     MarkAlertsSentResponse,
-    NewsCountResponse,
     NewsGlobalSummary,
     NewsIdsResponse,
     NewsItem,
@@ -123,7 +122,7 @@ def _build_news_page_subquery(
     limit: int | None = None,
     article_id: int | None = None,
 ):
-    query = _build_news_query(
+    query = build_article_query(
         db,
         ticker=ticker,
         source=source,
@@ -163,6 +162,22 @@ def _build_news_page_subquery(
     if limit is not None:
         query = query.limit(limit)
     return query.subquery("news_page")
+
+
+def _serialize_news_item(row: object) -> NewsItem:
+    return NewsItem(
+        id=row.id,
+        title=row.title,
+        url=row.url,
+        source=row.source,
+        provider=row.provider,
+        summary=clean_summary_text(row.summary),
+        published_at=_published_at_for_response(row),
+        first_seen_at=_first_seen_at_for_response(row),
+        alert_sent_at=row.alert_sent_at,
+        tickers=_parse_aggregated_symbols(row.tickers),
+        dedupe_group=row.dedupe_group,
+    )
 
 
 def _build_ticker_agg_subquery(db: Session, news_page):
@@ -538,65 +553,6 @@ def list_tickers(
     )
 
 
-def _build_news_query(
-    db: Session,
-    *,
-    ticker: str | None = None,
-    source: str | None = None,
-    provider: str | None = None,
-    q: str | None = None,
-    include_unmapped: bool = False,
-    include_unmapped_from_provider: str | None = None,
-    from_: datetime | None = None,
-    to: datetime | None = None,
-):
-    """Build a filtered Article query (without ordering, cursor, or limit)."""
-    return build_article_query(
-        db,
-        ticker=ticker,
-        source=source,
-        provider=provider,
-        q=q,
-        include_unmapped=include_unmapped,
-        include_unmapped_from_provider=include_unmapped_from_provider,
-        from_=from_,
-        to=to,
-    )
-
-
-@app.get(f"{settings.api_prefix}/news/count", response_model=NewsCountResponse)
-def count_news(
-    ticker: str | None = None,
-    source: str | None = None,
-    provider: str | None = None,
-    q: str | None = None,
-    include_unmapped: bool = Query(
-        default=False,
-        description="Include articles not mapped to any active ticker",
-    ),
-    include_unmapped_from_provider: str | None = Query(
-        default=None,
-        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
-    ),
-    from_: datetime | None = Query(default=None, alias="from"),
-    to: datetime | None = None,
-    db: Session = Depends(get_db),
-):
-    query = _build_news_query(
-        db,
-        ticker=ticker,
-        source=source,
-        provider=provider,
-        q=q,
-        include_unmapped=include_unmapped,
-        include_unmapped_from_provider=include_unmapped_from_provider,
-        from_=from_,
-        to=to,
-    )
-    total = db.scalar(select(func.count()).select_from(query.subquery()))
-    return NewsCountResponse(total=total or 0)
-
-
 @app.get(f"{settings.api_prefix}/news/ids", response_model=NewsIdsResponse)
 def list_news_ids(
     ticker: str | None = None,
@@ -617,7 +573,7 @@ def list_news_ids(
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    query = _build_news_query(
+    query = build_article_query(
         db,
         ticker=ticker,
         source=source,
@@ -693,22 +649,7 @@ def list_news(
     has_more = len(rows) > limit
     rows = rows[:limit]
 
-    items = [
-        NewsItem(
-            id=row.id,
-            title=row.title,
-            url=row.url,
-            source=row.source,
-            provider=row.provider,
-            summary=clean_summary_text(row.summary),
-            published_at=_published_at_for_response(row),
-            first_seen_at=_first_seen_at_for_response(row),
-            alert_sent_at=row.alert_sent_at,
-            tickers=_parse_aggregated_symbols(row.tickers),
-            dedupe_group=row.dedupe_group,
-        )
-        for row in rows
-    ]
+    items = [_serialize_news_item(row) for row in rows]
 
     next_cursor = None
     if has_more and rows:
@@ -735,19 +676,7 @@ def get_news_item(article_id: int, db: Session = Depends(get_db)):
     row = db.execute(_build_enriched_news_select(db, news_page)).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    return NewsItem(
-        id=row.id,
-        title=row.title,
-        url=row.url,
-        source=row.source,
-        provider=row.provider,
-        summary=clean_summary_text(row.summary),
-        published_at=_published_at_for_response(row),
-        first_seen_at=_first_seen_at_for_response(row),
-        alert_sent_at=row.alert_sent_at,
-        tickers=_parse_aggregated_symbols(row.tickers),
-        dedupe_group=row.dedupe_group,
-    )
+    return _serialize_news_item(row)
 
 
 @app.post(

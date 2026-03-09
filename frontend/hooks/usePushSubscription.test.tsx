@@ -37,7 +37,6 @@ describe("usePushSubscription", () => {
     )
 
     await waitFor(() => expect(result.current.pushSubscribed).toBe(true))
-    expect(localStorage.getItem("pushSubscribed")).toBe("true")
   })
 
   it("stays unsubscribed when push is unavailable", async () => {
@@ -50,7 +49,7 @@ describe("usePushSubscription", () => {
       })
     )
 
-    await waitFor(() => expect(localStorage.getItem("pushSubscribed")).toBe("false"))
+    await waitFor(() => expect(result.current.pushSubscribed).toBe(false))
     expect(result.current.pushSubscribed).toBe(false)
     expect(result.current.pushError).toBeNull()
   })

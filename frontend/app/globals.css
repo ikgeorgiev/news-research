@@ -27,12 +27,11 @@ body {
   width: 100vw;
   background: var(--bg-main);
   color: var(--text-primary);
-  /* Fallback to system sans-serif for clean modern look */
   font-family:
-    var(--font-inter),
+    "Segoe UI",
+    "Aptos",
     -apple-system,
     BlinkMacSystemFont,
-    "Segoe UI",
     Roboto,
     Helvetica,
     Arial,

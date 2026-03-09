@@ -12,7 +12,6 @@ import {
 import { persistJson, persistValue, removePersistedValue } from "@/lib/local-storage"
 import { PushAlertScopes, Watchlist } from "@/lib/types"
 
-const PUSH_SUBSCRIBED_STORAGE_KEY = "pushSubscribed"
 const LEGACY_NOTIFICATIONS_STORAGE_KEY = "notificationsEnabled"
 const ALERT_INCLUDE_ALL_STORAGE_KEY = "alertIncludeAllNews"
 const ALERT_WATCHLIST_IDS_STORAGE_KEY = "alertWatchlistIds"
@@ -26,7 +25,6 @@ export function usePushSubscription({
   mounted: boolean
 }) {
   const [pushSubscribed, setPushSubscribed] = useState(false)
-  const [, setPushSupported] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
   const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
   const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
@@ -97,26 +95,18 @@ export function usePushSubscription({
     const refreshPushStatus = async () => {
       if (!isPushSupported()) {
         if (!cancelled) {
-          setPushSupported(false)
           setPushSubscribed(false)
         }
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
         return
-      }
-      if (!cancelled) {
-        setPushSupported(true)
       }
       try {
         const status = await getPushStatus()
         if (cancelled) return
-        setPushSupported(status.supported)
         setPushSubscribed(status.subscribed)
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, status.subscribed ? "true" : "false")
       } catch {
         if (!cancelled) {
           setPushSubscribed(false)
         }
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
       }
     }
 
@@ -181,7 +171,6 @@ export function usePushSubscription({
   const togglePushSubscription = async () => {
     if (pushSubscribed) {
       setPushSubscribed(false)
-      persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "false")
       setPushError(null)
       try {
         await disablePushNotifications()
@@ -194,10 +183,8 @@ export function usePushSubscription({
     setPushError(null)
     try {
       const result = await enablePushNotifications(pushScopes)
-      setPushSupported(isPushSupported())
       if (result.pushActive) {
         setPushSubscribed(true)
-        persistValue(PUSH_SUBSCRIBED_STORAGE_KEY, "true")
         return
       }
       if (!result.permissionGranted) {

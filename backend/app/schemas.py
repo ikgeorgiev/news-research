@@ -31,11 +31,6 @@ class NewsListResponse(BaseModel):
     meta: dict[str, int | str | None]
     global_summary: NewsGlobalSummary | None = None
 
-
-class NewsCountResponse(BaseModel):
-    total: int
-
-
 class NewsIdsResponse(BaseModel):
     ids: list[int]
     next_cursor: str | None = None
