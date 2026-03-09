@@ -78,7 +78,7 @@ def build_article_query(
     elif ticker_filter_supplied:
         query = query.where(mapped_exists)
     elif include_unmapped:
-        pass
+        pass  # Show all articles (including unmapped) — no filter needed
     elif include_unmapped_from_provider:
         include_name = include_unmapped_from_provider.strip()
         include_source_row = db.scalar(

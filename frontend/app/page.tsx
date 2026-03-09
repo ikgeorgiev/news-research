@@ -96,6 +96,34 @@ function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
+function buildFetchParams(
+  activeWatchlist: Watchlist | undefined,
+  activeWatchlistId: string,
+  ticker: string
+): { fetchTickers: string[] | undefined; includeGeneralFromProvider: string | undefined } {
+  let fetchTickers: string[] | undefined = undefined
+  if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
+    fetchTickers = [...activeWatchlist.tickers]
+  }
+  if (ticker) {
+    if (fetchTickers) {
+      if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
+    } else {
+      fetchTickers = [ticker]
+    }
+  }
+  const includeGeneralFromProvider =
+    activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
+      ? "Business Wire"
+      : undefined
+  return { fetchTickers, includeGeneralFromProvider }
+}
+
+function dedupeById<T extends { id: number }>(existing: T[], incoming: T[]): T[] {
+  const ids = new Set(existing.map((item) => item.id))
+  return incoming.filter((item) => !ids.has(item.id))
+}
+
 function createWatchlistId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `cwl_${crypto.randomUUID()}`
@@ -110,7 +138,6 @@ export default function Page() {
   const [items, setItems] = useState<NewsItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
-  // Watchlists state
   // Watchlists state
   const [customWatchlists, setCustomWatchlists] = useState<Watchlist[]>([])
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>("all")
@@ -397,23 +424,7 @@ export default function Page() {
     const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
     const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
 
-    // Combine active watchlist tickers with any individually selected ticker filter
-    let fetchTickers: string[] | undefined = undefined
-    if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
-      fetchTickers = [...activeWatchlist.tickers]
-    }
-    if (ticker) {
-      if (fetchTickers) {
-        if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
-      } else {
-        fetchTickers = [ticker]
-      }
-    }
-
-    const includeGeneralFromProvider =
-      activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
-        ? "Business Wire"
-        : undefined
+    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(activeWatchlist, activeWatchlistId, ticker)
 
     // When user is scrolled deep, fetch in the background and buffer new items
     // instead of updating the feed directly.  We snapshot the current generation
@@ -433,14 +444,11 @@ export default function Page() {
           // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
           const fetchedItems = data.items
-          const currentIds = new Set(itemsRef.current.map((i) => i.id))
-          const newOnes = fetchedItems.filter((i) => !currentIds.has(i.id))
-          const pendingIds = new Set(pendingNewItemsRef.current.map((i) => i.id))
-          const freshOnes = newOnes.filter((i) => !pendingIds.has(i.id))
+          const newOnes = dedupeById(itemsRef.current, fetchedItems)
+          const freshOnes = dedupeById(pendingNewItemsRef.current, newOnes)
           if (freshOnes.length > 0) {
             setPendingNewItems((prev) => {
-              const prevIds = new Set(prev.map((i) => i.id))
-              const uniqueFresh = freshOnes.filter((i) => !prevIds.has(i.id))
+              const uniqueFresh = dedupeById(prev, freshOnes)
               return uniqueFresh.length > 0 ? [...uniqueFresh, ...prev] : prev
             })
           }
@@ -477,15 +485,13 @@ export default function Page() {
         const fetchedItems = data.items
         // Refresh succeeded — safe to clear pending banner.
         setPendingNewItems([])
-        const currentIds = new Set(itemsRef.current.map((item) => item.id))
         const autoRefreshNewOnes = isAutoRefresh
-          ? fetchedItems.filter((item) => !currentIds.has(item.id))
+          ? dedupeById(itemsRef.current, fetchedItems)
           : []
         if (isAutoRefresh && itemsRef.current.length > data.items.length) {
           // Keep previously loaded pages; prepend only genuinely new top stories.
           setItems((prev) => {
-            const prevIds = new Set(prev.map((item) => item.id))
-            const prepend = fetchedItems.filter((item) => !prevIds.has(item.id))
+            const prepend = dedupeById(prev, fetchedItems)
             return prepend.length > 0 ? [...prepend, ...prev] : prev
           })
           setNextCursor((prev) => prev ?? data.next_cursor)
@@ -528,24 +534,9 @@ export default function Page() {
     setError(null)
     const requestGeneration = feedGenerationRef.current
     
-    let fetchTickers: string[] | undefined = undefined
-    if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
-      fetchTickers = [...activeWatchlist.tickers]
-    }
-    if (ticker) {
-      if (fetchTickers) {
-        if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
-      } else {
-        fetchTickers = [ticker]
-      }
-    }
+    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(activeWatchlist, activeWatchlistId, ticker)
 
     try {
-      const includeGeneralFromProvider =
-        activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
-          ? "Business Wire"
-          : undefined
-
       const data = await fetchNews({
         tickers: fetchTickers,
         provider: provider || undefined,
@@ -557,8 +548,7 @@ export default function Page() {
       if (requestGeneration !== feedGenerationRef.current) return
       const fetchedItems = data.items
       setItems((prev) => {
-        const prevIds = new Set(prev.map((item) => item.id))
-        const append = fetchedItems.filter((item) => !prevIds.has(item.id))
+        const append = dedupeById(prev, fetchedItems)
         return append.length > 0 ? [...prev, ...append] : prev
       })
       setNextCursor(data.next_cursor)
@@ -573,8 +563,7 @@ export default function Page() {
 
   const loadPendingArticles = () => {
     setItems((prev) => {
-      const prevIds = new Set(prev.map((i) => i.id))
-      const newOnes = pendingNewItems.filter((i) => !prevIds.has(i.id))
+      const newOnes = dedupeById(prev, pendingNewItems)
       return newOnes.length > 0 ? [...newOnes, ...prev] : prev
     })
     setPendingNewItems([])

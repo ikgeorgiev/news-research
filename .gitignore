@@ -38,3 +38,5 @@ dev-*.sh
 .tmp_*.html
 .tmp/
 .research-src/
+dropped_yahoo_entries.json
+websub_results.json

@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 import feedparser
 import requests
 from sqlalchemy import and_, delete, desc, func, or_, select, tuple_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
@@ -478,7 +478,7 @@ def _parse_retry_after_seconds(header_value: str | None) -> float | None:
         pass
     try:
         retry_at = parsedate_to_datetime(value)
-    except Exception:
+    except (ValueError, TypeError):
         return None
     if retry_at.tzinfo is None:
         retry_at = retry_at.replace(tzinfo=timezone.utc)
@@ -627,7 +627,7 @@ def _load_tickers_from_csv_if_changed(db: Session, csv_path: str) -> dict[str, i
 
     try:
         tickers_exist = db.scalar(select(Ticker.id).limit(1))
-    except Exception:
+    except SQLAlchemyError:
         tickers_exist = None
 
     # If DB is empty, skip mtime cache and force a load.
@@ -636,7 +636,7 @@ def _load_tickers_from_csv_if_changed(db: Session, csv_path: str) -> dict[str, i
 
     try:
         mtime = Path(csv_path).stat().st_mtime
-    except Exception:
+    except OSError:
         # Missing/unreadable file: preserve the previous behavior (loader returns zeros if file missing).
         return load_tickers_from_csv(db, csv_path)
 
@@ -879,7 +879,7 @@ def _fetch_source_page_html(
         )
         if response.ok and response.text:
             html_text = response.text
-    except Exception:
+    except (requests.RequestException, AttributeError):
         html_text = None
 
     _cache_source_page(fetch_url, time.time(), html_text)
@@ -1844,7 +1844,7 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
     if total_inserted > 0:
         try:
             push_alerts = check_and_send_alerts(db, settings)
-        except Exception:
+        except Exception:  # Broad catch: push failures must not abort ingestion
             logger.exception("Push alert processing failed after ingestion cycle")
 
     return {

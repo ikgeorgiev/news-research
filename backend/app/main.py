@@ -793,28 +793,12 @@ def admin_reload_tickers(
     ),
     remap_limit: int = Query(default=500, ge=1, le=5000),
     db: Session = Depends(get_db),
-    *,
-    remap_unmapped_businesswire: bool | None = Query(
-        default=None,
-        description="Deprecated alias for remap_unmapped",
-        deprecated=True,
-    ),
 ):
     ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
 
     remap_payload: BusinessWireRemapResponse | None = None
     source_remap_payloads: list[SourceRemapResponse] = []
-    primary_should_remap = remap_unmapped if isinstance(remap_unmapped, bool) else True
-    legacy_should_remap = (
-        remap_unmapped_businesswire
-        if isinstance(remap_unmapped_businesswire, bool)
-        else None
-    )
-    should_remap = (
-        legacy_should_remap
-        if legacy_should_remap is not None
-        else primary_should_remap
-    )
+    should_remap = remap_unmapped
 
     if should_remap:
         for code in sorted(PAGE_FETCH_CONFIGS.keys()):

@@ -24,7 +24,7 @@ MAX_ERROR_TEXT_LEN = 500
 
 try:
     from pywebpush import WebPushException, webpush
-except Exception:  # pragma: no cover - guarded at runtime
+except ImportError:  # pragma: no cover - guarded at runtime
     WebPushException = Exception  # type: ignore[assignment]
     webpush = None
 

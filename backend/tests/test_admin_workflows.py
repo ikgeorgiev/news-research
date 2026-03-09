@@ -49,7 +49,7 @@ def test_admin_reload_tickers_returns_remap_payload(monkeypatch):
     monkeypatch.setattr("app.main.remap_source_articles", fake_remap)
 
     response = admin_reload_tickers(
-        remap_unmapped_businesswire=True,
+        remap_unmapped=True,
         remap_limit=321,
         db=db,
     )
@@ -82,7 +82,7 @@ def test_admin_reload_tickers_can_skip_remap(monkeypatch):
     monkeypatch.setattr("app.main.remap_source_articles", fake_remap)
 
     response = admin_reload_tickers(
-        remap_unmapped_businesswire=False,
+        remap_unmapped=False,
         remap_limit=500,
         db=db,
     )
