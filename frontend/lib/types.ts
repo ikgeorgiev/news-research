@@ -12,6 +12,12 @@ export type NewsItem = {
   dedupe_group: string
 }
 
+export type GlobalNewsSummary = {
+  total: number
+  tracked_ids: number[]
+  tracked_limit: number
+}
+
 export type NewsResponse = {
   items: NewsItem[]
   next_cursor: string | null
@@ -20,6 +26,7 @@ export type NewsResponse = {
     limit: number
     sort: string
   }
+  global_summary?: GlobalNewsSummary | null
 }
 
 export type NewsCountResponse = {

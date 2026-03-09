@@ -209,9 +209,11 @@ For frontend on `3000` instead:
 - `POST /api/v1/admin/remap/businesswire`
 
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
-Use `include_unmapped=true` to include all unmapped stories.
-Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wire unmapped stories while keeping mapped stories from all providers.
+Mapped means linked to at least one active ticker.
+Use `include_unmapped=true` to include stories with no active ticker mapping.
+Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wire stories with no active ticker mapping while keeping active-ticker-mapped stories from all providers.
 `GET /api/v1/news/ids` supports cursor pagination with `limit` and `cursor`.
+`GET /api/v1/tickers?q=` does case-insensitive prefix matching on the ticker symbol.
 
 Admin endpoints require the `X-API-Key` header and `ADMIN_API_KEY` to be configured.
 

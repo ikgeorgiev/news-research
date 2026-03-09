@@ -39,6 +39,7 @@ def test_list_tickers_filters_before_count_and_pagination():
     db = _make_db_session()
     db.add_all(
         [
+            Ticker(symbol="ABB", active=True),
             Ticker(symbol="AAA", active=True),
             Ticker(symbol="BBB", active=True),
             Ticker(symbol="CCC", active=True),

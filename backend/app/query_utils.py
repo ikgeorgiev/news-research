@@ -30,3 +30,7 @@ def escape_like_literal(value: str) -> str:
 
 def contains_literal_pattern(value: str) -> str:
     return f"%{escape_like_literal(value.strip())}%"
+
+
+def prefix_literal_pattern(value: str) -> str:
+    return f"{escape_like_literal(value.strip())}%"

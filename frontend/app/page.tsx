@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react"
-import { fetchNews, fetchNewsCount, fetchNewsIds, fetchTickers } from "@/lib/api"
+import { fetchNews, fetchNewsIds, fetchTickers } from "@/lib/api"
 import { usePushSubscription } from "@/hooks/usePushSubscription"
 import { persistJson, persistValue } from "@/lib/local-storage"
 import { markReadIdsByQuery, trimIdSet } from "@/lib/read-state"
@@ -96,6 +96,19 @@ function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
+function mergeUniqueIds(...groups: number[][]): number[] {
+  const merged: number[] = []
+  const seen = new Set<number>()
+  for (const group of groups) {
+    for (const id of group) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      merged.push(id)
+    }
+  }
+  return merged
+}
+
 function buildFetchParams(
   activeWatchlist: Watchlist | undefined,
   activeWatchlistId: string,
@@ -133,7 +146,7 @@ function createWatchlistId(): string {
 
 export default function Page() {
   const [tickers, setTickers] = useState<TickerItem[]>([])
-  const [globalItems, setGlobalItems] = useState<NewsItem[]>([])
+  const [globalTrackedIds, setGlobalTrackedIds] = useState<number[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [items, setItems] = useState<NewsItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -294,33 +307,6 @@ export default function Page() {
     setSearchInput(activeWatchlist?.q || "")
   }, [activeWatchlist])
 
-  // Fetch global baseline news for unread count
-  useEffect(() => {
-    const controller = new AbortController()
-    // Fetch a baseline of the latest news to calculate global unread counts
-    fetchNews({
-      includeUnmappedFromProvider: "Business Wire",
-      limit: 100, // Fetch a larger chunk for accurate unread calculations
-      signal: controller.signal,
-    })
-      .then((data) => setGlobalItems(data.items))
-      .catch(() => {}) // Ignore errors for background global fetch
-
-    return () => controller.abort()
-  }, [refreshTick])
-
-  // Fetch lightweight total count from dedicated endpoint
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchNewsCount({
-      includeUnmappedFromProvider: "Business Wire",
-      signal: controller.signal,
-    })
-      .then((data) => setTotalCount(data.total))
-      .catch(() => {}) // Ignore errors for background count fetch
-    return () => controller.abort()
-  }, [refreshTick])
-
   // Auto-refresh feed while tab is visible.
   useEffect(() => {
     if (!mounted) return
@@ -436,6 +422,7 @@ export default function Page() {
         tickers: fetchTickers,
         provider: provider || undefined,
         includeUnmappedFromProvider: includeGeneralFromProvider,
+        includeGlobalSummary: true,
         q: searchQuery || undefined,
         limit: 40,
         signal: controller.signal,
@@ -443,6 +430,10 @@ export default function Page() {
         .then((data) => {
           // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
+          if (data.global_summary) {
+            setGlobalTrackedIds(data.global_summary.tracked_ids)
+            setTotalCount(data.global_summary.total)
+          }
           const fetchedItems = data.items
           const newOnes = dedupeById(itemsRef.current, fetchedItems)
           const freshOnes = dedupeById(pendingNewItemsRef.current, newOnes)
@@ -476,12 +467,17 @@ export default function Page() {
       tickers: fetchTickers,
       provider: provider || undefined,
       includeUnmappedFromProvider: includeGeneralFromProvider,
+      includeGlobalSummary: true,
       q: searchQuery || undefined,
       limit: 40,
       signal: controller.signal,
     })
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
+        if (data.global_summary) {
+          setGlobalTrackedIds(data.global_summary.tracked_ids)
+          setTotalCount(data.global_summary.total)
+        }
         const fetchedItems = data.items
         // Refresh succeeded — safe to clear pending banner.
         setPendingNewItems([])
@@ -629,8 +625,17 @@ export default function Page() {
   }
 
   const trackedUnreadItems = useMemo(
-    () => mergeUniqueNewsItems(items, pendingNewItems, globalItems),
-    [items, pendingNewItems, globalItems]
+    () => mergeUniqueNewsItems(items, pendingNewItems),
+    [items, pendingNewItems]
+  )
+
+  const trackedUnreadIds = useMemo(
+    () => mergeUniqueIds(
+      items.map((item) => item.id),
+      pendingNewItems.map((item) => item.id),
+      globalTrackedIds
+    ),
+    [items, pendingNewItems, globalTrackedIds]
   )
 
   // Count read IDs verified against our tracked window, plus reads beyond the
@@ -639,17 +644,17 @@ export default function Page() {
   // avoid stale localStorage IDs inflating the count.
   const unreadCount = useMemo(() => {
     let validReadCount = 0
-    for (const item of trackedUnreadItems) {
-      if (readIds.has(item.id)) validReadCount++
+    for (const id of trackedUnreadIds) {
+      if (readIds.has(id)) validReadCount++
     }
     if (totalCount > 0) {
       const untrackedReads = readIds.size - validReadCount
-      const untrackedArticles = Math.max(0, totalCount - trackedUnreadItems.length)
+      const untrackedArticles = Math.max(0, totalCount - trackedUnreadIds.length)
       const totalReads = validReadCount + Math.min(untrackedReads, untrackedArticles)
       return Math.max(0, totalCount - totalReads)
     }
-    return trackedUnreadItems.length - validReadCount
-  }, [trackedUnreadItems, readIds, totalCount])
+    return trackedUnreadIds.length - validReadCount
+  }, [trackedUnreadIds, readIds, totalCount])
 
   const handleCreateWatchlist = (e: FormEvent) => {
     e.preventDefault()

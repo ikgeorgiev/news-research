@@ -644,9 +644,11 @@ def _load_tickers_from_csv_if_changed(db: Session, csv_path: str) -> dict[str, i
         last = _tickers_csv_mtime_cache.get(csv_path)
         if last is not None and last == mtime:
             return {"loaded": 0, "created": 0, "updated": 0, "unchanged": 0}
-        _tickers_csv_mtime_cache[csv_path] = mtime
 
-    return load_tickers_from_csv(db, csv_path)
+    stats = load_tickers_from_csv(db, csv_path)
+    with _tickers_csv_mtime_cache_lock:
+        _tickers_csv_mtime_cache[csv_path] = mtime
+    return stats
 
 
 @dataclass(slots=True)

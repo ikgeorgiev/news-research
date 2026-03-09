@@ -35,6 +35,7 @@ from app.schemas import (
     MarkAlertsSentRequest,
     MarkAlertsSentResponse,
     NewsCountResponse,
+    NewsGlobalSummary,
     NewsIdsResponse,
     NewsItem,
     NewsListResponse,
@@ -53,7 +54,7 @@ from app.schemas import (
 from app.scheduler import IngestionScheduler
 from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
-from app.query_utils import contains_literal_pattern, iter_chunks
+from app.query_utils import contains_literal_pattern, iter_chunks, prefix_literal_pattern
 from app.utils import clean_summary_text, decode_cursor, encode_cursor
 
 logging.basicConfig(level=logging.INFO)
@@ -61,65 +62,259 @@ logger = logging.getLogger(__name__)
 
 scheduler: IngestionScheduler | None = None
 MAX_NEWS_IDS_PAGE_SIZE = 5000
+GLOBAL_NEWS_TRACKED_LIMIT = 100
+EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
-def _published_at_for_response(row: Article) -> datetime:
-    """Protect API serialization/cursoring from legacy rows with null published_at."""
-    return row.published_at or row.created_at
+def _article_sort_key_expr():
+    return func.coalesce(Article.published_at, Article.created_at, Article.first_seen_at)
 
 
-def _first_seen_at_for_response(row: Article) -> datetime:
+def _coalesce_row_timestamp(*values: datetime | None) -> datetime:
+    for value in values:
+        if value is not None:
+            return value
+    return EPOCH_UTC
+
+
+def _published_at_for_response(row: object) -> datetime:
+    """Protect API serialization/cursoring from legacy rows with missing timestamps."""
+    return _coalesce_row_timestamp(
+        getattr(row, "published_at", None),
+        getattr(row, "created_at", None),
+        getattr(row, "first_seen_at", None),
+    )
+
+
+def _first_seen_at_for_response(row: object) -> datetime:
     """Protect serialization for legacy rows created before first_seen_at existed."""
-    return row.first_seen_at or row.created_at or _published_at_for_response(row)
+    return _coalesce_row_timestamp(
+        getattr(row, "first_seen_at", None),
+        getattr(row, "created_at", None),
+        getattr(row, "published_at", None),
+    )
 
 
-def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[str]]:
-    if not article_ids:
-        return {}
-    rows = []
-    for chunk in iter_chunks(article_ids):
-        rows.extend(
-            db.execute(
-                select(ArticleTicker.article_id, Ticker.symbol)
-                .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-                .where(ArticleTicker.article_id.in_(chunk))
-                .order_by(ArticleTicker.article_id.asc(), Ticker.symbol.asc())
-            ).all()
+def _sort_timestamp_for_response(row: object) -> datetime:
+    return _coalesce_row_timestamp(
+        getattr(row, "published_at", None),
+        getattr(row, "created_at", None),
+        getattr(row, "first_seen_at", None),
+    )
+
+
+def _parse_aggregated_symbols(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = [item for item in value.split(",") if item]
+    elif isinstance(value, (list, tuple)):
+        raw_values = [str(item) for item in value if item]
+    else:
+        raw_values = [str(value)]
+    unique = sorted({item.strip() for item in raw_values if item and item.strip()})
+    return unique
+
+
+def _build_news_page_subquery(
+    db: Session,
+    *,
+    ticker: str | None = None,
+    source: str | None = None,
+    provider: str | None = None,
+    q: str | None = None,
+    include_unmapped: bool = False,
+    include_unmapped_from_provider: str | None = None,
+    from_: datetime | None = None,
+    to: datetime | None = None,
+    cursor: str | None = None,
+    limit: int | None = None,
+    article_id: int | None = None,
+):
+    query = _build_news_query(
+        db,
+        ticker=ticker,
+        source=source,
+        provider=provider,
+        q=q,
+        include_unmapped=include_unmapped,
+        include_unmapped_from_provider=include_unmapped_from_provider,
+        from_=from_,
+        to=to,
+    )
+    sort_key = _article_sort_key_expr()
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    if cursor_payload:
+        cursor_published, cursor_id = cursor_payload
+        query = query.where(
+            or_(
+                sort_key < cursor_published,
+                and_(sort_key == cursor_published, Article.id < cursor_id),
+            )
         )
-    mapped: dict[int, list[str]] = {}
-    for article_id, symbol in rows:
-        mapped.setdefault(article_id, []).append(symbol)
-    return mapped
+    if article_id is not None:
+        query = query.where(Article.id == article_id)
+    query = query.with_only_columns(
+        Article.id.label("id"),
+        Article.title.label("title"),
+        Article.canonical_url.label("url"),
+        Article.source_name.label("source"),
+        Article.provider_name.label("provider_name"),
+        Article.summary.label("summary"),
+        Article.published_at.label("published_at"),
+        Article.created_at.label("created_at"),
+        Article.first_seen_at.label("first_seen_at"),
+        Article.first_alert_sent_at.label("alert_sent_at"),
+        Article.cluster_key.label("dedupe_group"),
+        sort_key.label("sort_ts"),
+    ).order_by(sort_key.desc(), Article.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    return query.subquery("news_page")
 
 
-def _article_providers_map(db: Session, article_ids: list[int]) -> dict[int, str]:
-    if not article_ids:
-        return {}
-    rows = []
-    for chunk in iter_chunks(article_ids):
-        rows.extend(
-            db.execute(
-                select(
-                    RawFeedItem.article_id,
-                    Source.name,
-                    RawFeedItem.raw_link,
-                    Article.canonical_url,
-                    RawFeedItem.id,
-                )
-                .join(Source, Source.id == RawFeedItem.source_id)
-                .join(Article, Article.id == RawFeedItem.article_id)
-                .where(RawFeedItem.article_id.in_(chunk))
-                .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
-            ).all()
+def _build_ticker_agg_subquery(db: Session, news_page):
+    ticker_rows = (
+        select(
+            news_page.c.id.label("article_id"),
+            Ticker.symbol.label("symbol"),
         )
-    matched: dict[int, str] = {}
-    fallback: dict[int, str] = {}
-    for article_id, source_name, raw_link, canonical_url, _raw_id in rows:
-        fallback.setdefault(article_id, source_name)
-        if raw_link and canonical_url and raw_link == canonical_url:
-            # Rows are ordered newest-first, so keep the first canonical match.
-            matched.setdefault(article_id, source_name)
-    return {article_id: matched.get(article_id) or fallback.get(article_id, "") for article_id in article_ids}
+        .select_from(news_page)
+        .join(ArticleTicker, ArticleTicker.article_id == news_page.c.id)
+        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+        .where(Ticker.active.is_(True))
+        .distinct()
+        .subquery("ticker_rows")
+    )
+    dialect_name = db.get_bind().dialect.name if db.get_bind() is not None else ""
+    if dialect_name == "postgresql":
+        ticker_agg = func.array_agg(ticker_rows.c.symbol).label("tickers")
+    else:
+        ticker_agg = func.group_concat(ticker_rows.c.symbol, ",").label("tickers")
+    return (
+        select(
+            ticker_rows.c.article_id,
+            ticker_agg,
+        )
+        .group_by(ticker_rows.c.article_id)
+        .subquery("ticker_agg")
+    )
+
+
+def _build_enriched_news_select(db: Session, news_page):
+    ticker_agg = _build_ticker_agg_subquery(db, news_page)
+    canonical_provider = (
+        select(Source.name)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(
+            and_(
+                RawFeedItem.article_id == news_page.c.id,
+                RawFeedItem.raw_link == news_page.c.url,
+            )
+        )
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    latest_provider = (
+        select(Source.name)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(RawFeedItem.article_id == news_page.c.id)
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    return (
+        select(
+            news_page.c.id,
+            news_page.c.title,
+            news_page.c.url,
+            news_page.c.source,
+            news_page.c.provider_name,
+            news_page.c.summary,
+            news_page.c.published_at,
+            news_page.c.created_at,
+            news_page.c.first_seen_at,
+            news_page.c.alert_sent_at,
+            news_page.c.dedupe_group,
+            news_page.c.sort_ts,
+            func.coalesce(canonical_provider, latest_provider, news_page.c.provider_name).label("provider"),
+            ticker_agg.c.tickers.label("tickers"),
+        )
+        .select_from(news_page.outerjoin(ticker_agg, ticker_agg.c.article_id == news_page.c.id))
+        .order_by(news_page.c.sort_ts.desc(), news_page.c.id.desc())
+    )
+
+
+def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
+    sort_key = _article_sort_key_expr()
+    mapped_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+        .where(
+            and_(
+                ArticleTicker.article_id == Article.id,
+                Ticker.active.is_(True),
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
+    include_provider_exists = (
+        select(1)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(
+            and_(
+                RawFeedItem.article_id == Article.id,
+                func.lower(Source.name) == "business wire",
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
+    base_query = select(Article).where(
+        or_(
+            mapped_exists,
+            and_(~mapped_exists, include_provider_exists),
+        )
+    )
+    summary_page = (
+        base_query.with_only_columns(
+            Article.id.label("id"),
+            func.count().over().label("total"),
+        )
+        .order_by(sort_key.desc(), Article.id.desc())
+        .limit(GLOBAL_NEWS_TRACKED_LIMIT)
+        .subquery("global_summary_page")
+    )
+    dialect_name = db.get_bind().dialect.name if db.get_bind() is not None else ""
+    if dialect_name == "postgresql":
+        tracked_ids_agg = func.array_agg(summary_page.c.id).label("tracked_ids")
+    else:
+        tracked_ids_agg = func.group_concat(summary_page.c.id, ",").label("tracked_ids")
+    row = db.execute(
+        select(
+            func.max(summary_page.c.total).label("total"),
+            tracked_ids_agg,
+        ).select_from(summary_page)
+    ).one()
+    tracked_ids_value = row.tracked_ids
+    if tracked_ids_value is None:
+        tracked_ids: list[int] = []
+    elif isinstance(tracked_ids_value, str):
+        tracked_ids = [int(value) for value in tracked_ids_value.split(",") if value]
+    else:
+        tracked_ids = [int(value) for value in tracked_ids_value if value is not None]
+    total = int(row.total or 0)
+    return NewsGlobalSummary(
+        total=total,
+        tracked_ids=tracked_ids,
+        tracked_limit=GLOBAL_NEWS_TRACKED_LIMIT,
+    )
 
 
 @asynccontextmanager
@@ -330,7 +525,7 @@ def list_tickers(
     if q:
         query = query.where(
             Ticker.symbol.ilike(
-                contains_literal_pattern(q.strip().upper()),
+                prefix_literal_pattern(q.strip().upper()),
                 escape="\\",
             )
         )
@@ -389,7 +584,7 @@ def count_news(
     ),
     include_unmapped_from_provider: str | None = Query(
         default=None,
-        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
     ),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
@@ -422,7 +617,7 @@ def list_news_ids(
     ),
     include_unmapped_from_provider: str | None = Query(
         default=None,
-        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
     ),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
@@ -441,7 +636,7 @@ def list_news_ids(
         from_=from_,
         to=to,
     )
-    sort_key = func.coalesce(Article.published_at, Article.created_at)
+    sort_key = _article_sort_key_expr()
     cursor_payload = decode_cursor(cursor) if cursor else None
     if cursor_payload:
         cursor_published, cursor_id = cursor_payload
@@ -464,7 +659,7 @@ def list_news_ids(
     next_cursor = None
     if has_more and rows:
         last_id, last_sort_ts = rows[-1]
-        next_cursor = encode_cursor(last_sort_ts, last_id)
+        next_cursor = encode_cursor(last_sort_ts or EPOCH_UTC, last_id)
     return NewsIdsResponse(ids=ids, next_cursor=next_cursor)
 
 
@@ -480,15 +675,16 @@ def list_news(
     ),
     include_unmapped_from_provider: str | None = Query(
         default=None,
-        description="Include unmapped articles only from this provider while keeping mapped articles from all providers",
+        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
     ),
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=100),
+    include_global_summary: bool = Query(default=False),
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
-    query = _build_news_query(
+    news_page = _build_news_page_subquery(
         db,
         ticker=ticker,
         source=source,
@@ -498,41 +694,26 @@ def list_news(
         include_unmapped_from_provider=include_unmapped_from_provider,
         from_=from_,
         to=to,
+        cursor=cursor,
+        limit=limit + 1,
     )
-    sort_key = func.coalesce(Article.published_at, Article.created_at)
-
-    cursor_payload = decode_cursor(cursor) if cursor else None
-    if cursor_payload:
-        cursor_published, cursor_id = cursor_payload
-        query = query.where(
-            or_(
-                sort_key < cursor_published,
-                and_(sort_key == cursor_published, Article.id < cursor_id),
-            )
-        )
-
-    query = query.order_by(sort_key.desc(), Article.id.desc()).limit(limit + 1)
-
-    rows = db.scalars(query).all()
+    rows = db.execute(_build_enriched_news_select(db, news_page)).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-
-    tickers_by_article = _article_tickers_map(db, [row.id for row in rows])
-    providers_by_article = _article_providers_map(db, [row.id for row in rows])
 
     items = [
         NewsItem(
             id=row.id,
             title=row.title,
-            url=row.canonical_url,
-            source=row.source_name,
-            provider=providers_by_article.get(row.id) or row.provider_name,
+            url=row.url,
+            source=row.source,
+            provider=row.provider,
             summary=clean_summary_text(row.summary),
             published_at=_published_at_for_response(row),
             first_seen_at=_first_seen_at_for_response(row),
-            alert_sent_at=row.first_alert_sent_at,
-            tickers=tickers_by_article.get(row.id, []),
-            dedupe_group=row.cluster_key,
+            alert_sent_at=row.alert_sent_at,
+            tickers=_parse_aggregated_symbols(row.tickers),
+            dedupe_group=row.dedupe_group,
         )
         for row in rows
     ]
@@ -540,7 +721,9 @@ def list_news(
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
-        next_cursor = encode_cursor(_published_at_for_response(last), last.id)
+        next_cursor = encode_cursor(_sort_timestamp_for_response(last), last.id)
+
+    global_summary = _build_global_summary(db) if include_global_summary else None
 
     return NewsListResponse(
         items=items,
@@ -550,29 +733,28 @@ def list_news(
             "limit": limit,
             "sort": "latest",
         },
+        global_summary=global_summary,
     )
 
 
 @app.get(f"{settings.api_prefix}/news/{{article_id}}", response_model=NewsItem)
 def get_news_item(article_id: int, db: Session = Depends(get_db)):
-    row = db.scalar(select(Article).where(Article.id == article_id))
+    news_page = _build_news_page_subquery(db, article_id=article_id)
+    row = db.execute(_build_enriched_news_select(db, news_page)).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Article not found")
-
-    tickers_by_article = _article_tickers_map(db, [row.id])
-    providers_by_article = _article_providers_map(db, [row.id])
     return NewsItem(
         id=row.id,
         title=row.title,
-        url=row.canonical_url,
-        source=row.source_name,
-        provider=providers_by_article.get(row.id) or row.provider_name,
+        url=row.url,
+        source=row.source,
+        provider=row.provider,
         summary=clean_summary_text(row.summary),
         published_at=_published_at_for_response(row),
         first_seen_at=_first_seen_at_for_response(row),
-        alert_sent_at=row.first_alert_sent_at,
-        tickers=tickers_by_article.get(row.id, []),
-        dedupe_group=row.cluster_key,
+        alert_sent_at=row.alert_sent_at,
+        tickers=_parse_aggregated_symbols(row.tickers),
+        dedupe_group=row.dedupe_group,
     )
 
 

@@ -55,7 +55,13 @@ def build_article_query(
     mapped_exists = (
         select(1)
         .select_from(ArticleTicker)
-        .where(ArticleTicker.article_id == Article.id)
+        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+        .where(
+            and_(
+                ArticleTicker.article_id == Article.id,
+                Ticker.active.is_(True),
+            )
+        )
         .correlate(Article)
         .exists()
     )
@@ -69,6 +75,7 @@ def build_article_query(
                 and_(
                     ArticleTicker.article_id == Article.id,
                     Ticker.symbol.in_(ticker_symbols),
+                    Ticker.active.is_(True),
                 )
             )
             .correlate(Article)

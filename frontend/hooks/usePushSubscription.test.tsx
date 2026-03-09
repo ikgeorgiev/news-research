@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { usePushSubscription } from "./usePushSubscription"
 import * as pushApi from "@/lib/push"
+import type { Watchlist } from "@/lib/types"
 
 vi.mock("@/lib/push", () => ({
   disablePushNotifications: vi.fn(),
@@ -83,6 +84,11 @@ describe("usePushSubscription", () => {
   })
 
   it("preserves stored custom scope ids until watchlists hydrate", async () => {
+    type HookProps = {
+      customWatchlists: Watchlist[]
+      mounted: boolean
+    }
+
     localStorage.setItem("alertWatchlistIds", JSON.stringify(["wl-1"]))
     localStorage.setItem("alertIncludeAllNews", "false")
 
@@ -93,18 +99,18 @@ describe("usePushSubscription", () => {
     })
     mockedPushApi.syncPushScopes.mockResolvedValue(true)
 
+    const initialProps: HookProps = {
+      customWatchlists: [],
+      mounted: false,
+    }
+
     const { result, rerender } = renderHook(
-      ({ customWatchlists, mounted }: { customWatchlists: Array<{ id: string; name: string; tickers?: string[] }>; mounted: boolean }) =>
+      ({ customWatchlists, mounted }: HookProps) =>
         usePushSubscription({
           customWatchlists,
           mounted,
         }),
-      {
-        initialProps: {
-          customWatchlists: [],
-          mounted: false,
-        },
-      }
+      { initialProps }
     )
 
     await waitFor(() => expect(result.current.pushSubscribed).toBe(true))

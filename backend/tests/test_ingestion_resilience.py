@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import requests
 from requests.structures import CaseInsensitiveDict
 from sqlalchemy import create_engine, select
@@ -13,6 +15,7 @@ from app.database import Base
 from app.ingestion import (
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
+    _load_tickers_from_csv_if_changed,
     _update_feed_http_cache,
     dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
@@ -346,6 +349,39 @@ def test_ingest_feed_dedupes_raw_feed_rows(monkeypatch):
     assert second["status"] == "success"
     assert len(raw_rows) == 1
     db.close()
+
+
+def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure(monkeypatch):
+    db = _make_db_session()
+    db.add(Ticker(symbol="GOF", active=True))
+    db.commit()
+
+    csv_path = Path(__file__).with_name(".tmp") / "tickers-retry.csv"
+    csv_path.write_text("ticker,fund_name,sponsor,active\nGOF,Guggenheim,Guggenheim,true\n", encoding="utf-8")
+
+    call_count = {"count": 0}
+
+    def fake_loader(_db: Session, _path: str):
+        call_count["count"] += 1
+        if call_count["count"] == 1:
+            raise RuntimeError("transient loader failure")
+        return {"loaded": 1, "created": 0, "updated": 0, "unchanged": 1}
+
+    monkeypatch.setattr("app.ingestion.load_tickers_from_csv", fake_loader)
+    monkeypatch.setattr("app.ingestion._tickers_csv_mtime_cache", {})
+
+    try:
+        with pytest.raises(RuntimeError, match="transient loader failure"):
+            _load_tickers_from_csv_if_changed(db, str(csv_path))
+
+        second = _load_tickers_from_csv_if_changed(db, str(csv_path))
+
+        assert call_count["count"] == 2
+        assert second == {"loaded": 1, "created": 0, "updated": 0, "unchanged": 1}
+    finally:
+        if csv_path.exists():
+            csv_path.unlink()
+        db.close()
 
 
 def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(monkeypatch):

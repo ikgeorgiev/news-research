@@ -16,6 +16,7 @@ export async function fetchNews(params: {
   provider?: string
   includeUnmapped?: boolean
   includeUnmappedFromProvider?: string
+  includeGlobalSummary?: boolean
   q?: string
   cursor?: string | null
   limit?: number
@@ -33,6 +34,9 @@ export async function fetchNews(params: {
   }
   if (params.includeUnmappedFromProvider) {
     query.set("include_unmapped_from_provider", params.includeUnmappedFromProvider)
+  }
+  if (params.includeGlobalSummary) {
+    query.set("include_global_summary", "true")
   }
   if (params.q) query.set("q", params.q)
   if (params.cursor) query.set("cursor", params.cursor)

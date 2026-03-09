@@ -2,18 +2,23 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 import uuid
 
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
 from app.main import (
     app,
     count_news,
+    EPOCH_UTC,
+    _first_seen_at_for_response,
+    _published_at_for_response,
+    get_news_item,
     health,
     list_news,
     list_news_ids,
@@ -176,6 +181,106 @@ def test_list_news_keeps_empty_ticker_input_on_mapped_only_path():
     db.close()
 
 
+def test_inactive_only_ticker_mapping_is_treated_as_unmapped():
+    db = _make_db_session()
+    active_ticker = Ticker(symbol="GOF", active=True)
+    inactive_ticker = Ticker(symbol="AAA", active=False)
+    db.add_all([active_ticker, inactive_ticker])
+    db.commit()
+    db.refresh(active_ticker)
+    db.refresh(inactive_ticker)
+
+    active_article = _seed_article(
+        db,
+        slug="active-mapped",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+    inactive_only_article = _seed_article(
+        db,
+        slug="inactive-only-mapped",
+        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    )
+    db.add_all(
+        [
+            ArticleTicker(article_id=active_article.id, ticker_id=active_ticker.id),
+            ArticleTicker(article_id=inactive_only_article.id, ticker_id=inactive_ticker.id),
+        ]
+    )
+    db.commit()
+
+    mapped_count = count_news(
+        include_unmapped=False,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        db=db,
+    )
+    mapped_news = list_news(
+        include_unmapped=False,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+    mapped_ids = list_news_ids(
+        include_unmapped=False,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+    all_news = list_news(
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    assert mapped_count.total == 1
+    assert [item.id for item in mapped_news.items] == [active_article.id]
+    assert mapped_ids.ids == [active_article.id]
+    assert [item.id for item in all_news.items] == [active_article.id, inactive_only_article.id]
+    assert next(item for item in all_news.items if item.id == inactive_only_article.id).tickers == []
+    db.close()
+
+
+def test_ticker_filter_excludes_inactive_only_mappings():
+    db = _make_db_session()
+    inactive_ticker = Ticker(symbol="AAA", active=False)
+    db.add(inactive_ticker)
+    db.commit()
+    db.refresh(inactive_ticker)
+
+    article = _seed_article(
+        db,
+        slug="inactive-filter",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+    db.add(ArticleTicker(article_id=article.id, ticker_id=inactive_ticker.id))
+    db.commit()
+
+    response = list_news(
+        ticker="AAA",
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    assert response.items == []
+    db.close()
+
+
 def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
     db = _make_db_session()
     businesswire = Source(
@@ -266,6 +371,234 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw():
     db.close()
 
 
+def test_list_news_uses_single_statement_for_enriched_rows():
+    db = _make_db_session()
+    businesswire = Source(
+        code="businesswire",
+        name="Business Wire",
+        base_url="https://feed.businesswire.com",
+        enabled=True,
+    )
+    yahoo = Source(
+        code="yahoo",
+        name="Yahoo Finance",
+        base_url="https://feeds.finance.yahoo.com",
+        enabled=True,
+    )
+    gof = Ticker(symbol="GOF", active=True)
+    utf = Ticker(symbol="UTF", active=True)
+    db.add_all([businesswire, yahoo, gof, utf])
+    db.commit()
+    db.refresh(businesswire)
+    db.refresh(yahoo)
+    db.refresh(gof)
+    db.refresh(utf)
+
+    article = _seed_article(
+        db,
+        slug="single-statement",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        canonical_url="https://www.businesswire.com/news/home/20260301000001/en",
+    )
+    db.add_all(
+        [
+            ArticleTicker(article_id=article.id, ticker_id=gof.id),
+            ArticleTicker(article_id=article.id, ticker_id=utf.id),
+            RawFeedItem(
+                source_id=businesswire.id,
+                article_id=article.id,
+                feed_url="https://feed.businesswire.com/rss/home/",
+                raw_guid="bw-single-1",
+                raw_link=article.canonical_url,
+                raw_pub_date=article.published_at,
+                raw_payload_json={},
+            ),
+            RawFeedItem(
+                source_id=yahoo.id,
+                article_id=article.id,
+                feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+                raw_guid="y-single-1",
+                raw_link=article.canonical_url + "?mirror=1",
+                raw_pub_date=article.published_at,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(db.get_bind(), "before_cursor_execute")
+    def capture_sql(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ):
+        statements.append(statement)
+
+    try:
+            response = list_news(
+                include_unmapped=True,
+                include_unmapped_from_provider=None,
+                include_global_summary=False,
+                from_=None,
+                to=None,
+                limit=10,
+                cursor=None,
+                db=db,
+        )
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", capture_sql)
+
+    assert len(statements) == 1
+    assert [item.id for item in response.items] == [article.id]
+    assert response.items[0].provider == "Business Wire"
+    assert response.items[0].tickers == ["GOF", "UTF"]
+    db.close()
+
+
+def test_get_news_item_uses_single_statement_for_enriched_row():
+    db = _make_db_session()
+    businesswire = Source(
+        code="businesswire",
+        name="Business Wire",
+        base_url="https://feed.businesswire.com",
+        enabled=True,
+    )
+    gof = Ticker(symbol="GOF", active=True)
+    db.add_all([businesswire, gof])
+    db.commit()
+    db.refresh(businesswire)
+    db.refresh(gof)
+
+    article = _seed_article(
+        db,
+        slug="detail-single-statement",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        canonical_url="https://www.businesswire.com/news/home/20260301000002/en",
+    )
+    db.add_all(
+        [
+            ArticleTicker(article_id=article.id, ticker_id=gof.id),
+            RawFeedItem(
+                source_id=businesswire.id,
+                article_id=article.id,
+                feed_url="https://feed.businesswire.com/rss/home/",
+                raw_guid="bw-single-detail",
+                raw_link=article.canonical_url,
+                raw_pub_date=article.published_at,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+    article_id = article.id
+
+    statements: list[str] = []
+
+    @event.listens_for(db.get_bind(), "before_cursor_execute")
+    def capture_sql(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ):
+        statements.append(statement)
+
+    try:
+        result = get_news_item(article_id, db=db)
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", capture_sql)
+
+    assert len(statements) == 1
+    assert result.id == article.id
+    assert result.provider == "Business Wire"
+    assert result.tickers == ["GOF"]
+    db.close()
+
+
+def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scope():
+    db = _make_db_session()
+    businesswire = Source(
+        code="businesswire",
+        name="Business Wire",
+        base_url="https://feed.businesswire.com",
+        enabled=True,
+    )
+    gof = Ticker(symbol="GOF", active=True)
+    db.add_all([businesswire, gof])
+    db.commit()
+    db.refresh(businesswire)
+    db.refresh(gof)
+
+    mapped_article = _seed_article(
+        db,
+        slug="global-summary-mapped",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+    bw_general_article = _seed_article(
+        db,
+        slug="global-summary-general",
+        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    )
+    db.add_all(
+        [
+            ArticleTicker(article_id=mapped_article.id, ticker_id=gof.id),
+            RawFeedItem(
+                source_id=businesswire.id,
+                article_id=bw_general_article.id,
+                feed_url="https://feed.businesswire.com/rss/home/",
+                raw_guid="bw-global-general",
+                raw_link=bw_general_article.canonical_url,
+                raw_pub_date=bw_general_article.published_at,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(db.get_bind(), "before_cursor_execute")
+    def capture_sql(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ):
+        statements.append(statement)
+
+    try:
+        response = list_news(
+            ticker="GOF",
+            include_unmapped=False,
+            include_unmapped_from_provider=None,
+            include_global_summary=True,
+            from_=None,
+            to=None,
+            limit=10,
+            cursor=None,
+            db=db,
+        )
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", capture_sql)
+
+    assert len(statements) == 2
+    assert [item.id for item in response.items] == [mapped_article.id]
+    assert response.global_summary is not None
+    assert response.global_summary.total == 2
+    assert response.global_summary.tracked_ids == [mapped_article.id, bw_general_article.id]
+    assert response.global_summary.tracked_limit == 100
+    db.close()
+
+
 def test_list_news_cursor_paginates_consistently():
     db = _make_db_session()
     newest = _seed_article(
@@ -309,6 +642,17 @@ def test_list_news_cursor_paginates_consistently():
     )
     assert [item.id for item in page_two.items] == [middle.id, oldest.id]
     db.close()
+
+
+def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
+    row = SimpleNamespace(
+        published_at=None,
+        created_at=None,
+        first_seen_at=None,
+    )
+
+    assert _published_at_for_response(row) == EPOCH_UTC
+    assert _first_seen_at_for_response(row) == EPOCH_UTC
 
 
 def test_list_news_ids_supports_cursor_pagination():

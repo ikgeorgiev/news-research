@@ -69,9 +69,12 @@ def normalize_scopes(payload: dict[str, Any] | None) -> dict[str, Any]:
                     seen_tickers.add(ticker_text)
                     tickers.append(ticker_text)
 
-            provider = str(item.get("provider", "")).strip() or None
-            q = str(item.get("q", "")).strip() or None
-            name = str(item.get("name", "")).strip() or None
+            raw_provider = item.get("provider")
+            provider = raw_provider.strip() if isinstance(raw_provider, str) and raw_provider.strip() else None
+            raw_q = item.get("q")
+            q = raw_q.strip() if isinstance(raw_q, str) and raw_q.strip() else None
+            raw_name = item.get("name")
+            name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
             watchlists.append(
                 {
                     "id": watchlist_id,
@@ -168,7 +171,7 @@ def _scope_new_article_ids(
     rows = db.execute(
         query.with_only_columns(Article.id)
         .where(Article.id > after_id)
-        .order_by(Article.id.desc())
+        .order_by(Article.id.asc())
         .limit(limit)
     ).all()
     return [int(article_id) for (article_id,) in rows]
@@ -217,7 +220,7 @@ def _article_tickers_map(db: Session, article_ids: list[int]) -> dict[int, list[
             db.execute(
                 select(ArticleTicker.article_id, Ticker.symbol)
                 .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-                .where(ArticleTicker.article_id.in_(chunk))
+                .where(ArticleTicker.article_id.in_(chunk), Ticker.active.is_(True))
                 .order_by(ArticleTicker.article_id.asc(), Ticker.symbol.asc())
             ).all()
         )
@@ -363,15 +366,11 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
             )
             advanced_watermarks = dict(stable_watermarks)
             article_ids: set[int] = set()
+            fresh_ids_by_scope: dict[str, list[int]] = {}
             touched_scope_keys: list[str] = []
 
             for scope_key, scope_params in scope_queries:
                 previous = int(stable_watermarks.get(scope_key, 0) or 0)
-                current_max = _scope_max_article_id(db, scope_params)
-                if current_max <= previous:
-                    advanced_watermarks[scope_key] = previous
-                    continue
-
                 fresh_ids = _scope_new_article_ids(
                     db,
                     scope_params=scope_params,
@@ -380,8 +379,8 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
                 )
                 if fresh_ids:
                     article_ids.update(fresh_ids)
+                    fresh_ids_by_scope[scope_key] = fresh_ids
                     touched_scope_keys.append(scope_key)
-                advanced_watermarks[scope_key] = current_max
 
             subscription.alert_scopes_json = scopes
             # Keep stable watermark by default; only advance after successful push.
@@ -411,6 +410,8 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
             now_utc = datetime.now(timezone.utc)
             if status == "success":
                 sent += 1
+                for scope_key, fresh_ids in fresh_ids_by_scope.items():
+                    advanced_watermarks[scope_key] = max(fresh_ids)
                 subscription.last_notified_json = advanced_watermarks
                 subscription.failure_count = 0
                 subscription.last_error = None

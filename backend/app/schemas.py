@@ -19,10 +19,17 @@ class NewsItem(BaseModel):
     dedupe_group: str
 
 
+class NewsGlobalSummary(BaseModel):
+    total: int
+    tracked_ids: list[int]
+    tracked_limit: int
+
+
 class NewsListResponse(BaseModel):
     items: list[NewsItem]
     next_cursor: str | None
     meta: dict[str, int | str | None]
+    global_summary: NewsGlobalSummary | None = None
 
 
 class NewsCountResponse(BaseModel):

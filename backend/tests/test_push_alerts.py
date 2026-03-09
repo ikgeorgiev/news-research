@@ -61,6 +61,42 @@ def _seed_mapped_article(db: Session, *, slug: str) -> Article:
     return article
 
 
+def _seed_article_with_ticker(
+    db: Session,
+    *,
+    slug: str,
+    symbol: str,
+    active: bool,
+) -> Article:
+    ticker = db.scalar(select(Ticker).where(Ticker.symbol == symbol))
+    if ticker is None:
+        ticker = Ticker(symbol=symbol, active=active)
+        db.add(ticker)
+        db.commit()
+        db.refresh(ticker)
+
+    article = Article(
+        canonical_url=f"https://example.com/{slug}",
+        canonical_url_hash=sha256_str(f"https://example.com/{slug}"),
+        title=f"Title {slug}",
+        summary=f"Summary {slug}",
+        published_at=datetime.now(timezone.utc),
+        source_name="Test Source",
+        provider_name="Test Provider",
+        content_hash=sha256_str(f"content-{slug}"),
+        title_normalized_hash=sha256_str(f"title-{slug}"),
+        cluster_key=sha256_str(f"cluster-{slug}"),
+    )
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+
+    db.add(ArticleTicker(article_id=article.id, ticker_id=ticker.id))
+    db.commit()
+    db.refresh(article)
+    return article
+
+
 def _push_payload(*, endpoint: str, manage_token: str | None = None) -> PushUpsertRequest:
     return PushUpsertRequest(
         subscription=PushSubscriptionPayload(
@@ -305,6 +341,120 @@ def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(mon
     assert int(sub.last_notified_json.get("all", 0) or 0) == second.id
     assert second_after is not None
     assert second_after.first_alert_sent_at is not None
+
+    db.close()
+
+
+def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = _make_db_session()
+    seeded_articles = [_seed_mapped_article(db, slug=f"backlog-{idx}") for idx in range(6)]
+
+    sub = PushSubscription(
+        endpoint="https://push.example/sub-backlog",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={
+            "include_all_news": True,
+            "watchlists": [
+                {
+                    "id": "wl-1",
+                    "name": "GOF",
+                    "tickers": ["GOF"],
+                }
+            ],
+        },
+        last_notified_json={
+            "all": seeded_articles[0].id,
+            "watchlist:wl-1": seeded_articles[0].id,
+        },
+        manage_token_hash=sha256_str("token"),
+        active=True,
+    )
+    db.add(sub)
+    db.commit()
+
+    delivered_payloads: list[list[int]] = []
+
+    def _send(*_args, **kwargs):
+        delivered_payloads.append(list(kwargs["payload"]["article_ids"]))
+        return ("success", None)
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=3,
+    )
+
+    first_run = check_and_send_alerts(db, settings_obj)
+    db.refresh(sub)
+    assert first_run["sent"] == 1
+    assert delivered_payloads[0] == [seeded_articles[3].id, seeded_articles[2].id, seeded_articles[1].id]
+    assert sub.last_notified_json == {
+        "all": seeded_articles[3].id,
+        "watchlist:wl-1": seeded_articles[3].id,
+    }
+
+    second_run = check_and_send_alerts(db, settings_obj)
+    db.refresh(sub)
+    assert second_run["sent"] == 1
+    assert delivered_payloads[1] == [seeded_articles[5].id, seeded_articles[4].id]
+    assert sub.last_notified_json == {
+        "all": seeded_articles[5].id,
+        "watchlist:wl-1": seeded_articles[5].id,
+    }
+
+    db.close()
+
+
+def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = _make_db_session()
+    first = _seed_mapped_article(db, slug="active-baseline")
+    _inactive_only = _seed_article_with_ticker(db, slug="inactive-only", symbol="AAA", active=False)
+
+    sub = PushSubscription(
+        endpoint="https://push.example/sub-inactive-only",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={"include_all_news": True, "watchlists": []},
+        last_notified_json={"all": first.id},
+        manage_token_hash=sha256_str("token"),
+        active=True,
+    )
+    db.add(sub)
+    db.commit()
+
+    send_calls = {"count": 0}
+
+    def _send(*_args, **_kwargs):
+        send_calls["count"] += 1
+        return ("success", None)
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+    )
+
+    stats = check_and_send_alerts(db, settings_obj)
+    db.refresh(sub)
+
+    assert stats["sent"] == 0
+    assert send_calls["count"] == 0
+    assert sub.last_notified_json == {"all": first.id}
 
     db.close()
 
