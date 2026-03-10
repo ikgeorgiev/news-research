@@ -95,6 +95,11 @@ def test_should_persist_entry_keeps_paren_hits():
     assert _should_persist_entry("prnewswire", hits) is True
 
 
+def test_should_persist_entry_rejects_subthreshold_paren_hits():
+    hits = {"CGO": ("paren", 0.62)}
+    assert _should_persist_entry("prnewswire", hits) is False
+
+
 def test_should_persist_entry_keeps_exchange_hits():
     hits = {"CGO": ("exchange", 0.88)}
     assert _should_persist_entry("globenewswire", hits) is True
@@ -296,6 +301,10 @@ def test_prnewswire_fallback_extracts_table_symbols(monkeypatch):
         {"VKQ", "VMO", "OIA"},
         timeout_seconds=5,
         config=config,
+        symbol_keywords={
+            "VKQ": frozenset({"invesco", "municipal trust"}),
+            "VMO": frozenset({"invesco", "municipal opportunity"}),
+        },
     )
 
     assert "VKQ" in hits
@@ -359,12 +368,45 @@ def test_globenewswire_fallback_extracts_exchange_and_table(monkeypatch):
         {"DSM", "LEO"},
         timeout_seconds=5,
         config=config,
+        symbol_keywords={
+            "LEO": frozenset({"bny", "mellon", "strategic municipals"}),
+        },
     )
 
     assert "DSM" in hits
     assert hits["DSM"][0] == "exchange"
     assert "LEO" in hits
     assert hits["LEO"][0] == "gnw_table"
+
+
+def test_prnewswire_fallback_drops_table_hits_without_keyword_support(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Generic corporate update</h1>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>CGO</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Generic corporate update",
+        "",
+        "https://www.prnewswire.com/news-releases/generic-302701199.html",
+        "",
+        {"CGO"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"CGO": frozenset({"calamos", "calamos global"})},
+    )
+
+    assert hits["CGO"] == ("prn_table", 0.62)
 
 
 def test_source_page_fetch_skips_wrong_host(monkeypatch, clean_page_cache):
@@ -469,9 +511,25 @@ def test_token_match_not_validated_with_sponsor_brand_only_context():
     assert hits["CGO"][1] == 0.62
 
 
-def test_paren_match_bypasses_fund_name_validation():
+def test_paren_match_requires_fund_name_validation():
     known = {"CGO"}
     sym_kws = {"CGO": frozenset({"calamos", "calamos global"})}
+    hits = _extract_entry_tickers(
+        "Fund update for (CGO) distribution schedule",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "CGO" in hits
+    assert hits["CGO"][0] == "paren"
+    assert hits["CGO"][1] == 0.62
+
+
+def test_paren_match_keeps_explicit_symbol_when_keywords_missing():
+    known = {"CGO"}
+    sym_kws = {"CGO": frozenset()}
     hits = _extract_entry_tickers(
         "Fund update for (CGO) distribution schedule",
         "",
@@ -630,6 +688,232 @@ def test_false_positive_articles_filtered_end_to_end():
             assert (
                 confidence < MIN_PERSIST_CONFIDENCE
             ), f"False positive: {sym} in '{title}' has confidence {confidence} ({match_type})"
+
+
+@pytest.mark.parametrize(
+    ("row", "title", "summary"),
+    [
+        (
+            (1, "TEI", "Templeton Emerg Mkts Income", "Franklin Advisers, Inc."),
+            "Bloomberg Tax Showcases Industry-Leading AI-Powered Tools at TEI Midyear 2026",
+            "Bloomberg Tax announces its continuing Platinum sponsorship of the Tax Executives Institute (TEI) 2026 Midyear Conference.",
+        ),
+        (
+            (2, "NIM", "Nuveen Select Maturity Muni", "Nuveen Fund Advisors, LLC."),
+            "Gold Coast Federal Credit Union Selects Algebrik to Modernize Lending",
+            "The platform is designed to improve net interest margins (NIM) across lending operations.",
+        ),
+        (
+            (3, "ECC", "Eagle Point Credit Company LLC", "Eagle Point Credit Management"),
+            "Cypherpunk Makes $5M Investment into Zcash Open Development Lab (ZODL)",
+            "Cypherpunk said the investment supports Electric Coin Company (ECC) ecosystem development.",
+        ),
+        (
+            (4, "CET", "Central Securities Corporation", "Central Securities Corp"),
+            "Atos launches new modernization initiative",
+            "The company said its central enterprise transformation (CET) program will accelerate delivery.",
+        ),
+    ],
+)
+def test_real_world_paren_false_positives_stay_subthreshold(row, title, summary):
+    symbol = row[1]
+    known = {symbol}
+    sym_kws = _build_symbol_keywords([row])
+
+    hits = _extract_entry_tickers(
+        title,
+        summary,
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+
+    assert symbol in hits
+    assert hits[symbol][1] < MIN_PERSIST_CONFIDENCE
+
+
+def test_real_world_asa_page_false_positive_stays_subthreshold(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Nscale announced support from Aker ASA and other investors.</p>
+          </article>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>ASA</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "ASA", "ASA Gold and Precious Metals Limited", "ASA")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Nscale Raises $2 Billion in Series C",
+        "",
+        "https://www.prnewswire.com/news-releases/nscale-302708359.html",
+        "",
+        {"ASA"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["ASA"] == ("prn_table", 0.62)
+
+
+def test_keywordless_cef_table_hit_reaches_persist_threshold(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Distribution announcement for shareholders.</p>
+          </article>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>DNP</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "DNP", "DNP Select Income", "Duff & Phelps Inv Mgmt Co (IL)")]
+    )
+    assert sym_kws["DNP"] == frozenset()
+
+    hits = _extract_source_fallback_tickers(
+        "Monthly distribution notice",
+        "",
+        "https://www.prnewswire.com/news-releases/dnp-302708359.html",
+        "",
+        {"DNP"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["DNP"] == ("prn_table", 0.84)
+    assert hits["DNP"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_noise_wrapped_table_does_not_create_keywordless_table_hit(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Distribution announcement for shareholders.</p>
+          </article>
+          <aside class="related-articles">
+            <table>
+              <tr><th>Ticker</th></tr>
+              <tr><td>DNP</td></tr>
+            </table>
+          </aside>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "DNP", "DNP Select Income", "Duff & Phelps Inv Mgmt Co (IL)")]
+    )
+    assert sym_kws["DNP"] == frozenset()
+
+    hits = _extract_source_fallback_tickers(
+        "Monthly distribution notice",
+        "",
+        "https://www.prnewswire.com/news-releases/dnp-302708359.html",
+        "",
+        {"DNP"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "DNP" not in hits
+
+
+def test_sidebar_keyword_noise_does_not_validate_token(monkeypatch):
+    """Keywords in sidebar/nav/aside should not validate a token match."""
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Nscale announced a $2 billion raise led by Aker ASA.</p>
+          </article>
+          <aside class="related-articles">
+            <a href="/gold-etf">Gold ETF sees inflows amid precious metals rally</a>
+          </aside>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "ASA", "ASA Gold and Precious Metals Limited", "ASA")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Nscale Raises $2 Billion in Series C",
+        "",
+        "https://www.prnewswire.com/news-releases/nscale-302708359.html",
+        "",
+        {"ASA"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    # "gold" and "precious" appear in <aside> sidebar only, not article body.
+    # Noise stripping removes them, so ASA should NOT validate.
+    assert "ASA" not in hits
+
+
+def test_article_header_keywords_still_validate_table_hit(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <header>
+              <h1>Calamos Global Total Return Fund monthly distribution update</h1>
+            </header>
+            <table>
+              <tr><th>Ticker</th></tr>
+              <tr><td>CGO</td></tr>
+            </table>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Distribution update",
+        "",
+        "https://www.prnewswire.com/news-releases/calamos-302701174.html",
+        "",
+        {"CGO"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"CGO": frozenset({"calamos", "calamos global"})},
+    )
+
+    assert hits["CGO"] == ("prn_table", 0.84)
 
 
 def test_real_cef_article_persists_end_to_end():

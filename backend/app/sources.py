@@ -10,6 +10,18 @@ from app.config import Settings
 from app.models import Source, Ticker
 
 
+POLICY_GENERAL_ALLOWED = "general_allowed"
+POLICY_VALIDATED_MAPPING_REQUIRED = "validated_mapping_required"
+POLICY_SCOPED_CONTEXT_REQUIRED = "scoped_context_required"
+
+SOURCE_POLICY: dict[str, str] = {
+    "businesswire": POLICY_GENERAL_ALLOWED,
+    "prnewswire": POLICY_VALIDATED_MAPPING_REQUIRED,
+    "globenewswire": POLICY_VALIDATED_MAPPING_REQUIRED,
+    "yahoo": POLICY_SCOPED_CONTEXT_REQUIRED,
+}
+
+
 PRNEWSWIRE_FEEDS: list[str] = [
     "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
     "https://www.prnewswire.com/rss/financial-services-latest-news/mutual-funds-list.rss",
@@ -33,6 +45,10 @@ class SourceFeed:
     name: str
     base_url: str
     feed_urls: list[str]
+
+
+def get_source_policy(source_code: str) -> str:
+    return SOURCE_POLICY.get(source_code, POLICY_VALIDATED_MAPPING_REQUIRED)
 
 
 def get_active_symbols(db: Session) -> list[str]:

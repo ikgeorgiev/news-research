@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
 import requests
-from sqlalchemy import and_, delete, desc, func, or_, select, tuple_
+from sqlalchemy import and_, delete, desc, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -33,7 +33,13 @@ from app.models import (
     Ticker,
 )
 from app.push_alerts import check_and_send_alerts
-from app.sources import build_source_feeds, seed_sources
+from app.sources import (
+    POLICY_GENERAL_ALLOWED,
+    POLICY_SCOPED_CONTEXT_REQUIRED,
+    build_source_feeds,
+    get_source_policy,
+    seed_sources,
+)
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import (
     canonicalize_url,
@@ -66,6 +72,10 @@ PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
 HTML_SCRIPT_STYLE_PATTERN = re.compile(
     r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL
+)
+HTML_NOISE_ELEMENT_PATTERN = re.compile(
+    r"<(?:nav|aside|footer)\b[^>]*>.*?</(?:nav|aside|footer)>",
+    flags=re.IGNORECASE | re.DOTALL,
 )
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
@@ -701,6 +711,7 @@ def _prefetch_recorded_raw_keys(
                 select(RawFeedItem.raw_guid).where(
                     and_(
                         RawFeedItem.source_id == source_id,
+                        RawFeedItem.article_id.is_not(None),
                         RawFeedItem.raw_guid.in_(list(guids)),
                     )
                 )
@@ -714,6 +725,7 @@ def _prefetch_recorded_raw_keys(
             select(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).where(
                 and_(
                     RawFeedItem.source_id == source_id,
+                    RawFeedItem.article_id.is_not(None),
                     tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(
                         list(pairs)
                     ),
@@ -909,6 +921,12 @@ def _html_to_plain_text(html_text: str) -> str:
     return text
 
 
+def _strip_noise_elements(html_text: str) -> str:
+    """Remove nav/aside/footer/header elements to keep article body content only."""
+    text = HTML_NOISE_ELEMENT_PATTERN.sub(" ", html_text)
+    return text
+
+
 def _extract_source_fallback_tickers(
     title: str,
     summary: str,
@@ -924,7 +942,16 @@ def _extract_source_fallback_tickers(
     if not html_text:
         return {}
 
-    plain_text = _html_to_plain_text(html_text)
+    body_html = _strip_noise_elements(html_text)
+    plain_text = _html_to_plain_text(body_html)
+    plain_text_lower = plain_text.lower() if symbol_keywords is not None else None
+    # Include title/summary in validation context so table-cell keyword matching
+    # sees article headlines even when they live inside stripped <header> elements.
+    validation_text_lower = (
+        " ".join([part for part in [title, summary, plain_text] if part]).lower()
+        if symbol_keywords is not None
+        else None
+    )
     enriched_summary = " ".join(
         [part for part in [summary, plain_text] if part]
     ).strip()
@@ -942,13 +969,28 @@ def _extract_source_fallback_tickers(
     hits = {
         symbol: hit
         for symbol, hit in hits.items()
-        if hit[0] != "token"
+        if hit[1] >= MIN_PERSIST_CONFIDENCE
     }
 
-    for symbol in _extract_table_cell_symbols_from_html(html_text, known_symbols):
+    for symbol in _extract_table_cell_symbols_from_html(body_html, known_symbols):
+        confidence = 0.62
+        if symbol_keywords is None:
+            confidence = 0.84
+        else:
+            kws = symbol_keywords.get(symbol, frozenset())
+            if not kws:
+                # Some active fund rows intentionally have no distinctive
+                # validation keywords after stopword filtering. A strict-source
+                # ticker table is still sufficient evidence for those symbols.
+                confidence = 0.84
+            elif (
+                validation_text_lower is not None
+                and _text_matches_validation_keywords(validation_text_lower, kws)
+            ):
+                confidence = 0.84
         existing = hits.get(symbol)
-        if existing is None or 0.84 > existing[1]:
-            hits[symbol] = (config.table_match_type, 0.84)
+        if existing is None or confidence > existing[1]:
+            hits[symbol] = (config.table_match_type, confidence)
 
     return hits
 
@@ -998,6 +1040,20 @@ def _extract_entry_tickers(
                 if kws and _text_matches_validation_keywords(text_lower, kws):
                     add(upper, "paren", 0.75)
             continue
+        if symbol_keywords is not None:
+            kws = symbol_keywords.get(upper, frozenset())
+            if not kws:
+                add(upper, "paren", 0.75)
+                continue
+            if (
+                text_lower is not None
+                and kws
+                and _text_matches_validation_keywords(text_lower, kws)
+            ):
+                add(upper, "paren", 0.75)
+            else:
+                add(upper, "paren", 0.62)
+            continue
         add(upper, "paren", 0.75)
 
     if include_token:
@@ -1034,18 +1090,40 @@ def _merge_ticker_hits(
             target[symbol] = (match_type, confidence)
 
 
+def _verified_ticker_hits(
+    source_code: str,
+    hits: dict[str, tuple[str, float]],
+) -> dict[str, tuple[str, float]]:
+    policy = get_source_policy(source_code)
+    return {
+        symbol: hit
+        for symbol, hit in hits.items()
+        if hit[1] >= MIN_PERSIST_CONFIDENCE
+        and (
+            hit[0] != "context"
+            or policy == POLICY_SCOPED_CONTEXT_REQUIRED
+        )
+    }
+
+
+def _has_general_allowed_raw_provenance(
+    raw_contexts: list[tuple[str, str | None, str | None]],
+) -> bool:
+    return any(
+        get_source_policy(source_code) == POLICY_GENERAL_ALLOWED
+        for source_code, _, _ in raw_contexts
+    )
+
+
 def _should_persist_entry(
     source_code: str, ticker_hits: dict[str, tuple[str, float]]
 ) -> bool:
-    # Persist all Business Wire items (general stream).
-    if source_code == GENERAL_SOURCE_CODE:
+    policy = get_source_policy(source_code)
+    if policy == POLICY_GENERAL_ALLOWED:
         return True
     if not ticker_hits:
         return False
-    # Require at least one match above bare-token confidence to filter out
-    # false positives from common abbreviations (CGO, PMO, FT, etc.).
-    max_confidence = _max_ticker_confidence(ticker_hits)
-    return max_confidence >= MIN_PERSIST_CONFIDENCE
+    return bool(_verified_ticker_hits(source_code, ticker_hits))
 
 
 def _upsert_article(
@@ -1411,6 +1489,7 @@ def ingest_feed(
                         persisted_raw = False
                         persisted_raw_guid: str | None = None
                         persisted_pair: tuple[str, datetime] | None = None
+                        article: Article | None = None
 
                         # Isolate malformed entries so one bad payload does not roll back the full feed run.
                         with db.begin_nested():
@@ -1486,44 +1565,42 @@ def ingest_feed(
                                 allow_existing_exact_url = (
                                     existing_article_id is not None
                                 )
-
-                            if not should_persist_tickers and not allow_existing_exact_url:
-                                continue
-
-                            article, created, matched_by_url = _upsert_article(
-                                db,
-                                source_code=source.code,
-                                canonical_url=prepared.article_url,
-                                title=prepared.title,
-                                summary=summary,
-                                published_at=prepared.published_at,
-                                source_name=source_name,
-                                provider_name=provider_name,
-                                allow_url_match_overwrite=prepared.is_exact_source_url,
+                            effective_ticker_hits = _verified_ticker_hits(
+                                source.code,
+                                ticker_hits,
                             )
-                            created_article = created
+                            if should_persist_tickers or allow_existing_exact_url:
+                                article, created, matched_by_url = _upsert_article(
+                                    db,
+                                    source_code=source.code,
+                                    canonical_url=prepared.article_url,
+                                    title=prepared.title,
+                                    summary=summary,
+                                    published_at=prepared.published_at,
+                                    source_name=source_name,
+                                    provider_name=provider_name,
+                                    allow_url_match_overwrite=prepared.is_exact_source_url,
+                                )
+                                created_article = created
 
-                            effective_ticker_hits = (
-                                ticker_hits if should_persist_tickers else {}
-                            )
-                            # New articles never have mappings yet; skip the SELECT in _upsert_article_tickers().
-                            existing_rows = {} if created else None
-                            _upsert_article_tickers(
-                                db,
-                                article.id,
-                                effective_ticker_hits,
-                                symbol_to_id,
-                                existing_rows=existing_rows,
-                                # Prune only when the source entry URL exactly matches the article URL.
-                                # Mirrored Business Wire copies (e.g., Yahoo with query variants) should not
-                                # prune mappings on the canonical BW article.
-                                prune_missing=(
-                                    source.code != GENERAL_SOURCE_CODE
-                                    and matched_by_url
-                                    and prepared.is_exact_source_url
-                                    and bool(effective_ticker_hits)
-                                ),
-                            )
+                                # New articles never have mappings yet; skip the SELECT in _upsert_article_tickers().
+                                existing_rows = {} if created else None
+                                _upsert_article_tickers(
+                                    db,
+                                    article.id,
+                                    effective_ticker_hits,
+                                    symbol_to_id,
+                                    existing_rows=existing_rows,
+                                    # Prune only when the source entry URL exactly matches the article URL.
+                                    # Mirrored Business Wire copies (e.g., Yahoo with query variants) should not
+                                    # prune mappings on the canonical BW article.
+                                    prune_missing=(
+                                        source.code != GENERAL_SOURCE_CODE
+                                        and matched_by_url
+                                        and prepared.is_exact_source_url
+                                        and bool(effective_ticker_hits)
+                                    ),
+                                )
 
                             payload = {
                                 "title": prepared.raw_title,
@@ -1533,18 +1610,58 @@ def ingest_feed(
                                 "summary": raw_summary,
                                 "source": entry_source_name,
                             }
-                            db.add(
-                                RawFeedItem(
-                                    source_id=source.id,
-                                    article_id=article.id,
-                                    feed_url=feed_url,
-                                    raw_guid=prepared.raw_guid,
-                                    raw_title=prepared.raw_title,
-                                    raw_link=prepared.raw_link,
-                                    raw_pub_date=prepared.published_at,
-                                    raw_payload_json=to_json_safe(payload),
+                            detached_row: RawFeedItem | None = None
+                            if article is None:
+                                if prepared.raw_guid:
+                                    detached_row = db.scalar(
+                                        select(RawFeedItem)
+                                        .where(
+                                            and_(
+                                                RawFeedItem.source_id == source.id,
+                                                RawFeedItem.article_id.is_(None),
+                                                RawFeedItem.raw_guid == prepared.raw_guid,
+                                            )
+                                        )
+                                        .order_by(RawFeedItem.id.desc())
+                                        .limit(1)
+                                    )
+                                if detached_row is None:
+                                    detached_row = db.scalar(
+                                        select(RawFeedItem)
+                                        .where(
+                                            and_(
+                                                RawFeedItem.source_id == source.id,
+                                                RawFeedItem.article_id.is_(None),
+                                                RawFeedItem.raw_link == prepared.raw_link,
+                                                RawFeedItem.raw_pub_date
+                                                == prepared.published_at,
+                                            )
+                                        )
+                                        .order_by(RawFeedItem.id.desc())
+                                        .limit(1)
+                                    )
+
+                            if detached_row is None:
+                                db.add(
+                                    RawFeedItem(
+                                        source_id=source.id,
+                                        article_id=article.id if article is not None else None,
+                                        feed_url=feed_url,
+                                        raw_guid=prepared.raw_guid,
+                                        raw_title=prepared.raw_title,
+                                        raw_link=prepared.raw_link,
+                                        raw_pub_date=prepared.published_at,
+                                        raw_payload_json=to_json_safe(payload),
+                                    )
                                 )
-                            )
+                            else:
+                                detached_row.feed_url = feed_url
+                                detached_row.raw_guid = prepared.raw_guid
+                                detached_row.raw_title = prepared.raw_title
+                                detached_row.raw_link = prepared.raw_link
+                                detached_row.raw_pub_date = prepared.published_at
+                                detached_row.raw_payload_json = to_json_safe(payload)
+                                detached_row.fetched_at = datetime.now(timezone.utc)
                             persisted_raw = True
                             persisted_raw_guid = prepared.raw_guid
                             persisted_pair = (prepared.raw_link, prepared.published_at)
@@ -1553,9 +1670,12 @@ def ingest_feed(
                         if persisted_raw:
                             if created_article:
                                 items_inserted += 1
-                            if persisted_raw_guid:
+                            # Detached raw rows should not suppress a later copy in
+                            # the same feed response that has enough context to
+                            # validate and create the article.
+                            if article is not None and persisted_raw_guid:
                                 recorded_guids.add(persisted_raw_guid)
-                            if persisted_pair:
+                            if article is not None and persisted_pair:
                                 recorded_pairs.add(persisted_pair)
 
                     except Exception as entry_exc:
@@ -1842,16 +1962,6 @@ def remap_source_articles(
     limit: int = 500,
     only_unmapped: bool = True,
 ) -> SourceRemapStats:
-    config = PAGE_FETCH_CONFIGS.get(source_code)
-    if config is None:
-        return {
-            "source_code": source_code,
-            "processed": 0,
-            "articles_with_hits": 0,
-            "remapped_articles": 0,
-            "only_unmapped": only_unmapped,
-        }
-
     ticker_rows = db.execute(
         select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
             Ticker.active.is_(True)
@@ -1895,6 +2005,9 @@ def remap_source_articles(
     ticker_rows_by_article: dict[int, dict[int, ArticleTicker]] = {
         article_id: {} for article_id in article_ids
     }
+    raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = {
+        article_id: [] for article_id in article_ids
+    }
     if article_ids:
         existing_rows = db.scalars(
             select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
@@ -1903,6 +2016,28 @@ def remap_source_articles(
             ticker_rows_by_article.setdefault(ticker_row.article_id, {})[
                 ticker_row.ticker_id
             ] = ticker_row
+        raw_context_rows = db.execute(
+            select(
+                RawFeedItem.article_id,
+                Source.code,
+                RawFeedItem.raw_link,
+                RawFeedItem.feed_url,
+            )
+            .join(Source, Source.id == RawFeedItem.source_id)
+            .where(
+                and_(
+                    RawFeedItem.article_id.in_(article_ids),
+                    Source.code == source_code,
+                )
+            )
+            .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
+        ).all()
+        for article_id, raw_source_code, raw_link, feed_url in raw_context_rows:
+            if article_id is None:
+                continue
+            raw_contexts_by_article.setdefault(article_id, []).append(
+                (raw_source_code, raw_link, feed_url)
+            )
 
     processed = 0
     articles_with_hits = 0
@@ -1910,53 +2045,35 @@ def remap_source_articles(
 
     for row in rows:
         processed += 1
-        summary = row.summary or ""
-        ticker_hits = _extract_entry_tickers(
-            row.title,
-            summary,
-            row.canonical_url,
-            "",
+        raw_contexts = raw_contexts_by_article.get(row.id, [])
+        verified_hits = _reextract_purge_article_tickers(
+            row,
+            raw_contexts,
             known_symbols,
+            settings.request_timeout_seconds,
             symbol_keywords=symbol_keywords,
         )
-        if _max_ticker_confidence(ticker_hits) < MIN_PERSIST_CONFIDENCE:
-            fallback_hits = _extract_source_fallback_tickers(
-                row.title,
-                summary,
-                row.canonical_url,
-                "",
-                known_symbols,
-                settings.request_timeout_seconds,
-                config,
-                symbol_keywords=symbol_keywords,
-            )
-            _merge_ticker_hits(ticker_hits, fallback_hits)
-        if not ticker_hits:
+        if not verified_hits:
+            # Remaps are additive/non-destructive. Historical source pages may
+            # change, disappear, or fail transiently, so a revalidation miss is
+            # not strong enough evidence to delete or detach the article.
             continue
-        if (
-            source_code != GENERAL_SOURCE_CODE
-            and _max_ticker_confidence(ticker_hits) < MIN_PERSIST_CONFIDENCE
-        ):
-            continue
-
-        articles_with_hits += 1
+        has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
         existing_for_article = ticker_rows_by_article.setdefault(row.id, {})
-        new_ids = {
-            symbol_to_id[symbol]
-            for symbol in ticker_hits.keys()
-            if symbol in symbol_to_id
-            and symbol_to_id[symbol] not in existing_for_article
-        }
-        if new_ids:
-            remapped_articles += 1
-
-        _upsert_article_tickers(
+        outcome = _apply_revalidation(
             db,
-            row.id,
-            ticker_hits,
+            row,
+            verified_hits,
+            has_general_provenance,
             symbol_to_id,
             existing_rows=existing_for_article,
+            # Admin remaps stay additive even on full revalidation runs.
+            prune_verified_hits=False,
         )
+        if outcome.had_verified_hits:
+            articles_with_hits += 1
+        if outcome.changed_mappings:
+            remapped_articles += 1
 
     db.commit()
 
@@ -2299,29 +2416,29 @@ def _reextract_purge_article_tickers(
     timeout_seconds: int,
     *,
     symbol_keywords: dict[str, frozenset[str]] | None = None,
+    stop_when_existing_symbols_verified: set[str] | None = None,
 ) -> dict[str, tuple[str, float]]:
-    primary_link = article.canonical_url
-    primary_feed_url = ""
-    for _source_code, raw_link, feed_url in raw_contexts:
-        if raw_link:
-            primary_link = raw_link
-        if feed_url:
-            primary_feed_url = feed_url
-        if raw_link or feed_url:
-            break
-
-    hits = _extract_entry_tickers(
-        article.title,
-        article.summary or "",
-        primary_link,
-        primary_feed_url,
-        known_symbols,
-        symbol_keywords=symbol_keywords,
-    )
-    if _max_ticker_confidence(hits) >= MIN_PERSIST_CONFIDENCE:
-        return hits
-
+    hits: dict[str, tuple[str, float]] = {}
+    required_symbols = {
+        symbol.upper()
+        for symbol in (stop_when_existing_symbols_verified or set())
+        if symbol
+    }
     for source_code, raw_link, feed_url in raw_contexts:
+        entry_hits = _extract_entry_tickers(
+            article.title,
+            article.summary or "",
+            raw_link or article.canonical_url,
+            feed_url or "",
+            known_symbols,
+            symbol_keywords=symbol_keywords,
+        )
+        _merge_ticker_hits(hits, _verified_ticker_hits(source_code, entry_hits))
+        # Purge only needs to know whether the current mappings still verify.
+        # Once all existing symbols are proven by raw text, avoid expensive
+        # fallback fetches for the remaining contexts.
+        if required_symbols and required_symbols.issubset(hits.keys()):
+            return hits
         config = PAGE_FETCH_CONFIGS.get(source_code)
         if config is None:
             continue
@@ -2335,11 +2452,130 @@ def _reextract_purge_article_tickers(
             config,
             symbol_keywords=symbol_keywords,
         )
-        _merge_ticker_hits(hits, fallback_hits)
-        if _max_ticker_confidence(hits) >= MIN_PERSIST_CONFIDENCE:
-            break
+        _merge_ticker_hits(hits, _verified_ticker_hits(source_code, fallback_hits))
+        if required_symbols and required_symbols.issubset(hits.keys()):
+            return hits
 
     return hits
+
+
+@dataclass
+class _RevalidationOutcome:
+    """Result of revalidating a single article's ticker mappings."""
+
+    action: str  # "kept" | "pruned" | "deleted"
+    had_verified_hits: bool
+    changed_mappings: bool
+    deleted_article_tickers: int
+    deleted_raw_feed_items: int
+
+
+def _apply_revalidation(
+    db: Session,
+    article: Article,
+    verified_hits: dict[str, tuple[str, float]],
+    has_general_provenance: bool,
+    symbol_to_id: dict[str, int],
+    *,
+    existing_rows: dict[int, ArticleTicker] | None = None,
+    prune_verified_hits: bool = True,
+    dry_run: bool = False,
+) -> _RevalidationOutcome:
+    """Apply revalidation outcome for a single article.
+
+    Three possible outcomes:
+    - verified_hits exist: upsert mappings and optionally prune stale ones, keep article
+    - no hits + general provenance: prune all mappings, keep article
+    - no hits + non-general: detach RFIs, delete mappings, delete article
+    """
+    if existing_rows is None:
+        existing_rows = {
+            row.ticker_id: row
+            for row in db.scalars(
+                select(ArticleTicker).where(
+                    ArticleTicker.article_id == article.id
+                )
+            ).all()
+        }
+    existing_ids = set(existing_rows.keys())
+
+    if verified_hits:
+        verified_ids = {
+            symbol_to_id[s] for s in verified_hits if s in symbol_to_id
+        }
+        if prune_verified_hits:
+            changed = verified_ids != existing_ids
+            removed_count = len(existing_ids - verified_ids)
+        else:
+            changed = bool(verified_ids - existing_ids)
+            removed_count = 0
+        if not dry_run:
+            _upsert_article_tickers(
+                db,
+                article.id,
+                verified_hits,
+                symbol_to_id,
+                existing_rows=existing_rows,
+                prune_missing=prune_verified_hits,
+            )
+        return _RevalidationOutcome(
+            action="kept",
+            had_verified_hits=True,
+            changed_mappings=changed,
+            deleted_article_tickers=removed_count,
+            deleted_raw_feed_items=0,
+        )
+
+    at_count = len(existing_ids)
+
+    if has_general_provenance:
+        if not dry_run:
+            _upsert_article_tickers(
+                db,
+                article.id,
+                {},
+                symbol_to_id,
+                existing_rows=existing_rows,
+                prune_missing=True,
+            )
+        return _RevalidationOutcome(
+            action="pruned",
+            had_verified_hits=False,
+            changed_mappings=bool(existing_ids),
+            deleted_article_tickers=at_count,
+            deleted_raw_feed_items=0,
+        )
+
+    # Non-general provenance, no verified hits: detach and delete.
+    if not dry_run:
+        rfi_count = db.execute(
+            update(RawFeedItem)
+            .where(RawFeedItem.article_id == article.id)
+            .values(article_id=None)
+        ).rowcount
+        db.execute(
+            delete(ArticleTicker).where(
+                ArticleTicker.article_id == article.id
+            )
+        )
+        db.execute(delete(Article).where(Article.id == article.id))
+    else:
+        rfi_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(RawFeedItem)
+                .where(RawFeedItem.article_id == article.id)
+            )
+            or 0
+        )
+
+    return _RevalidationOutcome(
+        action="deleted",
+        had_verified_hits=False,
+        changed_mappings=bool(existing_ids),
+        deleted_article_tickers=at_count,
+        deleted_raw_feed_items=rfi_count,
+    )
 
 
 def purge_token_only_articles(
@@ -2349,27 +2585,17 @@ def purge_token_only_articles(
     limit: int = 2000,
     timeout_seconds: int = 20,
 ) -> PurgeFalsePositiveStats:
-    """Remove articles that were only matched via unvalidated token patterns.
-
-    Targets non-Business Wire articles whose highest-confidence ticker match
-    is below MIN_PERSIST_CONFIDENCE (i.e. bare token matches that would no
-    longer be persisted under the current rules).
-    """
-    # Load symbol keywords for re-evaluation.
+    """Remove or detach low-confidence articles whose mappings are no longer verified."""
     ticker_rows = db.execute(
         select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
             Ticker.active.is_(True)
         )
     ).all()
     symbol_keywords = _build_symbol_keywords(ticker_rows)
-    known_symbols = frozenset(row[1].upper() for row in ticker_rows)
+    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
+    id_to_symbol = {row[0]: row[1].upper() for row in ticker_rows}
+    known_symbols = frozenset(symbol_to_id.keys())
 
-    # Find non-Business Wire articles that have ticker mappings.
-    # Use NOT EXISTS instead of NOT IN to avoid NULL-sensitivity issues
-    # (raw_feed_items.article_id is nullable).
-    bw_source_id = db.scalar(
-        select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
-    )
     mapped_exists = (
         select(1)
         .select_from(ArticleTicker)
@@ -2390,7 +2616,9 @@ def purge_token_only_articles(
         .correlate(Article)
         .exists()
     )
-
+    bw_source_id = db.scalar(
+        select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
+    )
     bw_exists = (
         (
             select(1)
@@ -2477,6 +2705,18 @@ def purge_token_only_articles(
                 (source_code, raw_link, feed_url)
             )
 
+        existing_rows_by_article: dict[int, dict[int, ArticleTicker]] = {}
+        if article_ids:
+            at_rows = db.scalars(
+                select(ArticleTicker).where(
+                    ArticleTicker.article_id.in_(article_ids)
+                )
+            ).all()
+            for at_row in at_rows:
+                existing_rows_by_article.setdefault(at_row.article_id, {})[
+                    at_row.ticker_id
+                ] = at_row
+
         for article in articles:
             if article.id in seen_ids:
                 continue
@@ -2488,56 +2728,36 @@ def purge_token_only_articles(
                 # No raw rows means provenance is unknown after retention pruning.
                 # Conservatively skip instead of treating the article as non-BW.
                 continue
-            if any(
-                source_code == GENERAL_SOURCE_CODE
-                for source_code, _, _ in raw_contexts
-            ):
-                continue
 
-            # Re-evaluate tickers with the same fallback extraction rules used
-            # during ingestion for sources that support page fetch.
-            hits = _reextract_purge_article_tickers(
+            has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
+            existing_for_article = existing_rows_by_article.get(article.id)
+            existing_symbols = {
+                id_to_symbol[ticker_id]
+                for ticker_id in (existing_for_article or {}).keys()
+                if ticker_id in id_to_symbol
+            }
+            verified_hits = _reextract_purge_article_tickers(
                 article,
                 raw_contexts,
                 known_symbols,
                 timeout_seconds,
                 symbol_keywords=symbol_keywords,
+                stop_when_existing_symbols_verified=existing_symbols,
             )
-            max_conf = _max_ticker_confidence(hits)
-
-            if max_conf >= MIN_PERSIST_CONFIDENCE:
+            if verified_hits:
                 continue
 
-            # This article would no longer be persisted — purge it.
-            if not dry_run:
-                at_count = db.execute(
-                    delete(ArticleTicker).where(ArticleTicker.article_id == article.id)
-                ).rowcount
-                rfi_count = db.execute(
-                    delete(RawFeedItem).where(RawFeedItem.article_id == article.id)
-                ).rowcount
-                db.execute(delete(Article).where(Article.id == article.id))
-                deleted_at += at_count
-                deleted_rfi += rfi_count
-            else:
-                at_count = (
-                    db.scalar(
-                        select(func.count())
-                        .select_from(ArticleTicker)
-                        .where(ArticleTicker.article_id == article.id)
-                    )
-                    or 0
-                )
-                rfi_count = (
-                    db.scalar(
-                        select(func.count())
-                        .select_from(RawFeedItem)
-                        .where(RawFeedItem.article_id == article.id)
-                    )
-                    or 0
-                )
-                deleted_at += at_count
-                deleted_rfi += rfi_count
+            outcome = _apply_revalidation(
+                db,
+                article,
+                {},
+                has_general_provenance,
+                symbol_to_id,
+                existing_rows=existing_for_article,
+                dry_run=dry_run,
+            )
+            deleted_at += outcome.deleted_article_tickers
+            deleted_rfi += outcome.deleted_raw_feed_items
             purged += 1
             if purged >= limit:
                 break
