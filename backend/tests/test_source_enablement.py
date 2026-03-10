@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
-from app.ingestion import run_ingestion_cycle
+from app.ingestion import run_ingestion_cycle, sync_runtime_state
 from app.models import Source
 from app.sources import SourceFeed, seed_sources
 
@@ -105,6 +105,31 @@ def test_run_ingestion_cycle_skips_sources_disabled_in_db(db_session, monkeypatc
 
     assert result["total_feeds"] == 0
     assert calls["ingest_feed"] == 0
+
+
+def test_sync_runtime_state_loads_tickers_before_building_yahoo_feeds(db_session, monkeypatch):
+    call_order: list[str] = []
+
+    def fake_load_tickers(_db: Session, _path: str):
+        call_order.append("load")
+        return {"loaded": 1, "created": 1, "updated": 0, "unchanged": 0}
+
+    def fake_build_source_feeds(_settings, _db):
+        call_order.append("build")
+        return []
+
+    monkeypatch.setattr("app.ingestion.build_source_feeds", fake_build_source_feeds)
+    monkeypatch.setattr("app.ingestion.reconcile_stale_ingestion_runs", lambda *_args, **_kwargs: 0)
+
+    result = sync_runtime_state(
+        db_session,
+        _settings(source_enable_yahoo=True),
+        ticker_loader=fake_load_tickers,
+    )
+
+    assert call_order == ["load", "build"]
+    assert result["ticker_sync"] == {"loaded": 1, "created": 1, "updated": 0, "unchanged": 0}
+    assert result["source_feeds"] == []
 
 
 def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):

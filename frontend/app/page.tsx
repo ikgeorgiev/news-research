@@ -6,7 +6,7 @@ import { usePushSubscription } from "@/hooks/usePushSubscription"
 import { persistJson, persistValue } from "@/lib/local-storage"
 import { markReadIdsByQuery, trimIdSet } from "@/lib/read-state"
 import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
-import { BellIcon, CheckIcon, StarIcon } from "./page-icons"
+import { BellIcon, CheckIcon } from "./page-icons"
 import {
   buildFetchParams,
   createWatchlistId,
@@ -15,13 +15,13 @@ import {
   mergeUniqueIds,
   mergeUniqueNewsItems,
   toSafeExternalUrl,
+  watchlistMatchesItem,
 } from "./page-helpers"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 const AUTO_REFRESH_MS = 30_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
 const MAX_PERSISTED_READ_IDS = 20_000
-const MAX_PERSISTED_STARRED_IDS = 10_000
 const NEWS_IDS_PAGE_SIZE = 1000
 
 const DEFAULT_WATCHLISTS: Watchlist[] = [
@@ -67,7 +67,6 @@ export default function Page() {
 
   // Read/Unread state
   const [readIds, setReadIds] = useState<Set<number>>(new Set())
-  const [starredIds, setStarredIds] = useState<Set<number>>(new Set())
 
   const [pendingNewItems, setPendingNewItems] = useState<NewsItem[]>([])
 
@@ -109,18 +108,31 @@ export default function Page() {
         }
       }
       
-      const storedStarred = localStorage.getItem("starredNewsIds")
-      if (storedStarred) {
-        const parsed = JSON.parse(storedStarred)
-        if (Array.isArray(parsed)) {
-          const validIds = parsed.filter((id): id is number => Number.isInteger(id))
-          setStarredIds(trimIdSet(new Set(validIds), MAX_PERSISTED_STARRED_IDS))
-        }
-      }
-
       const storedWatchlists = localStorage.getItem("customWatchlists")
       if (storedWatchlists) {
-        setCustomWatchlists(JSON.parse(storedWatchlists))
+        const parsed = JSON.parse(storedWatchlists)
+        if (Array.isArray(parsed)) {
+          const normalized = parsed
+            .filter((item): item is Partial<Watchlist> & { id: unknown; name: unknown } => (
+              typeof item === "object" && item !== null && "id" in item && "name" in item
+            ))
+            .map((item) => ({
+              id: String(item.id),
+              name: String(item.name),
+              provider:
+                typeof item.provider === "string" && item.provider.trim().length > 0
+                  ? item.provider.trim()
+                  : undefined,
+              q:
+                typeof item.q === "string" && item.q.trim().length > 0
+                  ? item.q.trim()
+                  : undefined,
+              tickers: Array.isArray(item.tickers)
+                ? item.tickers.filter((symbol): symbol is string => typeof symbol === "string" && symbol.length > 0)
+                : undefined,
+            }))
+          setCustomWatchlists(normalized)
+        }
       }
 
       const storedViewMode = localStorage.getItem("newsViewMode")
@@ -147,6 +159,36 @@ export default function Page() {
     pendingNewItemsRef.current = pendingNewItems
   }, [pendingNewItems])
 
+  const buildCurrentNewsRequest = (
+    overrides: Partial<Parameters<typeof fetchNews>[0]> = {}
+  ): Parameters<typeof fetchNews>[0] => {
+    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(
+      activeWatchlist,
+      activeWatchlistId,
+      ticker
+    )
+    return {
+      tickers: fetchTickers,
+      provider: provider || undefined,
+      includeUnmappedFromProvider: includeGeneralFromProvider,
+      q: searchQuery || undefined,
+      ...overrides,
+    }
+  }
+
+  const syncFiltersToWatchlist = (watchlist?: Watchlist) => {
+    const nextQuery = watchlist?.q || ""
+    setTicker("")
+    setProvider(watchlist?.provider || "")
+    setSearchQuery(nextQuery)
+    setSearchInput(nextQuery)
+  }
+
+  const selectWatchlist = (watchlistId: string, watchlist?: Watchlist) => {
+    setActiveWatchlistId(watchlistId)
+    syncFiltersToWatchlist(watchlist)
+  }
+
   const handleTogglePushScope = (watchlistId: string, e?: MouseEvent) => {
     e?.preventDefault()
     e?.stopPropagation()
@@ -164,10 +206,6 @@ export default function Page() {
   }, [readIds])
 
   useEffect(() => {
-    persistJson("starredNewsIds", Array.from(starredIds))
-  }, [starredIds])
-
-  useEffect(() => {
     persistValue("newsViewMode", viewMode)
   }, [viewMode])
 
@@ -179,14 +217,6 @@ export default function Page() {
       .catch(() => setTickers([]))
     return () => controller.abort()
   }, [])
-
-  // Sync Watchlist -> Filters (reset all filters when switching watchlists)
-  useEffect(() => {
-    setTicker("")
-    setProvider(activeWatchlist?.provider || "")
-    setSearchQuery(activeWatchlist?.q || "")
-    setSearchInput(activeWatchlist?.q || "")
-  }, [activeWatchlist])
 
   // Auto-refresh feed while tab is visible.
   useEffect(() => {
@@ -286,23 +316,17 @@ export default function Page() {
     const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
     const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
 
-    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(activeWatchlist, activeWatchlistId, ticker)
-
     // When user is scrolled deep, fetch in the background and buffer new items
     // instead of updating the feed directly.  We snapshot the current generation
     // WITHOUT incrementing it so that an in-flight loadMore is not invalidated.
     if (isAutoRefresh && isReadingDeep) {
       const bgGeneration = feedGenerationRef.current
       const controller = new AbortController()
-      fetchNews({
-        tickers: fetchTickers,
-        provider: provider || undefined,
-        includeUnmappedFromProvider: includeGeneralFromProvider,
+      fetchNews(buildCurrentNewsRequest({
         includeGlobalSummary: true,
-        q: searchQuery || undefined,
         limit: 40,
         signal: controller.signal,
-      })
+      }))
         .then((data) => {
           // Discard if a filter change or manual refresh superseded this background fetch.
           if (bgGeneration !== feedGenerationRef.current) return
@@ -339,15 +363,11 @@ export default function Page() {
 
     const requestGeneration = ++feedGenerationRef.current
 
-    fetchNews({
-      tickers: fetchTickers,
-      provider: provider || undefined,
-      includeUnmappedFromProvider: includeGeneralFromProvider,
+    fetchNews(buildCurrentNewsRequest({
       includeGlobalSummary: true,
-      q: searchQuery || undefined,
       limit: 40,
       signal: controller.signal,
-    })
+    }))
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
         if (data.global_summary) {
@@ -405,18 +425,12 @@ export default function Page() {
     setLoadingMore(true)
     setError(null)
     const requestGeneration = feedGenerationRef.current
-    
-    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(activeWatchlist, activeWatchlistId, ticker)
 
     try {
-      const data = await fetchNews({
-        tickers: fetchTickers,
-        provider: provider || undefined,
-        includeUnmappedFromProvider: includeGeneralFromProvider,
-        q: searchQuery || undefined,
+      const data = await fetchNews(buildCurrentNewsRequest({
         limit: 40,
         cursor: nextCursor,
-      })
+      }))
       if (requestGeneration !== feedGenerationRef.current) return
       const fetchedItems = data.items
       setItems((prev) => {
@@ -452,19 +466,6 @@ export default function Page() {
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-    })
-  }
-
-  const toggleStar = (id: number, e?: MouseEvent) => {
-    if (e) {
-      e.stopPropagation()
-      e.preventDefault()
-    }
-    setStarredIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return trimIdSet(next, MAX_PERSISTED_STARRED_IDS)
     })
   }
 
@@ -546,13 +547,13 @@ export default function Page() {
     setNewWatchlistName("")
     setSelectedTickers(new Set())
     setIsCreatingWatchlist(false)
-    setActiveWatchlistId(newWl.id)
+    selectWatchlist(newWl.id, newWl)
   }
 
   const handleDeleteWatchlist = (id: string) => {
     setCustomWatchlists(prev => prev.filter(w => w.id !== id))
     if (activeWatchlistId === id) {
-      setActiveWatchlistId("all")
+      selectWatchlist("all")
     }
   }
 
@@ -576,7 +577,9 @@ export default function Page() {
 
   const markReadByQuery = async (params: {
     tickers?: string[]
+    provider?: string
     includeUnmappedFromProvider?: string
+    q?: string
   }) => {
     await markReadIdsByQuery({
       params,
@@ -607,22 +610,25 @@ export default function Page() {
 
     const wl = customWatchlists.find(w => w.id === wlId)
     if (!wl) return
-    // For watchlists, fetch IDs filtered by the watchlist tickers.
-    const wlTickers = wl.tickers || []
-    if (wlTickers.length > 0) {
-      markReadByQuery({ tickers: wlTickers })
-        .catch(() => {
-          // Fallback: mark only tracked items matching this watchlist.
-          const matchingIds = trackedUnreadItems
-            .filter(i => i.tickers?.some(t => wlTickers.includes(t)))
-            .map(i => i.id)
-          setReadIds(prev => {
-            const next = new Set(prev)
-            matchingIds.forEach(id => next.add(id))
-            return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-          })
-        })
+    const params = {
+      tickers: wl.tickers && wl.tickers.length > 0 ? wl.tickers : undefined,
+      provider: wl.provider,
+      q: wl.q,
     }
+    if (!params.tickers && !params.provider && !params.q) return
+
+    markReadByQuery(params)
+      .catch(() => {
+        // Fallback: mark only tracked items matching this watchlist.
+        const matchingIds = trackedUnreadItems
+          .filter((item) => watchlistMatchesItem(item, wl))
+          .map((item) => item.id)
+        setReadIds(prev => {
+          const next = new Set(prev)
+          matchingIds.forEach(id => next.add(id))
+          return trimIdSet(next, MAX_PERSISTED_READ_IDS)
+        })
+      })
   }
 
   const handleStartRename = (wlId: string) => {
@@ -645,11 +651,6 @@ export default function Page() {
 
   const handleContextDelete = (wlId: string) => {
     handleDeleteWatchlist(wlId)
-    closeContextMenu()
-  }
-
-  const handleUpdateFeeds = () => {
-    triggerRefresh("manual")
     closeContextMenu()
   }
 
@@ -679,7 +680,7 @@ export default function Page() {
 
         <div
           className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
-          onClick={() => setActiveWatchlistId("all")}
+          onClick={() => selectWatchlist("all")}
           onContextMenu={(e) => handleWatchlistContextMenu(e, "all")}
           style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
         >
@@ -695,7 +696,7 @@ export default function Page() {
               onClick={(e) => handleTogglePushScope("all", e)}
               style={{
                 padding: "2px",
-                color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-muted)",
+                color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-secondary)",
               }}
             >
               <BellIcon active={alertIncludeAllNews} />
@@ -732,14 +733,14 @@ export default function Page() {
         <div>
           {customWatchlists.map(wl => {
             const wlUnreadCount = trackedUnreadItems.filter(
-              i => !readIds.has(i.id) && i.tickers?.some(t => (wl.tickers || []).includes(t))
+              (item) => !readIds.has(item.id) && watchlistMatchesItem(item, wl)
             ).length;
             
             return (
               <div 
                 key={wl.id} 
                 className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
-                onClick={() => setActiveWatchlistId(wl.id)}
+                onClick={() => selectWatchlist(wl.id, wl)}
                 onContextMenu={(e) => handleWatchlistContextMenu(e, wl.id)}
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
               >
@@ -772,7 +773,7 @@ export default function Page() {
                     onClick={(e) => handleTogglePushScope(wl.id, e)}
                     style={{
                       padding: "2px",
-                      color: isPushScopeEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-muted)",
+                      color: isPushScopeEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-secondary)",
                     }}
                   >
                     <BellIcon active={isPushScopeEnabled(wl.id)} />
@@ -794,14 +795,14 @@ export default function Page() {
             );
           })}
           {customWatchlists.length === 0 && !isCreatingWatchlist && (
-            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", padding: "0 0.5rem" }}>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", padding: "0 0.5rem" }}>
               No custom watchlists yet.
             </p>
           )}
         </div>
 
         {isCreatingWatchlist && (
-          <form className="create-watchlist-form" onSubmit={handleCreateWatchlist} style={{ marginTop: "1rem", padding: "0.5rem", background: "var(--bg-layer-2)", borderRadius: "4px" }}>
+          <form className="create-watchlist-form" onSubmit={handleCreateWatchlist} style={{ marginTop: "1rem", padding: "0.5rem", background: "var(--bg-hover)", borderRadius: "4px" }}>
             <input 
               autoFocus
               placeholder="Watchlist Name" 
@@ -809,7 +810,7 @@ export default function Page() {
               onChange={e => setNewWatchlistName(e.target.value)}
               style={{ width: "100%", marginBottom: "0.5rem" }}
             />
-            <div className="ticker-selector" style={{ maxHeight: "150px", overflowY: "auto", marginBottom: "0.5rem", border: "1px solid var(--border)", borderRadius: "4px", padding: "4px" }}>
+            <div className="ticker-selector" style={{ maxHeight: "150px", overflowY: "auto", marginBottom: "0.5rem", border: "1px solid var(--border-color)", borderRadius: "4px", padding: "4px" }}>
               {tickers.map(t => (
                 <label key={t.symbol} style={{ display: "block", fontSize: "0.85rem", cursor: "pointer", padding: "2px 0" }}>
                   <input 
@@ -854,10 +855,6 @@ export default function Page() {
                 </div>
               </>
             )}
-            <div className="context-menu-separator" />
-            <div className="context-menu-item" onClick={handleUpdateFeeds}>
-              Update Feeds in Folder
-            </div>
           </div>
         )}
       </aside>
@@ -944,7 +941,7 @@ export default function Page() {
                   borderRadius: "999px",
                   border: "1px solid var(--border-color)",
                   background: activePushScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
-                  color: activePushScopeCount > 0 ? "var(--accent-blue)" : "var(--text-muted)",
+                  color: activePushScopeCount > 0 ? "var(--accent-blue)" : "var(--text-secondary)",
                   whiteSpace: "nowrap",
                 }}
               >
@@ -981,12 +978,11 @@ export default function Page() {
           {!loading && items.length === 0 && (
             <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
               <p style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>No news found</p>
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Try adjusting your filters or switching watchlists.</p>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Try adjusting your filters or switching watchlists.</p>
             </div>
           )}
           {items.map((item) => {
             const isRead = readIds.has(item.id)
-            const isStarred = starredIds.has(item.id)
             const isExpanded = viewMode === "full" || expandedIds.has(item.id)
             const safeItemUrl = toSafeExternalUrl(item.url)
              
@@ -1039,13 +1035,6 @@ export default function Page() {
                       onClick={(e) => toggleRead(item.id, e)}
                     >
                       <CheckIcon />
-                    </button>
-                    <button 
-                      className={`icon-button ${isStarred ? "starred" : ""}`} 
-                      title="Star story"
-                      onClick={(e) => toggleStar(item.id, e)}
-                    >
-                      <StarIcon fill={isStarred ? "currentColor" : "none"} />
                     </button>
                   </div>
                 </div>

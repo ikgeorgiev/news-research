@@ -2,7 +2,9 @@ import type { NewsIdsResponse } from "./types"
 
 export type ReadQueryParams = {
   tickers?: string[]
+  provider?: string
   includeUnmappedFromProvider?: string
+  q?: string
 }
 
 type FetchNewsIdsPage = (params: ReadQueryParams & {

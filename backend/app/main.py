@@ -19,17 +19,14 @@ from app.ingestion import (
     dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
     purge_token_only_articles,
-    reconcile_stale_ingestion_runs,
-    remap_businesswire_articles,
     remap_source_articles,
+    sync_runtime_state,
 )
 from app.monitoring import observe_http_request, render_metrics
 from app.models import Article, ArticleTicker, IngestionRun, PushSubscription, RawFeedItem, Source, Ticker
 from app.push_alerts import hash_manage_token, normalize_scopes, push_runtime_enabled, seed_last_notified_watermarks
 from app.schemas import (
-    BusinessWireDedupeResponse,
-    BusinessWireRemapResponse,
-    TitleDedupeResponse,
+    DedupeResponse,
     IngestionRunItem,
     IngestionRunResponse,
     MarkAlertsSentRequest,
@@ -51,7 +48,6 @@ from app.schemas import (
     TickerListResponse,
 )
 from app.scheduler import IngestionScheduler
-from app.sources import build_source_feeds, seed_sources
 from app.ticker_loader import load_tickers_from_csv
 from app.query_utils import contains_literal_pattern, iter_chunks, prefix_literal_pattern
 from app.utils import clean_summary_text, decode_cursor, encode_cursor
@@ -332,15 +328,13 @@ async def lifespan(app: FastAPI):
     init_db()
 
     with get_session_factory()() as db:
-        source_feeds = build_source_feeds(settings, db)
-        seed_sources(db, source_feeds)
-
-        ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
-        logger.info("Ticker load stats: %s", ticker_stats)
-        stale_runs_fixed = reconcile_stale_ingestion_runs(
+        runtime_sync = sync_runtime_state(
             db,
-            stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
+            settings,
+            ticker_loader=load_tickers_from_csv,
         )
+        logger.info("Ticker load stats: %s", runtime_sync["ticker_sync"])
+        stale_runs_fixed = runtime_sync["stale_runs_fixed"]
         if stale_runs_fixed:
             logger.warning("Marked %s stale ingestion runs as failed at startup", stale_runs_fixed)
 
@@ -762,40 +756,13 @@ def admin_ingestion_status(
 
 
 @app.post(
-    f"{settings.api_prefix}/admin/remap/businesswire",
-    response_model=BusinessWireRemapResponse,
-    dependencies=[Depends(require_admin_api_key)],
-)
-def admin_remap_businesswire(
-    limit: int = Query(default=500, ge=1, le=5000),
-    only_unmapped: bool = Query(
-        default=True,
-        description="Remap only Business Wire articles that currently have no ticker mapping",
-    ),
-    db: Session = Depends(get_db),
-):
-    result = remap_businesswire_articles(
-        db,
-        settings,
-        limit=limit,
-        only_unmapped=only_unmapped,
-    )
-    return BusinessWireRemapResponse(
-        processed=int(result["processed"]),
-        articles_with_hits=int(result["articles_with_hits"]),
-        remapped_articles=int(result["remapped_articles"]),
-        only_unmapped=bool(result["only_unmapped"]),
-    )
-
-
-@app.post(
     f"{settings.api_prefix}/admin/dedupe/businesswire-url-variants",
-    response_model=BusinessWireDedupeResponse,
+    response_model=DedupeResponse,
     dependencies=[Depends(require_admin_api_key)],
 )
 def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
     result = dedupe_businesswire_url_variants(db)
-    return BusinessWireDedupeResponse(
+    return DedupeResponse(
         scanned_articles=int(result["scanned_articles"]),
         duplicate_groups=int(result["duplicate_groups"]),
         merged_articles=int(result["merged_articles"]),
@@ -808,12 +775,12 @@ def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
 
 @app.post(
     f"{settings.api_prefix}/admin/dedupe/title",
-    response_model=TitleDedupeResponse,
+    response_model=DedupeResponse,
     dependencies=[Depends(require_admin_api_key)],
 )
 def admin_dedupe_by_title(db: Session = Depends(get_db)):
     result = dedupe_articles_by_title(db)
-    return TitleDedupeResponse(
+    return DedupeResponse(
         scanned_articles=int(result["scanned_articles"]),
         duplicate_groups=int(result["duplicate_groups"]),
         merged_articles=int(result["merged_articles"]),
@@ -899,11 +866,8 @@ def admin_reload_tickers(
 ):
     ticker_stats = load_tickers_from_csv(db, settings.tickers_csv_path)
 
-    remap_payload: BusinessWireRemapResponse | None = None
     source_remap_payloads: list[SourceRemapResponse] = []
-    should_remap = remap_unmapped
-
-    if should_remap:
+    if remap_unmapped:
         for code in sorted(PAGE_FETCH_CONFIGS.keys()):
             result = remap_source_articles(
                 db, settings, source_code=code, limit=remap_limit, only_unmapped=True,
@@ -916,20 +880,10 @@ def admin_reload_tickers(
                 only_unmapped=bool(result["only_unmapped"]),
             ))
 
-        bw = next((r for r in source_remap_payloads if r.source_code == "businesswire"), None)
-        if bw is not None:
-            remap_payload = BusinessWireRemapResponse(
-                processed=bw.processed,
-                articles_with_hits=bw.articles_with_hits,
-                remapped_articles=bw.remapped_articles,
-                only_unmapped=bw.only_unmapped,
-            )
-
     return ReloadTickersResponse(
         loaded=int(ticker_stats["loaded"]),
         created=int(ticker_stats["created"]),
         updated=int(ticker_stats["updated"]),
         unchanged=int(ticker_stats["unchanged"]),
-        remap=remap_payload,
         source_remaps=source_remap_payloads if source_remap_payloads else None,
     )

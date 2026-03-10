@@ -94,6 +94,41 @@ export function buildFetchParams(
   return { fetchTickers, includeGeneralFromProvider }
 }
 
+export function watchlistMatchesItem(item: NewsItem, watchlist: Watchlist): boolean {
+  if (watchlist.tickers && watchlist.tickers.length > 0) {
+    const hasTickerMatch = item.tickers?.some((ticker) => watchlist.tickers?.includes(ticker))
+    if (!hasTickerMatch) {
+      return false
+    }
+  }
+
+  if (watchlist.provider) {
+    const itemProvider = item.provider.trim().toLowerCase()
+    const watchlistProvider = watchlist.provider.trim().toLowerCase()
+    if (itemProvider !== watchlistProvider) {
+      return false
+    }
+  }
+
+  if (watchlist.q) {
+    const haystack = [
+      item.title,
+      item.summary,
+      item.source,
+      item.provider,
+      ...(item.tickers || []),
+    ]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(" ")
+      .toLowerCase()
+    if (!haystack.includes(watchlist.q.trim().toLowerCase())) {
+      return false
+    }
+  }
+
+  return true
+}
+
 export function dedupeById<T extends { id: number }>(existing: T[], incoming: T[]): T[] {
   const ids = new Set(existing.map((item) => item.id))
   return incoming.filter((item) => !ids.has(item.id))

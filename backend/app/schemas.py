@@ -81,13 +81,6 @@ class RunIngestionResponse(BaseModel):
     failed_feeds: int
 
 
-class BusinessWireRemapResponse(BaseModel):
-    processed: int
-    articles_with_hits: int
-    remapped_articles: int
-    only_unmapped: bool
-
-
 class SourceRemapResponse(BaseModel):
     source_code: str
     processed: int
@@ -96,17 +89,7 @@ class SourceRemapResponse(BaseModel):
     only_unmapped: bool
 
 
-class BusinessWireDedupeResponse(BaseModel):
-    scanned_articles: int
-    duplicate_groups: int
-    merged_articles: int
-    raw_items_relinked: int
-    ticker_rows_relinked: int
-    ticker_rows_updated: int
-    ticker_rows_deleted: int
-
-
-class TitleDedupeResponse(BaseModel):
+class DedupeResponse(BaseModel):
     scanned_articles: int
     duplicate_groups: int
     merged_articles: int
@@ -129,7 +112,6 @@ class ReloadTickersResponse(BaseModel):
     created: int
     updated: int
     unchanged: int
-    remap: BusinessWireRemapResponse | None = None
     source_remaps: list[SourceRemapResponse] | None = None
 
 

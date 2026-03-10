@@ -13,7 +13,7 @@ from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from html import unescape
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import feedparser
@@ -36,6 +36,7 @@ from app.push_alerts import check_and_send_alerts
 from app.sources import (
     POLICY_GENERAL_ALLOWED,
     POLICY_SCOPED_CONTEXT_REQUIRED,
+    SourceFeed,
     build_source_feeds,
     get_source_policy,
     seed_sources,
@@ -347,10 +348,6 @@ class SourceRemapStats(TypedDict):
     remapped_articles: int
     only_unmapped: bool
 
-
-BusinessWireRemapStats = SourceRemapStats
-
-
 class BusinessWireUrlDedupeStats(TypedDict):
     scanned_articles: int
     duplicate_groups: int
@@ -381,6 +378,43 @@ class IngestionCycleResult(TypedDict):
     source_remaps: list[SourceRemapStats]
     feeds: list[IngestFeedResult]
     push_alerts: dict[str, int]
+
+
+class RuntimeSyncResult(TypedDict):
+    source_feeds: list[SourceFeed]
+    ticker_sync: TickerSyncStats
+    stale_runs_fixed: int
+
+
+def _normalize_ticker_sync_stats(raw_stats: dict[str, int]) -> TickerSyncStats:
+    return {
+        "loaded": int(raw_stats.get("loaded", 0) or 0),
+        "created": int(raw_stats.get("created", 0) or 0),
+        "updated": int(raw_stats.get("updated", 0) or 0),
+        "unchanged": int(raw_stats.get("unchanged", 0) or 0),
+    }
+
+
+def sync_runtime_state(
+    db: Session,
+    settings: Settings,
+    *,
+    ticker_loader: Callable[[Session, str], dict[str, int]],
+) -> RuntimeSyncResult:
+    ticker_sync = _normalize_ticker_sync_stats(
+        ticker_loader(db, settings.tickers_csv_path)
+    )
+    source_feeds = build_source_feeds(settings, db)
+    seed_sources(db, source_feeds)
+    stale_runs_fixed = reconcile_stale_ingestion_runs(
+        db,
+        stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
+    )
+    return {
+        "source_feeds": source_feeds,
+        "ticker_sync": ticker_sync,
+        "stale_runs_fixed": stale_runs_fixed,
+    }
 
 
 def _clamp_label(value: str | None, max_len: int = 120) -> str:
@@ -1719,23 +1753,17 @@ def ingest_feed(
 
 
 def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult:
-    stale_runs_fixed = reconcile_stale_ingestion_runs(
+    runtime_sync = sync_runtime_state(
         db,
-        stale_after_seconds=settings.ingestion_stale_run_timeout_seconds,
+        settings,
+        ticker_loader=_load_tickers_from_csv_if_changed,
     )
+    stale_runs_fixed = runtime_sync["stale_runs_fixed"]
     if stale_runs_fixed:
         logger.warning("Marked %s stale ingestion runs as failed", stale_runs_fixed)
 
-    raw_ticker_sync = _load_tickers_from_csv_if_changed(db, settings.tickers_csv_path)
-    ticker_sync: TickerSyncStats = {
-        "loaded": int(raw_ticker_sync.get("loaded", 0) or 0),
-        "created": int(raw_ticker_sync.get("created", 0) or 0),
-        "updated": int(raw_ticker_sync.get("updated", 0) or 0),
-        "unchanged": int(raw_ticker_sync.get("unchanged", 0) or 0),
-    }
-
-    source_feeds = build_source_feeds(settings, db)
-    seed_sources(db, source_feeds)
+    ticker_sync = runtime_sync["ticker_sync"]
+    source_feeds = runtime_sync["source_feeds"]
 
     source_map = {
         source.code: source
@@ -2384,22 +2412,6 @@ def dedupe_articles_by_title(
         "ticker_rows_updated": ticker_rows_updated,
         "ticker_rows_deleted": ticker_rows_deleted,
     }
-
-
-def remap_businesswire_articles(
-    db: Session,
-    settings: Settings,
-    *,
-    limit: int = 500,
-    only_unmapped: bool = True,
-) -> SourceRemapStats:
-    return remap_source_articles(
-        db,
-        settings,
-        source_code="businesswire",
-        limit=limit,
-        only_unmapped=only_unmapped,
-    )
 
 
 class PurgeFalsePositiveStats(TypedDict):

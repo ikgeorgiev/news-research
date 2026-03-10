@@ -74,4 +74,34 @@ describe("Page refresh requests", () => {
 
     await waitFor(() => expect(mockedApi.fetchNews).toHaveBeenCalledTimes(2))
   })
+
+  it("preserves legacy provider and query filters for saved watchlists", async () => {
+    localStorage.setItem(
+      "customWatchlists",
+      JSON.stringify([
+        {
+          id: "legacy-provider-watchlist",
+          name: "Legacy Provider",
+          provider: "Business Wire",
+          q: "rights offering",
+        },
+      ])
+    )
+
+    render(<Page />)
+
+    await waitFor(() => expect(screen.getByText("Legacy Provider")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("Legacy Provider"))
+
+    await waitFor(() =>
+      expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provider: "Business Wire",
+          q: "rights offering",
+          includeGlobalSummary: true,
+          limit: 40,
+        })
+      )
+    )
+  })
 })

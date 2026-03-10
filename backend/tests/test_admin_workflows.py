@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.main import admin_dedupe_businesswire_url_variants, admin_reload_tickers, admin_remap_businesswire
+from app.main import admin_dedupe_businesswire_url_variants, admin_reload_tickers
 
 
-def test_admin_reload_tickers_returns_remap_payload(monkeypatch, db_session):
+def test_admin_reload_tickers_returns_source_remaps(monkeypatch, db_session):
     calls: dict[str, int | bool | list[str]] = {}
 
     def fake_load_tickers(_db: Session, _path: str) -> dict[str, int]:
@@ -48,8 +48,10 @@ def test_admin_reload_tickers_returns_remap_payload(monkeypatch, db_session):
     assert response.created == 4
     assert response.updated == 5
     assert response.unchanged == 16
-    assert response.remap is not None
-    assert response.remap.remapped_articles == 3
+    assert response.source_remaps is not None
+    assert any(remap.source_code == "businesswire" for remap in response.source_remaps)
+    bw_remap = next(remap for remap in response.source_remaps if remap.source_code == "businesswire")
+    assert bw_remap.remapped_articles == 3
     assert calls["limit"] == 321
     assert calls["only_unmapped"] is True
     assert "businesswire" in calls["source_codes"]
@@ -75,33 +77,8 @@ def test_admin_reload_tickers_can_skip_remap(monkeypatch, db_session):
     )
 
     assert response.loaded == 10
-    assert response.remap is None
+    assert response.source_remaps is None
     assert calls["remap_called"] == 0
-
-
-def test_admin_remap_businesswire_response_contract(monkeypatch, db_session):
-    calls: dict[str, int | bool] = {}
-
-    def fake_remap(_db: Session, _settings, *, limit: int, only_unmapped: bool):  # noqa: ANN001
-        calls["limit"] = limit
-        calls["only_unmapped"] = only_unmapped
-        return {
-            "processed": 11,
-            "articles_with_hits": 5,
-            "remapped_articles": 4,
-            "only_unmapped": only_unmapped,
-        }
-
-    monkeypatch.setattr("app.main.remap_businesswire_articles", fake_remap)
-
-    response = admin_remap_businesswire(limit=777, only_unmapped=False, db=db_session)
-
-    assert response.processed == 11
-    assert response.articles_with_hits == 5
-    assert response.remapped_articles == 4
-    assert response.only_unmapped is False
-    assert calls["limit"] == 777
-    assert calls["only_unmapped"] is False
 
 
 def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, db_session):

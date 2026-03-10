@@ -6,7 +6,6 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --no-config-lookup --ignore-pattern .next",
     "test": "vitest run"
   },
   "dependencies": {
@@ -20,7 +19,6 @@
     "@types/node": "22.15.30",
     "@types/react": "19.0.8",
     "@types/react-dom": "19.0.3",
-    "eslint": "9.39.1",
     "jsdom": "^28.1.0",
     "typescript": "5.8.3",
     "vitest": "^4.0.18"

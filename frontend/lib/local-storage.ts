@@ -15,11 +15,3 @@ export function persistValue(key: string, value: string): void {
     console.warn(`Failed to persist ${key} to localStorage`, err)
   }
 }
-
-export function removePersistedValue(key: string): void {
-  try {
-    localStorage.removeItem(key)
-  } catch (err) {
-    console.warn(`Failed to remove ${key} from localStorage`, err)
-  }
-}

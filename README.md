@@ -206,7 +206,7 @@ For frontend on `3000` instead:
 - `POST /api/v1/admin/ingest/run-once`
 - `GET /api/v1/admin/ingest/status`
 - `POST /api/v1/admin/tickers/reload`
-- `POST /api/v1/admin/remap/businesswire`
+- `POST /api/v1/admin/remap/{source_code}`
 
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
 Mapped means linked to at least one active ticker.
@@ -236,7 +236,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/tickers/reload" \
   -H "X-API-Key: ${ADMIN_API_KEY}"
 ```
 
-This reloads symbols and remaps recent unmapped Business Wire items so they move out of `GENERAL` when a ticker match is found.
+This reloads symbols and remaps recent unmapped page-fetch sources, including `businesswire`, so stories move out of `GENERAL` when a ticker match is found.
 
 Ingestion reliability controls are configurable via env vars:
 

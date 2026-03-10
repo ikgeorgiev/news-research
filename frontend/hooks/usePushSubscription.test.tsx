@@ -122,6 +122,8 @@ describe("usePushSubscription", () => {
         {
           id: "wl-1",
           name: "Watchlist 1",
+          provider: "Business Wire",
+          q: "rights offering",
           tickers: ["GOF"],
         },
       ],
@@ -136,8 +138,8 @@ describe("usePushSubscription", () => {
             id: "wl-1",
             name: "Watchlist 1",
             tickers: ["GOF"],
-            provider: undefined,
-            q: undefined,
+            provider: "Business Wire",
+            q: "rights offering",
           },
         ],
       })

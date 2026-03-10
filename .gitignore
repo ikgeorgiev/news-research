@@ -14,10 +14,8 @@ frontend/next-env.d.ts
 
 # Local env
 .env
-.env.example
 
 # Docker
-docker-compose.yml
 docker-compose.yaml
 compose.yml
 compose.yaml
@@ -30,7 +28,6 @@ Thumbs.db
 _tmpbuild/
 
 # Local dev scripts
-dev-*.ps1
 dev-*.sh
 
 # Research scratch files

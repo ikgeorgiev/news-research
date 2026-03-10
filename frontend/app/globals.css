@@ -389,10 +389,6 @@ button:disabled {
   background: var(--bg-input);
 }
 
-.icon-button.starred {
-  color: #f5a623; /* Gold/Yellow for starred */
-}
-
 .load-more-container {
   padding: 1.5rem;
   display: flex;

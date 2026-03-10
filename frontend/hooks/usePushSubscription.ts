@@ -9,13 +9,11 @@ import {
   isPushSupported,
   syncPushScopes,
 } from "@/lib/push"
-import { persistJson, persistValue, removePersistedValue } from "@/lib/local-storage"
+import { persistJson, persistValue } from "@/lib/local-storage"
 import { PushAlertScopes, Watchlist } from "@/lib/types"
 
-const LEGACY_NOTIFICATIONS_STORAGE_KEY = "notificationsEnabled"
 const ALERT_INCLUDE_ALL_STORAGE_KEY = "alertIncludeAllNews"
 const ALERT_WATCHLIST_IDS_STORAGE_KEY = "alertWatchlistIds"
-
 
 export function usePushSubscription({
   customWatchlists,
@@ -69,8 +67,6 @@ export function usePushSubscription({
 
   useEffect(() => {
     try {
-      removePersistedValue(LEGACY_NOTIFICATIONS_STORAGE_KEY)
-
       const storedAlertIncludeAll = localStorage.getItem(ALERT_INCLUDE_ALL_STORAGE_KEY)
       if (storedAlertIncludeAll !== null) {
         setAlertIncludeAllNews(storedAlertIncludeAll === "true")
