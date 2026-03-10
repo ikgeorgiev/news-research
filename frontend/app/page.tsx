@@ -1,87 +1,102 @@
 "use client"
 
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react"
-import { fetchNews, fetchNewsIds, fetchTickers } from "@/lib/api"
+import { FormEvent, MouseEvent, useState } from "react"
 import { usePushSubscription } from "@/hooks/usePushSubscription"
-import { persistJson, persistValue } from "@/lib/local-storage"
-import { markReadIdsByQuery, trimIdSet } from "@/lib/read-state"
-import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
-import { BellIcon, CheckIcon } from "./page-icons"
-import {
-  buildFetchParams,
-  createWatchlistId,
-  dedupeById,
-  formatDetailedDate,
-  mergeUniqueIds,
-  mergeUniqueNewsItems,
-  toSafeExternalUrl,
-  watchlistMatchesItem,
-} from "./page-helpers"
+import { Watchlist } from "@/lib/types"
+import { NewsFeedSection } from "./news-feed-section"
+import { BellIcon } from "./page-icons"
+import { useFeedPreferences } from "./use-feed-preferences"
+import { useNewsFeed } from "./use-news-feed"
+import { useWatchlists } from "./use-watchlists"
+import { watchlistMatchesItem } from "./page-helpers"
+import { WatchlistSidebar } from "./watchlist-sidebar"
 
 const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
-const AUTO_REFRESH_MS = 30_000
-const AUTO_REFRESH_DEDUPE_MS = 2_000
-const MAX_PERSISTED_READ_IDS = 20_000
-const NEWS_IDS_PAGE_SIZE = 1000
-
-const DEFAULT_WATCHLISTS: Watchlist[] = [
-  { id: "all", name: "All News" },
-]
 
 export default function Page() {
-  const [tickers, setTickers] = useState<TickerItem[]>([])
-  const [globalTrackedIds, setGlobalTrackedIds] = useState<number[]>([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [items, setItems] = useState<NewsItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-
-  // Watchlists state
-  const [customWatchlists, setCustomWatchlists] = useState<Watchlist[]>([])
-  const [activeWatchlistId, setActiveWatchlistId] = useState<string>("all")
-  
-  const activeWatchlist = useMemo(() => {
-    return DEFAULT_WATCHLISTS.find(w => w.id === activeWatchlistId) || 
-           customWatchlists.find(w => w.id === activeWatchlistId)
-  }, [activeWatchlistId, customWatchlists])
-
-  // Create Watchlist State
-  const [isCreatingWatchlist, setIsCreatingWatchlist] = useState(false)
-  const [newWatchlistName, setNewWatchlistName] = useState("")
-  const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set())
-
-  // Context menu state
-  const [contextMenu, setContextMenu] = useState<{ watchlistId: string; x: number; y: number } | null>(null)
-  const [renamingWatchlistId, setRenamingWatchlistId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState("")
-
   // Search/Filter state
   const [ticker, setTicker] = useState("")
-  const [provider, setProvider] = useState(activeWatchlist?.provider || "")
+  const [provider, setProvider] = useState("")
   const [searchInput, setSearchInput] = useState("")
-  const [searchQuery, setSearchQuery] = useState(activeWatchlist?.q || "")
-  const [refreshTick, setRefreshTick] = useState(0)
+  const [searchQuery, setSearchQuery] = useState("")
 
-  // View Mode & Expansion state
-  const [viewMode, setViewMode] = useState<"list" | "full">("list")
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+  const syncFiltersToWatchlist = (watchlist?: Watchlist) => {
+    const nextProvider = watchlist?.provider || ""
+    const nextQuery = watchlist?.q || ""
+    setTicker("")
+    setProvider(nextProvider)
+    setSearchQuery(nextQuery)
+    setSearchInput(nextQuery)
+  }
 
-  // Read/Unread state
-  const [readIds, setReadIds] = useState<Set<number>>(new Set())
+  const {
+    activeWatchlist,
+    activeWatchlistId,
+    closeContextMenu,
+    contextMenu,
+    customWatchlists,
+    handleContextDelete,
+    handleCreateWatchlist,
+    handleFinishRename,
+    handleStartRename,
+    handleWatchlistContextMenu,
+    isCreatingWatchlist,
+    newWatchlistName,
+    renameValue,
+    renamingWatchlistId,
+    selectWatchlist,
+    selectedTickers,
+    setIsCreatingWatchlist,
+    setNewWatchlistName,
+    setRenameValue,
+    setRenamingWatchlistId,
+    toggleTickerSelection,
+  } = useWatchlists({
+    onSelectWatchlist: syncFiltersToWatchlist,
+  })
 
-  const [pendingNewItems, setPendingNewItems] = useState<NewsItem[]>([])
+  const {
+    error,
+    feedContainerRef,
+    globalTrackedIds,
+    items,
+    loadMore,
+    loadPendingArticles,
+    loading,
+    loadingMore,
+    nextCursor,
+    pendingNewItems,
+    tickers,
+    totalCount,
+    triggerRefresh,
+  } = useNewsFeed({
+    activeWatchlist,
+    activeWatchlistId,
+    provider,
+    searchQuery,
+    ticker,
+  })
 
-  const [loading, setLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  
-  const [mounted, setMounted] = useState(false)
-  const feedGenerationRef = useRef(0)
-  const feedContainerRef = useRef<HTMLElement | null>(null)
-  const refreshReasonRef = useRef<"auto" | "manual">("manual")
-  const itemsRef = useRef<NewsItem[]>([])
-  const pendingNewItemsRef = useRef<NewsItem[]>([])
-  const lastQueryKeyRef = useRef("")
-  const lastAutoRefreshAtRef = useRef(0)
+  const {
+    addReadIds,
+    expandedIds,
+    markAsReadAndOpen,
+    markReadByQuery,
+    mounted,
+    readIds,
+    setViewMode,
+    toggleRead,
+    toggleSummary,
+    trackedUnreadItems,
+    unreadCount,
+    viewMode,
+  } = useFeedPreferences({
+    globalTrackedIds,
+    items,
+    pendingNewItems,
+    totalCount,
+  })
+
   const {
     alertIncludeAllNews,
     activePushScopeCount,
@@ -96,498 +111,15 @@ export default function Page() {
     mounted,
   })
 
-  // Load state from local storage on mount
-  useEffect(() => {
-    try {
-      const storedRead = localStorage.getItem("readNewsIds")
-      if (storedRead) {
-        const parsed = JSON.parse(storedRead)
-        if (Array.isArray(parsed)) {
-          const validIds = parsed.filter((id): id is number => Number.isInteger(id))
-          setReadIds(trimIdSet(new Set(validIds), MAX_PERSISTED_READ_IDS))
-        }
-      }
-      
-      const storedWatchlists = localStorage.getItem("customWatchlists")
-      if (storedWatchlists) {
-        const parsed = JSON.parse(storedWatchlists)
-        if (Array.isArray(parsed)) {
-          const normalized = parsed
-            .filter((item): item is Partial<Watchlist> & { id: unknown; name: unknown } => (
-              typeof item === "object" && item !== null && "id" in item && "name" in item
-            ))
-            .map((item) => ({
-              id: String(item.id),
-              name: String(item.name),
-              provider:
-                typeof item.provider === "string" && item.provider.trim().length > 0
-                  ? item.provider.trim()
-                  : undefined,
-              q:
-                typeof item.q === "string" && item.q.trim().length > 0
-                  ? item.q.trim()
-                  : undefined,
-              tickers: Array.isArray(item.tickers)
-                ? item.tickers.filter((symbol): symbol is string => typeof symbol === "string" && symbol.length > 0)
-                : undefined,
-            }))
-          setCustomWatchlists(normalized)
-        }
-      }
-
-      const storedViewMode = localStorage.getItem("newsViewMode")
-      if (storedViewMode === "list" || storedViewMode === "full") {
-        setViewMode(storedViewMode)
-      }
-    } catch (e) {
-      console.error("Failed to parse local storage", e)
-    } finally {
-      setMounted(true)
-    }
-  }, [])
-
-  // Save custom watchlists
-  useEffect(() => {
-    persistJson("customWatchlists", customWatchlists)
-  }, [customWatchlists])
-
-  useEffect(() => {
-    itemsRef.current = items
-  }, [items])
-
-  useEffect(() => {
-    pendingNewItemsRef.current = pendingNewItems
-  }, [pendingNewItems])
-
-  const buildCurrentNewsRequest = (
-    overrides: Partial<Parameters<typeof fetchNews>[0]> = {}
-  ): Parameters<typeof fetchNews>[0] => {
-    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(
-      activeWatchlist,
-      activeWatchlistId,
-      ticker
-    )
-    return {
-      tickers: fetchTickers,
-      provider: provider || undefined,
-      includeUnmappedFromProvider: includeGeneralFromProvider,
-      q: searchQuery || undefined,
-      ...overrides,
-    }
-  }
-
-  const syncFiltersToWatchlist = (watchlist?: Watchlist) => {
-    const nextQuery = watchlist?.q || ""
-    setTicker("")
-    setProvider(watchlist?.provider || "")
-    setSearchQuery(nextQuery)
-    setSearchInput(nextQuery)
-  }
-
-  const selectWatchlist = (watchlistId: string, watchlist?: Watchlist) => {
-    setActiveWatchlistId(watchlistId)
-    syncFiltersToWatchlist(watchlist)
-  }
-
   const handleTogglePushScope = (watchlistId: string, e?: MouseEvent) => {
     e?.preventDefault()
     e?.stopPropagation()
     togglePushScope(watchlistId)
   }
 
-  const triggerRefresh = (reason: "auto" | "manual") => {
-    refreshReasonRef.current = reason
-    setRefreshTick((prev) => prev + 1)
-  }
-
-  // Save state to local storage when changed
-  useEffect(() => {
-    persistJson("readNewsIds", Array.from(readIds))
-  }, [readIds])
-
-  useEffect(() => {
-    persistValue("newsViewMode", viewMode)
-  }, [viewMode])
-
-  // Fetch tickers once
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchTickers(controller.signal)
-      .then((data) => setTickers(data.items))
-      .catch(() => setTickers([]))
-    return () => controller.abort()
-  }, [])
-
-  // Auto-refresh feed while tab is visible.
-  useEffect(() => {
-    if (!mounted) return
-
-    let timer: ReturnType<typeof setInterval> | null = null
-
-    const refreshNow = () => {
-      const now = Date.now()
-      if (now - lastAutoRefreshAtRef.current < AUTO_REFRESH_DEDUPE_MS) {
-        return
-      }
-      lastAutoRefreshAtRef.current = now
-      triggerRefresh("auto")
-    }
-    const startTimer = () => {
-      if (timer !== null) return
-      timer = setInterval(refreshNow, AUTO_REFRESH_MS)
-    }
-    const stopTimer = () => {
-      if (timer === null) return
-      clearInterval(timer)
-      timer = null
-    }
-
-    const onVisibilityChange = () => {
-      const visible = document.visibilityState === "visible"
-      if (visible) {
-        refreshNow()
-        startTimer()
-      } else {
-        stopTimer()
-      }
-    }
-
-    const onWindowFocus = () => {
-      refreshNow()
-    }
-
-    if (document.visibilityState === "visible") {
-      startTimer()
-    }
-
-    document.addEventListener("visibilitychange", onVisibilityChange)
-    window.addEventListener("focus", onWindowFocus)
-
-    return () => {
-      stopTimer()
-      document.removeEventListener("visibilitychange", onVisibilityChange)
-      window.removeEventListener("focus", onWindowFocus)
-    }
-  }, [mounted])
-
-  useEffect(() => {
-    if (!mounted) return
-    if (!("serviceWorker" in navigator)) return
-
-    const onMessage = (event: MessageEvent) => {
-      const payload = event.data
-      if (!payload || typeof payload !== "object") return
-
-      if (payload.type === "push-notification-click") {
-        // User explicitly clicked the notification — wants to see content
-        triggerRefresh("manual")
-        return
-      }
-
-      if (payload.type === "push-notification") {
-        // Determine if user is scrolled deep in the feed
-        const feedEl = feedContainerRef.current
-        const scrolledDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
-        // Scrolled deep → buffer into pending banner; at top → update inline
-        triggerRefresh(scrolledDeep ? "auto" : "manual")
-      }
-    }
-
-    navigator.serviceWorker.addEventListener("message", onMessage)
-    return () => {
-      navigator.serviceWorker.removeEventListener("message", onMessage)
-    }
-  }, [mounted])
-
-  // Fetch news when filters change
-  useEffect(() => {
-    const queryKey = JSON.stringify({
-      watchlistId: activeWatchlistId,
-      watchlistTickers: [...(activeWatchlist?.tickers || [])].sort(),
-      ticker,
-      provider,
-      searchQuery,
-    })
-    const sameQueryAsPrevious = lastQueryKeyRef.current === queryKey
-    const refreshReason = refreshReasonRef.current
-    refreshReasonRef.current = "manual"
-
-    const feedEl = feedContainerRef.current
-    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
-    const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
-
-    // When user is scrolled deep, fetch in the background and buffer new items
-    // instead of updating the feed directly.  We snapshot the current generation
-    // WITHOUT incrementing it so that an in-flight loadMore is not invalidated.
-    if (isAutoRefresh && isReadingDeep) {
-      const bgGeneration = feedGenerationRef.current
-      const controller = new AbortController()
-      fetchNews(buildCurrentNewsRequest({
-        includeGlobalSummary: true,
-        limit: 40,
-        signal: controller.signal,
-      }))
-        .then((data) => {
-          // Discard if a filter change or manual refresh superseded this background fetch.
-          if (bgGeneration !== feedGenerationRef.current) return
-          if (data.global_summary) {
-            setGlobalTrackedIds(data.global_summary.tracked_ids)
-            setTotalCount(data.global_summary.total)
-          }
-          const fetchedItems = data.items
-          const newOnes = dedupeById(itemsRef.current, fetchedItems)
-          const freshOnes = dedupeById(pendingNewItemsRef.current, newOnes)
-          if (freshOnes.length > 0) {
-            setPendingNewItems((prev) => {
-              const uniqueFresh = dedupeById(prev, freshOnes)
-              return uniqueFresh.length > 0 ? [...uniqueFresh, ...prev] : prev
-            })
-          }
-        })
-        .catch(() => {}) // Silently ignore background fetch errors
-      return () => controller.abort()
-    }
-
-    // Query changed (filter/watchlist switch) — discard stale pending items immediately.
-    if (!sameQueryAsPrevious) {
-      setPendingNewItems([])
-    }
-
-    lastQueryKeyRef.current = queryKey
-    const controller = new AbortController()
-    const showLoading = !isAutoRefresh
-    if (showLoading) {
-      setLoading(true)
-    }
-    setError(null)
-
-    const requestGeneration = ++feedGenerationRef.current
-
-    fetchNews(buildCurrentNewsRequest({
-      includeGlobalSummary: true,
-      limit: 40,
-      signal: controller.signal,
-    }))
-      .then((data) => {
-        if (requestGeneration !== feedGenerationRef.current) return
-        if (data.global_summary) {
-          setGlobalTrackedIds(data.global_summary.tracked_ids)
-          setTotalCount(data.global_summary.total)
-        }
-        const fetchedItems = data.items
-        // Refresh succeeded — safe to clear pending banner.
-        setPendingNewItems([])
-        const autoRefreshNewOnes = isAutoRefresh
-          ? dedupeById(itemsRef.current, fetchedItems)
-          : []
-        if (isAutoRefresh && itemsRef.current.length > data.items.length) {
-          // Keep previously loaded pages; prepend only genuinely new top stories.
-          setItems((prev) => {
-            const prepend = dedupeById(prev, fetchedItems)
-            return prepend.length > 0 ? [...prepend, ...prev] : prev
-          })
-          setNextCursor((prev) => prev ?? data.next_cursor)
-          return
-        }
-        setItems(fetchedItems)
-        setNextCursor(data.next_cursor)
-      })
-      .catch((err: unknown) => {
-        if (requestGeneration !== feedGenerationRef.current) return
-        if (err instanceof DOMException && err.name === "AbortError") return
-        const message = err instanceof Error ? err.message : "Failed to load feed"
-        setError(message)
-      })
-      .finally(() => {
-        if (showLoading && requestGeneration === feedGenerationRef.current) {
-          setLoading(false)
-        }
-      })
-
-    return () => controller.abort()
-  }, [
-    ticker,
-    provider,
-    searchQuery,
-    activeWatchlist,
-    activeWatchlistId,
-    refreshTick,
-  ])
-
   const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSearchQuery(searchInput.trim())
-  }
-
-  const loadMore = async () => {
-    if (!nextCursor || loadingMore) return
-
-    setLoadingMore(true)
-    setError(null)
-    const requestGeneration = feedGenerationRef.current
-
-    try {
-      const data = await fetchNews(buildCurrentNewsRequest({
-        limit: 40,
-        cursor: nextCursor,
-      }))
-      if (requestGeneration !== feedGenerationRef.current) return
-      const fetchedItems = data.items
-      setItems((prev) => {
-        const append = dedupeById(prev, fetchedItems)
-        return append.length > 0 ? [...prev, ...append] : prev
-      })
-      setNextCursor(data.next_cursor)
-    } catch (err: unknown) {
-      if (requestGeneration !== feedGenerationRef.current) return
-      const message = err instanceof Error ? err.message : "Failed to load more"
-      setError(message)
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
-  const loadPendingArticles = () => {
-    setItems((prev) => {
-      const newOnes = dedupeById(prev, pendingNewItems)
-      return newOnes.length > 0 ? [...newOnes, ...prev] : prev
-    })
-    setPendingNewItems([])
-    feedContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
-  }
-
-  const toggleRead = (id: number, e?: MouseEvent) => {
-    if (e) {
-      e.stopPropagation()
-      e.preventDefault()
-    }
-    setReadIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-    })
-  }
-
-  const markAsReadAndOpen = (item: NewsItem, e: MouseEvent) => {
-    e.stopPropagation()
-    const safeUrl = toSafeExternalUrl(item.url)
-    if (!safeUrl) {
-      e.preventDefault()
-      return
-    }
-    setReadIds(prev => {
-      const next = new Set(prev)
-      next.add(item.id)
-      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-    })
-  }
-
-  const toggleSummary = (item: NewsItem) => {
-    // Mark as read when expanded
-    setReadIds(prev => {
-      const next = new Set(prev)
-      next.add(item.id)
-      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-    })
-
-    if (viewMode === "full") return
-
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(item.id)) next.delete(item.id)
-      else next.add(item.id)
-      return next
-    })
-  }
-
-  const trackedUnreadItems = useMemo(
-    () => mergeUniqueNewsItems(items, pendingNewItems),
-    [items, pendingNewItems]
-  )
-
-  const trackedUnreadIds = useMemo(
-    () => mergeUniqueIds(
-      items.map((item) => item.id),
-      pendingNewItems.map((item) => item.id),
-      globalTrackedIds
-    ),
-    [items, pendingNewItems, globalTrackedIds]
-  )
-
-  // Count read IDs verified against our tracked window, plus reads beyond the
-  // tracked window (e.g. from bulk "Mark All Read" via the /news/ids endpoint).
-  // Untracked reads are capped at the number of articles beyond the window to
-  // avoid stale localStorage IDs inflating the count.
-  const unreadCount = useMemo(() => {
-    let validReadCount = 0
-    for (const id of trackedUnreadIds) {
-      if (readIds.has(id)) validReadCount++
-    }
-    if (totalCount > 0) {
-      const untrackedReads = readIds.size - validReadCount
-      const untrackedArticles = Math.max(0, totalCount - trackedUnreadIds.length)
-      const totalReads = validReadCount + Math.min(untrackedReads, untrackedArticles)
-      return Math.max(0, totalCount - totalReads)
-    }
-    return trackedUnreadIds.length - validReadCount
-  }, [trackedUnreadIds, readIds, totalCount])
-
-  const handleCreateWatchlist = (e: FormEvent) => {
-    e.preventDefault()
-    if (!newWatchlistName.trim() || selectedTickers.size === 0) return
-
-    const newWl: Watchlist = {
-      id: createWatchlistId(),
-      name: newWatchlistName.trim(),
-      tickers: Array.from(selectedTickers)
-    }
-
-    setCustomWatchlists(prev => [...prev, newWl])
-    setNewWatchlistName("")
-    setSelectedTickers(new Set())
-    setIsCreatingWatchlist(false)
-    selectWatchlist(newWl.id, newWl)
-  }
-
-  const handleDeleteWatchlist = (id: string) => {
-    setCustomWatchlists(prev => prev.filter(w => w.id !== id))
-    if (activeWatchlistId === id) {
-      selectWatchlist("all")
-    }
-  }
-
-  const toggleTickerSelection = (symbol: string) => {
-    setSelectedTickers(prev => {
-      const next = new Set(prev)
-      if (next.has(symbol)) next.delete(symbol)
-      else next.add(symbol)
-      return next
-    })
-  }
-
-  // Context menu handlers
-  const handleWatchlistContextMenu = (e: MouseEvent, wlId: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenu({ watchlistId: wlId, x: e.clientX, y: e.clientY })
-  }
-
-  const closeContextMenu = () => setContextMenu(null)
-
-  const markReadByQuery = async (params: {
-    tickers?: string[]
-    provider?: string
-    includeUnmappedFromProvider?: string
-    q?: string
-  }) => {
-    await markReadIdsByQuery({
-      params,
-      fetchIds: fetchNewsIds,
-      setReadIds,
-      pageSize: NEWS_IDS_PAGE_SIZE,
-      maxPersistedIds: MAX_PERSISTED_READ_IDS,
-    })
   }
 
   const handleMarkAllRead = (wlId: string) => {
@@ -599,11 +131,7 @@ export default function Page() {
       markReadByQuery({ includeUnmappedFromProvider: "Business Wire" })
         .catch(() => {
           // Fallback: mark only tracked items if the fetch fails.
-          setReadIds(prev => {
-            const next = new Set(prev)
-            trackedUnreadItems.forEach(i => next.add(i.id))
-            return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-          })
+          addReadIds(trackedUnreadItems.map((item) => item.id))
         })
       return
     }
@@ -611,7 +139,7 @@ export default function Page() {
     const wl = customWatchlists.find(w => w.id === wlId)
     if (!wl) return
     const params = {
-      tickers: wl.tickers && wl.tickers.length > 0 ? wl.tickers : undefined,
+      tickers: wl.tickers.length > 0 ? wl.tickers : undefined,
       provider: wl.provider,
       q: wl.q,
     }
@@ -623,241 +151,43 @@ export default function Page() {
         const matchingIds = trackedUnreadItems
           .filter((item) => watchlistMatchesItem(item, wl))
           .map((item) => item.id)
-        setReadIds(prev => {
-          const next = new Set(prev)
-          matchingIds.forEach(id => next.add(id))
-          return trimIdSet(next, MAX_PERSISTED_READ_IDS)
-        })
+        addReadIds(matchingIds)
       })
   }
 
-  const handleStartRename = (wlId: string) => {
-    const wl = customWatchlists.find(w => w.id === wlId)
-    if (!wl) return
-    setRenamingWatchlistId(wlId)
-    setRenameValue(wl.name)
-    closeContextMenu()
-  }
-
-  const handleFinishRename = () => {
-    if (renamingWatchlistId && renameValue.trim()) {
-      setCustomWatchlists(prev =>
-        prev.map(w => w.id === renamingWatchlistId ? { ...w, name: renameValue.trim() } : w)
-      )
-    }
-    setRenamingWatchlistId(null)
-    setRenameValue("")
-  }
-
-  const handleContextDelete = (wlId: string) => {
-    handleDeleteWatchlist(wlId)
-    closeContextMenu()
-  }
-
-  // Close context menu on outside click or Escape
-  useEffect(() => {
-    if (!contextMenu) return
-    const handleClick = () => closeContextMenu()
-    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeContextMenu() }
-    document.addEventListener("click", handleClick)
-    document.addEventListener("contextmenu", handleClick)
-    document.addEventListener("keydown", handleKey)
-    return () => {
-      document.removeEventListener("click", handleClick)
-      document.removeEventListener("contextmenu", handleClick)
-      document.removeEventListener("keydown", handleKey)
-    }
-  }, [contextMenu])
-
   return (
     <div className="deck-root">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="brand-header">
-          <h1>CEF News</h1>
-          <p>MARKET DATA</p>
-        </div>
-
-        <div
-          className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
-          onClick={() => selectWatchlist("all")}
-          onContextMenu={(e) => handleWatchlistContextMenu(e, "all")}
-          style={{ fontWeight: "bold", fontSize: "1.1rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-        >
-          <span>All News</span>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <button
-              className="icon-button"
-              title={
-                alertIncludeAllNews
-                  ? "Disable push notifications for All News"
-                  : "Enable push notifications for All News"
-              }
-              onClick={(e) => handleTogglePushScope("all", e)}
-              style={{
-                padding: "2px",
-                color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-secondary)",
-              }}
-            >
-              <BellIcon active={alertIncludeAllNews} />
-            </button>
-            {unreadCount > 0 && (
-              <span style={{ 
-                background: activeWatchlistId === "all" ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
-                color: activeWatchlistId === "all" ? "white" : "var(--text-secondary)", 
-                fontSize: "0.75rem", 
-                padding: "2px 8px", 
-                borderRadius: "12px", 
-                fontWeight: "normal" 
-              }}>
-                {unreadCount}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Watchlists</h2>
-          {!isCreatingWatchlist && (
-            <button 
-              className="icon-button" 
-              title="New Watchlist"
-              onClick={() => setIsCreatingWatchlist(true)}
-              style={{ padding: "4px", fontSize: "1.2rem" }}
-            >
-              +
-            </button>
-          )}
-        </div>
-        
-        <div>
-          {customWatchlists.map(wl => {
-            const wlUnreadCount = trackedUnreadItems.filter(
-              (item) => !readIds.has(item.id) && watchlistMatchesItem(item, wl)
-            ).length;
-            
-            return (
-              <div 
-                key={wl.id} 
-                className={`watchlist-item ${activeWatchlistId === wl.id ? "active" : ""}`}
-                onClick={() => selectWatchlist(wl.id, wl)}
-                onContextMenu={(e) => handleWatchlistContextMenu(e, wl.id)}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
-              >
-                {renamingWatchlistId === wl.id ? (
-                  <input
-                    autoFocus
-                    className="rename-input"
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onFocus={(e) => e.target.select()}
-                    onBlur={handleFinishRename}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleFinishRename()
-                      if (e.key === "Escape") { setRenamingWatchlistId(null); setRenameValue("") }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ flex: 1, fontSize: "0.9rem", padding: "2px 4px" }}
-                  />
-                ) : (
-                  <span>{wl.name}</span>
-                )}
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <button
-                    className="icon-button"
-                    title={
-                      isPushScopeEnabled(wl.id)
-                        ? `Disable push notifications for ${wl.name}`
-                        : `Enable push notifications for ${wl.name}`
-                    }
-                    onClick={(e) => handleTogglePushScope(wl.id, e)}
-                    style={{
-                      padding: "2px",
-                      color: isPushScopeEnabled(wl.id) ? "var(--accent-blue)" : "var(--text-secondary)",
-                    }}
-                  >
-                    <BellIcon active={isPushScopeEnabled(wl.id)} />
-                  </button>
-                  {wlUnreadCount > 0 && (
-                    <span style={{ 
-                      background: activeWatchlistId === wl.id ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)", 
-                      color: activeWatchlistId === wl.id ? "white" : "var(--text-secondary)", 
-                      fontSize: "0.75rem", 
-                      padding: "2px 8px", 
-                      borderRadius: "12px", 
-                      fontWeight: "normal" 
-                    }}>
-                      {wlUnreadCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          {customWatchlists.length === 0 && !isCreatingWatchlist && (
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", padding: "0 0.5rem" }}>
-              No custom watchlists yet.
-            </p>
-          )}
-        </div>
-
-        {isCreatingWatchlist && (
-          <form className="create-watchlist-form" onSubmit={handleCreateWatchlist} style={{ marginTop: "1rem", padding: "0.5rem", background: "var(--bg-hover)", borderRadius: "4px" }}>
-            <input 
-              autoFocus
-              placeholder="Watchlist Name" 
-              value={newWatchlistName}
-              onChange={e => setNewWatchlistName(e.target.value)}
-              style={{ width: "100%", marginBottom: "0.5rem" }}
-            />
-            <div className="ticker-selector" style={{ maxHeight: "150px", overflowY: "auto", marginBottom: "0.5rem", border: "1px solid var(--border-color)", borderRadius: "4px", padding: "4px" }}>
-              {tickers.map(t => (
-                <label key={t.symbol} style={{ display: "block", fontSize: "0.85rem", cursor: "pointer", padding: "2px 0" }}>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedTickers.has(t.symbol)} 
-                    onChange={() => toggleTickerSelection(t.symbol)} 
-                    style={{ marginRight: "6px" }}
-                  />
-                  {t.symbol}
-                </label>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button type="submit" className="primary" style={{ flex: 1, padding: "4px" }} disabled={!newWatchlistName.trim() || selectedTickers.size === 0}>Save</button>
-              <button type="button" onClick={() => setIsCreatingWatchlist(false)} style={{ flex: 1, padding: "4px" }}>Cancel</button>
-            </div>
-          </form>
-        )}
-
-        {/* Context Menu */}
-        {contextMenu && (
-          <div
-            className="context-menu"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="context-menu-item" onClick={() => { togglePushScope(contextMenu.watchlistId); closeContextMenu() }}>
-              {isPushScopeEnabled(contextMenu.watchlistId) ? "Disable Push" : "Enable Push"}
-            </div>
-            <div className="context-menu-separator" />
-            <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
-              Mark All Items as Read
-            </div>
-            {contextMenu.watchlistId !== "all" && (
-              <>
-                <div className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
-                  Rename
-                </div>
-                <div className="context-menu-separator" />
-                <div className="context-menu-item delete" onClick={() => handleContextDelete(contextMenu.watchlistId)}>
-                  Delete
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </aside>
+      <WatchlistSidebar
+        activeWatchlistId={activeWatchlistId}
+        alertIncludeAllNews={alertIncludeAllNews}
+        closeContextMenu={closeContextMenu}
+        contextMenu={contextMenu}
+        customWatchlists={customWatchlists}
+        handleContextDelete={handleContextDelete}
+        handleCreateWatchlist={handleCreateWatchlist}
+        handleFinishRename={handleFinishRename}
+        handleMarkAllRead={handleMarkAllRead}
+        handleStartRename={handleStartRename}
+        handleTogglePushScope={handleTogglePushScope}
+        handleWatchlistContextMenu={handleWatchlistContextMenu}
+        isCreatingWatchlist={isCreatingWatchlist}
+        isPushScopeEnabled={isPushScopeEnabled}
+        newWatchlistName={newWatchlistName}
+        readIds={readIds}
+        renameValue={renameValue}
+        renamingWatchlistId={renamingWatchlistId}
+        selectWatchlist={selectWatchlist}
+        selectedTickers={selectedTickers}
+        setIsCreatingWatchlist={setIsCreatingWatchlist}
+        setNewWatchlistName={setNewWatchlistName}
+        setRenameValue={setRenameValue}
+        setRenamingWatchlistId={setRenamingWatchlistId}
+        tickers={tickers}
+        togglePushScope={togglePushScope}
+        toggleTickerSelection={toggleTickerSelection}
+        trackedUnreadItems={trackedUnreadItems}
+        unreadCount={unreadCount}
+      />
 
       {/* Main Content */}
       <main className="main-content">
@@ -969,100 +299,22 @@ export default function Page() {
           )}
         </section>
 
-        <section className="feed-container" ref={feedContainerRef}>
-          {pendingNewItems.length > 0 && (
-            <div className="new-articles-banner" onClick={loadPendingArticles}>
-              {pendingNewItems.length} new article{pendingNewItems.length !== 1 ? "s" : ""} available — click to load
-            </div>
-          )}
-          {!loading && items.length === 0 && (
-            <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
-              <p style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>No news found</p>
-              <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>Try adjusting your filters or switching watchlists.</p>
-            </div>
-          )}
-          {items.map((item) => {
-            const isRead = readIds.has(item.id)
-            const isExpanded = viewMode === "full" || expandedIds.has(item.id)
-            const safeItemUrl = toSafeExternalUrl(item.url)
-             
-            return (
-              <article 
-                key={item.id} 
-                className={`feed-row-wrapper ${isRead ? "read" : "unread"}`}
-              >
-                <div 
-                  className={`feed-row`}
-                  onClick={() => toggleSummary(item)}
-                >
-                  <div className="main-col">
-                    <div className="headline-content">
-                      <div className="headline">
-                        <a 
-                          href={safeItemUrl ?? "#"}
-                          target="_blank" 
-                          rel="noreferrer" 
-                          aria-disabled={!safeItemUrl}
-                          onClick={(e) => markAsReadAndOpen(item, e)}
-                        >
-                          {item.title}
-                        </a>
-                      </div>
-                    </div>
-                    <div className="metadata-row">
-                      <div className="source-and-tickers">
-                        <span className="source" title={item.provider}>{item.provider}</span>
-                        <div className="ticker-rack">
-                          {item.tickers && item.tickers.length > 0 ? (
-                            item.tickers.map(t => (
-                              <span key={t} className="ticker-pill">{t}</span>
-                            ))
-                          ) : (
-                            <span className="ticker-pill">GENERAL</span>
-                          )}
-                        </div>
-                      </div>
-                      <span className="stamp">
-                        {formatDetailedDate(item.published_at)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="actions">
-                    <button 
-                      className="icon-button" 
-                      title={isRead ? "Mark as unread" : "Mark as read"}
-                      onClick={(e) => toggleRead(item.id, e)}
-                    >
-                      <CheckIcon />
-                    </button>
-                  </div>
-                </div>
-
-                {isExpanded && (
-                  <div className="feed-row-details">
-                    {item.summary && (
-                      <div className="summary-text">{item.summary}</div>
-                    )}
-                    <p>
-                      <strong>Seen by system:</strong> {formatDetailedDate(item.first_seen_at)}
-                    </p>
-                    <p>
-                      <strong>Alert sent:</strong>{" "}
-                      {item.alert_sent_at ? formatDetailedDate(item.alert_sent_at) : "Pending / not sent"}
-                    </p>
-                  </div>
-                )}
-              </article>
-            )
-          })}
-
-          <div className="load-more-container">
-            <button className="primary" disabled={loading || !nextCursor || loadingMore} onClick={loadMore}>
-              {loadingMore ? "Loading..." : nextCursor ? "Load More" : "End of results"}
-            </button>
-          </div>
-        </section>
+        <NewsFeedSection
+          expandedIds={expandedIds}
+          feedContainerRef={feedContainerRef}
+          items={items}
+          loadMore={loadMore}
+          loadPendingArticles={loadPendingArticles}
+          loading={loading}
+          loadingMore={loadingMore}
+          markAsReadAndOpen={markAsReadAndOpen}
+          nextCursor={nextCursor}
+          pendingNewItems={pendingNewItems}
+          readIds={readIds}
+          toggleRead={toggleRead}
+          toggleSummary={toggleSummary}
+          viewMode={viewMode}
+        />
       </main>
     </div>
   )

@@ -8,12 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "CEF News Feed"
-    app_env: str = "development"
     api_prefix: str = "/api/v1"
-
-    backend_host: str = "127.0.0.1"
-    backend_port: int = 8000
 
     # Local-first default. Docker compose overrides this with the container hostname (`db`).
     database_url: str = "postgresql+psycopg://cef:cef@localhost:5433/cef_news"

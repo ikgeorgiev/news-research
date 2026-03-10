@@ -82,7 +82,7 @@ describe("usePushSubscription", () => {
     expect(result.current.pushError).toBe("Browser notification permission denied")
   })
 
-  it("preserves stored custom scope ids until watchlists hydrate", async () => {
+  it("preserves legacy provider/query scope filters when watchlists hydrate", async () => {
     type HookProps = {
       customWatchlists: Watchlist[]
       mounted: boolean
@@ -121,28 +121,27 @@ describe("usePushSubscription", () => {
       customWatchlists: [
         {
           id: "wl-1",
-          name: "Watchlist 1",
+          name: "Legacy Provider",
           provider: "Business Wire",
           q: "rights offering",
-          tickers: ["GOF"],
+          tickers: [],
         },
       ],
       mounted: true,
     })
 
     await waitFor(() =>
-      expect(mockedPushApi.syncPushScopes).toHaveBeenCalledWith({
-        include_all_news: false,
-        watchlists: [
-          {
-            id: "wl-1",
-            name: "Watchlist 1",
-            tickers: ["GOF"],
-            provider: "Business Wire",
-            q: "rights offering",
-          },
-        ],
-      })
+        expect(mockedPushApi.syncPushScopes).toHaveBeenCalledWith({
+          include_all_news: false,
+          watchlists: [
+            {
+              id: "wl-1",
+              name: "Legacy Provider",
+              provider: "Business Wire",
+              q: "rights offering",
+            },
+          ],
+        })
     )
     expect(result.current.isPushScopeEnabled("wl-1")).toBe(true)
     expect(localStorage.getItem("alertWatchlistIds")).toBe(JSON.stringify(["wl-1"]))

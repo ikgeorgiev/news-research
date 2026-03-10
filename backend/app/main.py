@@ -12,19 +12,19 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.article_filters import build_article_query
-from app.config import get_settings
-from app.database import db_health_check, get_db, get_session_factory, init_db
-from app.ingestion import (
-    PAGE_FETCH_CONFIGS,
+from app.article_maintenance import (
     dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
     purge_token_only_articles,
     remap_source_articles,
-    sync_runtime_state,
 )
+from app.config import get_settings
+from app.database import db_health_check, get_db, get_session_factory, init_db
+from app.ingestion import sync_runtime_state
 from app.monitoring import observe_http_request, render_metrics
 from app.models import Article, ArticleTicker, IngestionRun, PushSubscription, RawFeedItem, Source, Ticker
 from app.push_alerts import hash_manage_token, normalize_scopes, push_runtime_enabled, seed_last_notified_watermarks
+from app.sources import PAGE_FETCH_CONFIGS
 from app.schemas import (
     DedupeResponse,
     IngestionRunItem,
@@ -49,7 +49,7 @@ from app.schemas import (
 )
 from app.scheduler import IngestionScheduler
 from app.ticker_loader import load_tickers_from_csv
-from app.query_utils import contains_literal_pattern, iter_chunks, prefix_literal_pattern
+from app.query_utils import iter_chunks, prefix_literal_pattern
 from app.utils import clean_summary_text, decode_cursor, encode_cursor
 
 logging.basicConfig(level=logging.INFO)
@@ -103,6 +103,20 @@ def _parse_aggregated_symbols(value: object) -> list[str]:
     return unique
 
 
+def _apply_news_cursor(query, *, cursor: str | None = None):
+    sort_key = _article_sort_key_expr()
+    cursor_payload = decode_cursor(cursor) if cursor else None
+    if cursor_payload:
+        cursor_published, cursor_id = cursor_payload
+        query = query.where(
+            or_(
+                sort_key < cursor_published,
+                and_(sort_key == cursor_published, Article.id < cursor_id),
+            )
+        )
+    return query, sort_key
+
+
 def _build_news_page_subquery(
     db: Session,
     *,
@@ -129,16 +143,7 @@ def _build_news_page_subquery(
         from_=from_,
         to=to,
     )
-    sort_key = _article_sort_key_expr()
-    cursor_payload = decode_cursor(cursor) if cursor else None
-    if cursor_payload:
-        cursor_published, cursor_id = cursor_payload
-        query = query.where(
-            or_(
-                sort_key < cursor_published,
-                and_(sort_key == cursor_published, Article.id < cursor_id),
-            )
-        )
+    query, sort_key = _apply_news_cursor(query, cursor=cursor)
     if article_id is not None:
         query = query.where(Article.id == article_id)
     query = query.with_only_columns(
@@ -173,6 +178,28 @@ def _serialize_news_item(row: object) -> NewsItem:
         alert_sent_at=row.alert_sent_at,
         tickers=_parse_aggregated_symbols(row.tickers),
         dedupe_group=row.dedupe_group,
+    )
+
+
+def _dedupe_response_payload(result: dict[str, int]) -> DedupeResponse:
+    return DedupeResponse(
+        scanned_articles=int(result["scanned_articles"]),
+        duplicate_groups=int(result["duplicate_groups"]),
+        merged_articles=int(result["merged_articles"]),
+        raw_items_relinked=int(result["raw_items_relinked"]),
+        ticker_rows_relinked=int(result["ticker_rows_relinked"]),
+        ticker_rows_updated=int(result["ticker_rows_updated"]),
+        ticker_rows_deleted=int(result["ticker_rows_deleted"]),
+    )
+
+
+def _source_remap_response_payload(result: dict[str, int | bool | str]) -> SourceRemapResponse:
+    return SourceRemapResponse(
+        source_code=str(result["source_code"]),
+        processed=int(result["processed"]),
+        articles_with_hits=int(result["articles_with_hits"]),
+        remapped_articles=int(result["remapped_articles"]),
+        only_unmapped=bool(result["only_unmapped"]),
     )
 
 
@@ -578,16 +605,7 @@ def list_news_ids(
         from_=from_,
         to=to,
     )
-    sort_key = _article_sort_key_expr()
-    cursor_payload = decode_cursor(cursor) if cursor else None
-    if cursor_payload:
-        cursor_published, cursor_id = cursor_payload
-        query = query.where(
-            or_(
-                sort_key < cursor_published,
-                and_(sort_key == cursor_published, Article.id < cursor_id),
-            )
-        )
+    query, sort_key = _apply_news_cursor(query, cursor=cursor)
 
     id_query = (
         query.with_only_columns(Article.id, sort_key.label("sort_ts"))
@@ -761,16 +779,7 @@ def admin_ingestion_status(
     dependencies=[Depends(require_admin_api_key)],
 )
 def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
-    result = dedupe_businesswire_url_variants(db)
-    return DedupeResponse(
-        scanned_articles=int(result["scanned_articles"]),
-        duplicate_groups=int(result["duplicate_groups"]),
-        merged_articles=int(result["merged_articles"]),
-        raw_items_relinked=int(result["raw_items_relinked"]),
-        ticker_rows_relinked=int(result["ticker_rows_relinked"]),
-        ticker_rows_updated=int(result["ticker_rows_updated"]),
-        ticker_rows_deleted=int(result["ticker_rows_deleted"]),
-    )
+    return _dedupe_response_payload(dedupe_businesswire_url_variants(db))
 
 
 @app.post(
@@ -779,16 +788,7 @@ def admin_dedupe_businesswire_url_variants(db: Session = Depends(get_db)):
     dependencies=[Depends(require_admin_api_key)],
 )
 def admin_dedupe_by_title(db: Session = Depends(get_db)):
-    result = dedupe_articles_by_title(db)
-    return DedupeResponse(
-        scanned_articles=int(result["scanned_articles"]),
-        duplicate_groups=int(result["duplicate_groups"]),
-        merged_articles=int(result["merged_articles"]),
-        raw_items_relinked=int(result["raw_items_relinked"]),
-        ticker_rows_relinked=int(result["ticker_rows_relinked"]),
-        ticker_rows_updated=int(result["ticker_rows_updated"]),
-        ticker_rows_deleted=int(result["ticker_rows_deleted"]),
-    )
+    return _dedupe_response_payload(dedupe_articles_by_title(db))
 
 
 @app.post(
@@ -842,13 +842,7 @@ def admin_remap_source(
     result = remap_source_articles(
         db, settings, source_code=source_code, limit=limit, only_unmapped=only_unmapped,
     )
-    return SourceRemapResponse(
-        source_code=result["source_code"],
-        processed=int(result["processed"]),
-        articles_with_hits=int(result["articles_with_hits"]),
-        remapped_articles=int(result["remapped_articles"]),
-        only_unmapped=bool(result["only_unmapped"]),
-    )
+    return _source_remap_response_payload(result)
 
 
 @app.post(
@@ -872,13 +866,7 @@ def admin_reload_tickers(
             result = remap_source_articles(
                 db, settings, source_code=code, limit=remap_limit, only_unmapped=True,
             )
-            source_remap_payloads.append(SourceRemapResponse(
-                source_code=result["source_code"],
-                processed=int(result["processed"]),
-                articles_with_hits=int(result["articles_with_hits"]),
-                remapped_articles=int(result["remapped_articles"]),
-                only_unmapped=bool(result["only_unmapped"]),
-            ))
+            source_remap_payloads.append(_source_remap_response_payload(result))
 
     return ReloadTickersResponse(
         loaded=int(ticker_stats["loaded"]),

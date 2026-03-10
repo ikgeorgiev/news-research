@@ -346,10 +346,7 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
     sent = 0
     failed = 0
     deactivated = 0
-    max_consecutive_failures = max(
-        1,
-        int(getattr(settings, "push_max_consecutive_failures", 20) or 20),
-    )
+    max_consecutive_failures = max(1, int(settings.push_max_consecutive_failures or 20))
 
     for subscription in subscriptions:
         scanned += 1

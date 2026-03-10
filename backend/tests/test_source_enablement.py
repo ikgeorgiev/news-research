@@ -98,7 +98,7 @@ def test_run_ingestion_cycle_skips_sources_disabled_in_db(db_session, monkeypatc
             "error": None,
         }
 
-    monkeypatch.setattr("app.ingestion.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_load_tickers)
     monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest_feed)
 
     result = run_ingestion_cycle(db, _settings())
@@ -200,7 +200,7 @@ def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
         }
 
     monkeypatch.setattr("app.ingestion.build_source_feeds", fake_build_source_feeds)
-    monkeypatch.setattr("app.ingestion.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_load_tickers)
     monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest_feed)
     monkeypatch.setattr("app.ingestion._should_run_raw_feed_prune", lambda _interval: False)
 
@@ -220,3 +220,4 @@ def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
         engine.dispose()
         if db_path.exists():
             db_path.unlink()
+

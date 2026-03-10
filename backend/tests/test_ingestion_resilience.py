@@ -10,19 +10,21 @@ from requests.structures import CaseInsensitiveDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.article_ingest import ingest_feed
+from app.article_maintenance import (
+    dedupe_articles_by_title,
+    dedupe_businesswire_url_variants,
+    purge_token_only_articles,
+    remap_source_articles,
+)
 from app.config import Settings
-from app.ingestion import (
+from app.feed_runtime import (
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
     _load_tickers_from_csv_if_changed,
     _update_feed_http_cache,
-    dedupe_articles_by_title,
-    dedupe_businesswire_url_variants,
-    ingest_feed,
-    purge_token_only_articles,
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
-    remap_source_articles,
 )
 from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
 from app.utils import sha256_str
@@ -133,8 +135,8 @@ def test_fetch_feed_with_retries_succeeds_after_transient_failures(monkeypatch):
             raise requests.Timeout("temporary timeout")
         return FakeResponse()
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
-    monkeypatch.setattr("app.ingestion.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
+    monkeypatch.setattr("app.feed_runtime.time.sleep", lambda _seconds: None)
 
     response = _fetch_feed_with_retries(
         feed_url="https://example.com/feed.xml",
@@ -174,8 +176,8 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
             return RateLimitedResponse()
         return OkResponse()
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
-    monkeypatch.setattr("app.ingestion.time.sleep", lambda seconds: slept.append(float(seconds)))
+    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
+    monkeypatch.setattr("app.feed_runtime.time.sleep", lambda seconds: slept.append(float(seconds)))
 
     response = _fetch_feed_with_retries(
         feed_url="https://example.com/feed.xml",
@@ -247,9 +249,10 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
             return FirstResponse()
         return NotModifiedResponse()
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
+    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[]),
     )
 
@@ -304,9 +307,10 @@ def test_ingest_feed_dedupes_raw_feed_rows(db_session, monkeypatch):
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[feed_entry]),
     )
 
@@ -356,8 +360,8 @@ def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure
             raise RuntimeError("transient loader failure")
         return {"loaded": 1, "created": 0, "updated": 0, "unchanged": 1}
 
-    monkeypatch.setattr("app.ingestion.load_tickers_from_csv", fake_loader)
-    monkeypatch.setattr("app.ingestion._tickers_csv_mtime_cache", {})
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_loader)
+    monkeypatch.setattr("app.feed_runtime._tickers_csv_mtime_cache", {})
 
     try:
         with pytest.raises(RuntimeError, match="transient loader failure"):
@@ -406,9 +410,10 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, 
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
     )
     yahoo_run = ingest_feed(
@@ -424,7 +429,7 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, 
     )
 
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[bw_entry]),
     )
     bw_run = ingest_feed(
@@ -502,9 +507,10 @@ def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(db_session,
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
     )
 
@@ -564,9 +570,10 @@ def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(db_se
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[mirror_entry]),
     )
 
@@ -643,9 +650,10 @@ def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(db_ses
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
     )
 
@@ -721,12 +729,13 @@ def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(db_session,
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
     )
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     result = ingest_feed(
         db,
@@ -803,12 +812,13 @@ def test_ingest_feed_exact_url_sub_threshold_hits_still_refresh_existing_article
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
     )
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     result = ingest_feed(
         db,
@@ -876,12 +886,13 @@ def test_ingest_feed_rejected_strict_source_entry_persists_detached_raw_row(
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
     )
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     result = ingest_feed(
         db,
@@ -951,12 +962,13 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[bad_entry]),
     )
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     first = ingest_feed(
         db,
@@ -972,7 +984,7 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
     )
 
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[good_entry]),
     )
 
@@ -1046,15 +1058,16 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_po
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(
             feed={"title": "PR Newswire"},
             entries=[bad_entry, good_entry],
         ),
     )
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     result = ingest_feed(
         db,
@@ -1110,9 +1123,10 @@ def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(db_sessio
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ingestion.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(
-        "app.ingestion.feedparser.parse",
+        "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=entries),
     )
 
@@ -1268,7 +1282,7 @@ def test_ingest_feed_skips_when_feed_is_in_failure_backoff(db_session, monkeypat
         calls["count"] += 1
         raise requests.Timeout("upstream unavailable")
 
-    monkeypatch.setattr("app.ingestion.requests.get", failing_get)
+    monkeypatch.setattr("app.feed_runtime.requests.get", failing_get)
 
     first = ingest_feed(
         db,
@@ -1414,7 +1428,7 @@ def test_purge_token_only_articles_does_not_trust_table_only_fallback(
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     result = purge_token_only_articles(
         db,
@@ -1532,7 +1546,7 @@ def test_purge_token_only_articles_skips_high_confidence_verified_rows(
     db.commit()
 
     monkeypatch.setattr(
-        "app.ingestion._fetch_source_page_html",
+        "app.ticker_extraction._fetch_source_page_html",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("verified entry hits should skip fallback fetch")
         ),
@@ -1605,7 +1619,7 @@ def test_remap_source_articles_unmapped_miss_is_non_destructive(db_session, monk
         fetch_calls["count"] += 1
         return ""
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     result = remap_source_articles(
         db,
@@ -1682,7 +1696,7 @@ def test_remap_source_articles_full_remap_miss_is_non_destructive(db_session, mo
     )
     db.commit()
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
 
     result = remap_source_articles(
         db,
@@ -1780,7 +1794,7 @@ def test_remap_source_articles_full_remap_partial_hits_stay_additive(db_session,
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     result = remap_source_articles(
         db,
@@ -1854,7 +1868,7 @@ def test_remap_source_articles_uses_verified_fallback_after_low_confidence_token
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     result = remap_source_articles(
         db,
@@ -2128,7 +2142,7 @@ def test_purge_token_only_articles_limit_applies_to_distinct_articles(db_session
     )
     db.commit()
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args: "")
 
     result = purge_token_only_articles(
         db,
@@ -2265,7 +2279,7 @@ def test_purge_token_only_articles_pages_past_recent_valid_rows(db_session, monk
             return "<html><body><p>Franklin Universal Trust</p><table><tr><td>FT</td></tr></table></body></html>"
         return ""
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     result = purge_token_only_articles(
         db,
@@ -2329,7 +2343,7 @@ def test_purge_token_only_articles_dry_run_false_detaches_raw_rows(db_session, m
     )
     db.commit()
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", lambda *_args: "")
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args: "")
 
     result = purge_token_only_articles(
         db,
@@ -2440,4 +2454,7 @@ def test_dedupe_articles_by_title_merges_duplicates(db_session):
         select(RawFeedItem).where(RawFeedItem.article_id == winner.id)
     ).all()
     assert len(raw_items) == 2
+
+
+
 

@@ -24,6 +24,14 @@ TRACKING_PARAM_EXACT = {
 }
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
+GENERAL_SOURCE_CODE = "businesswire"
+
+
+def to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 def sha256_str(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()

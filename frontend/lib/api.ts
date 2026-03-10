@@ -10,6 +10,16 @@ type NewsQueryParams = {
   limit?: number
 }
 
+type NewsRequestParams = NewsQueryParams & {
+  includeGlobalSummary?: boolean
+  signal?: AbortSignal
+}
+
+type NewsIdsRequestParams = Omit<NewsQueryParams, "cursor"> & {
+  cursor?: string
+  signal?: AbortSignal
+}
+
 function buildNewsQueryString(params: NewsQueryParams & { includeGlobalSummary?: boolean }): string {
   const query = new URLSearchParams()
   if (params.tickers && params.tickers.length > 0) {
@@ -36,16 +46,7 @@ export async function fetchTickers(signal?: AbortSignal): Promise<TickerResponse
   return response.json()
 }
 
-export async function fetchNews(params: {
-  tickers?: string[]
-  provider?: string
-  includeUnmappedFromProvider?: string
-  includeGlobalSummary?: boolean
-  q?: string
-  cursor?: string | null
-  limit?: number
-  signal?: AbortSignal
-}): Promise<NewsResponse> {
+export async function fetchNews(params: NewsRequestParams): Promise<NewsResponse> {
   const response = await fetch(buildApiUrl(`/api/v1/news?${buildNewsQueryString(params)}`), {
     signal: params.signal,
     cache: "no-store",
@@ -58,15 +59,7 @@ export async function fetchNews(params: {
   return response.json()
 }
 
-export async function fetchNewsIds(params: {
-  tickers?: string[]
-  provider?: string
-  includeUnmappedFromProvider?: string
-  q?: string
-  cursor?: string
-  limit?: number
-  signal?: AbortSignal
-}): Promise<NewsIdsResponse> {
+export async function fetchNewsIds(params: NewsIdsRequestParams): Promise<NewsIdsResponse> {
   const response = await fetch(buildApiUrl(`/api/v1/news/ids?${buildNewsQueryString(params)}`), {
     signal: params.signal,
     cache: "no-store",

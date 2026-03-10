@@ -1,8 +1,9 @@
 import pytest
 
-from app.ingestion import (
+from app.article_ingest import _clamp_label
+from app.sources import PAGE_FETCH_CONFIGS
+from app.ticker_extraction import (
     MIN_PERSIST_CONFIDENCE,
-    PAGE_FETCH_CONFIGS,
     _build_symbol_keywords,
     _extract_entry_tickers,
     _extract_source_fallback_tickers,
@@ -10,12 +11,9 @@ from app.ingestion import (
     _fetch_source_page_html,
     _is_businesswire_article_url,
     _is_source_article_url,
-    _source_page_cache,
-    _clamp_label,
     _should_persist_entry,
+    _source_page_cache,
 )
-
-
 @pytest.fixture()
 def clean_page_cache():
     _source_page_cache.clear()
@@ -170,7 +168,7 @@ def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "BNY Mellon Municipal Bond Closed-End Funds Declare Distributions",
@@ -211,9 +209,9 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
             return timestamps.pop(0)
         return 1000.5
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
-    monkeypatch.setattr("app.ingestion.time.time", fake_time)
-    monkeypatch.setattr("app.ingestion.SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
+    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
+    monkeypatch.setattr("app.ticker_extraction.time.time", fake_time)
+    monkeypatch.setattr("app.ticker_extraction.SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
 
     bw_config = PAGE_FETCH_CONFIGS["businesswire"]
     first = _fetch_source_page_html(
@@ -243,7 +241,7 @@ def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page
         calls["count"] += 1
         raise AssertionError("non-businesswire URL should not be fetched")
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
 
     result = _fetch_source_page_html("https://evil.example.com/news/home/abc", 5, PAGE_FETCH_CONFIGS["businesswire"])
 
@@ -291,7 +289,7 @@ def test_prnewswire_fallback_extracts_table_symbols(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "Invesco Closed-End Funds Declare Dividends",
@@ -326,7 +324,7 @@ def test_prnewswire_fallback_validates_plain_token_from_fetched_body(monkeypatch
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "Distribution update",
@@ -358,7 +356,7 @@ def test_globenewswire_fallback_extracts_exchange_and_table(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "BNY Mellon Funds Declare Distributions",
@@ -393,7 +391,7 @@ def test_prnewswire_fallback_drops_table_hits_without_keyword_support(monkeypatc
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "Generic corporate update",
@@ -416,7 +414,7 @@ def test_source_page_fetch_skips_wrong_host(monkeypatch, clean_page_cache):
         calls["count"] += 1
         raise AssertionError("wrong host should not be fetched")
 
-    monkeypatch.setattr("app.ingestion.requests.get", fake_get)
+    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
 
     config = PAGE_FETCH_CONFIGS["prnewswire"]
     result = _fetch_source_page_html("https://evil.example.com/news/abc", 5, config)
@@ -749,7 +747,7 @@ def test_real_world_asa_page_false_positive_stays_subthreshold(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     sym_kws = _build_symbol_keywords(
         [(1, "ASA", "ASA Gold and Precious Metals Limited", "ASA")]
@@ -784,7 +782,7 @@ def test_keywordless_cef_table_hit_reaches_persist_threshold(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     sym_kws = _build_symbol_keywords(
         [(1, "DNP", "DNP Select Income", "Duff & Phelps Inv Mgmt Co (IL)")]
@@ -824,7 +822,7 @@ def test_noise_wrapped_table_does_not_create_keywordless_table_hit(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     sym_kws = _build_symbol_keywords(
         [(1, "DNP", "DNP Select Income", "Duff & Phelps Inv Mgmt Co (IL)")]
@@ -861,7 +859,7 @@ def test_sidebar_keyword_noise_does_not_validate_token(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     sym_kws = _build_symbol_keywords(
         [(1, "ASA", "ASA Gold and Precious Metals Limited", "ASA")]
@@ -900,7 +898,7 @@ def test_article_header_keywords_still_validate_table_hit(monkeypatch):
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     hits = _extract_source_fallback_tickers(
         "Distribution update",
@@ -978,7 +976,7 @@ def test_businesswire_fallback_preserves_stopword_ticker_with_keywords(monkeypat
         </body></html>
         """
 
-    monkeypatch.setattr("app.ingestion._fetch_source_page_html", fake_fetch)
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
 
     sym_kws = {"USA": frozenset({"liberty", "all-star", "equity"})}
     hits = _extract_source_fallback_tickers(
@@ -995,3 +993,4 @@ def test_businesswire_fallback_preserves_stopword_ticker_with_keywords(monkeypat
     assert "USA" in hits
     assert hits["USA"][0] == "paren"
     assert hits["USA"][1] == 0.75
+

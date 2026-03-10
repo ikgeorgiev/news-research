@@ -75,9 +75,12 @@ export function buildFetchParams(
   activeWatchlist: Watchlist | undefined,
   activeWatchlistId: string,
   ticker: string
-): { fetchTickers: string[] | undefined; includeGeneralFromProvider: string | undefined } {
+): {
+  fetchTickers: string[] | undefined
+  includeGeneralFromProvider: string | undefined
+} {
   let fetchTickers: string[] | undefined = undefined
-  if (activeWatchlist?.tickers && activeWatchlist.tickers.length > 0) {
+  if (activeWatchlist && activeWatchlist.tickers.length > 0) {
     fetchTickers = [...activeWatchlist.tickers]
   }
   if (ticker) {
@@ -91,37 +94,34 @@ export function buildFetchParams(
     activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
       ? "Business Wire"
       : undefined
-  return { fetchTickers, includeGeneralFromProvider }
+  return {
+    fetchTickers,
+    includeGeneralFromProvider,
+  }
 }
 
 export function watchlistMatchesItem(item: NewsItem, watchlist: Watchlist): boolean {
-  if (watchlist.tickers && watchlist.tickers.length > 0) {
-    const hasTickerMatch = item.tickers?.some((ticker) => watchlist.tickers?.includes(ticker))
+  if (watchlist.tickers.length > 0) {
+    const hasTickerMatch = item.tickers?.some((ticker) => watchlist.tickers.includes(ticker)) ?? false
     if (!hasTickerMatch) {
       return false
     }
   }
 
   if (watchlist.provider) {
-    const itemProvider = item.provider.trim().toLowerCase()
-    const watchlistProvider = watchlist.provider.trim().toLowerCase()
-    if (itemProvider !== watchlistProvider) {
+    const providerText = watchlist.provider.trim().toLowerCase()
+    if (item.provider.trim().toLowerCase() !== providerText) {
       return false
     }
   }
 
   if (watchlist.q) {
-    const haystack = [
-      item.title,
-      item.summary,
-      item.source,
-      item.provider,
-      ...(item.tickers || []),
-    ]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
+    const queryText = watchlist.q.trim().toLowerCase()
+    const haystack = [item.title, item.summary, item.source, item.provider, ...(item.tickers || [])]
+      .filter((v): v is string => typeof v === "string" && v.length > 0)
       .join(" ")
       .toLowerCase()
-    if (!haystack.includes(watchlist.q.trim().toLowerCase())) {
+    if (!haystack.includes(queryText)) {
       return false
     }
   }

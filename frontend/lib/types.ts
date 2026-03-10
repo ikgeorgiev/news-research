@@ -51,7 +51,7 @@ export type Watchlist = {
   name: string
   provider?: string
   q?: string
-  tickers?: string[]
+  tickers: string[]
 }
 
 export type PushSubscriptionKeys = {

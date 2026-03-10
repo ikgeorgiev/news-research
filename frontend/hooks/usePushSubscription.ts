@@ -54,7 +54,7 @@ export function usePushSubscription({
       .map((watchlist) => ({
         id: watchlist.id,
         name: watchlist.name,
-        tickers: watchlist.tickers && watchlist.tickers.length > 0 ? [...watchlist.tickers] : undefined,
+        tickers: watchlist.tickers.length > 0 ? [...watchlist.tickers] : undefined,
         provider: watchlist.provider || undefined,
         q: watchlist.q || undefined,
       }))

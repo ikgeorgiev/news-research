@@ -204,6 +204,7 @@ def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session
         vapid_contact_email="alerts@example.com",
         push_send_timeout_seconds=10,
         push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
     )
     stats = check_and_send_alerts(db, settings_obj)
     db.refresh(sub)
@@ -263,7 +264,7 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session
         }
 
     monkeypatch.setattr("app.ingestion.build_source_feeds", fake_build_source_feeds)
-    monkeypatch.setattr("app.ingestion.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_load_tickers)
     monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest_feed)
     monkeypatch.setattr("app.ingestion._should_run_raw_feed_prune", lambda _interval: False)
     monkeypatch.setattr(
@@ -307,6 +308,7 @@ def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(db_
         vapid_contact_email="alerts@example.com",
         push_send_timeout_seconds=10,
         push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
     )
 
     monkeypatch.setattr("app.push_alerts._send_push_notification", lambda *_args, **_kwargs: ("error", "timeout"))
@@ -373,6 +375,7 @@ def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
         vapid_contact_email="alerts@example.com",
         push_send_timeout_seconds=10,
         push_max_per_cycle=3,
+        push_max_consecutive_failures=20,
     )
 
     first_run = check_and_send_alerts(db, settings_obj)
@@ -429,6 +432,7 @@ def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers
         vapid_contact_email="alerts@example.com",
         push_send_timeout_seconds=10,
         push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
     )
 
     stats = check_and_send_alerts(db, settings_obj)
@@ -547,3 +551,4 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
     assert int(second_sub_after.last_notified_json.get("all", 0) or 0) == first.id
     assert second_article is not None
     assert second_article.first_alert_sent_at is not None
+

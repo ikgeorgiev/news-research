@@ -47,6 +47,22 @@ class SourceFeed:
     feed_urls: list[str]
 
 
+@dataclass(slots=True, frozen=True)
+class SourcePageConfig:
+    source_code: str
+    hostname_suffix: str
+    table_match_type: str
+
+
+PAGE_FETCH_CONFIGS: dict[str, SourcePageConfig] = {
+    "businesswire": SourcePageConfig("businesswire", "businesswire.com", "bw_table"),
+    "prnewswire": SourcePageConfig("prnewswire", "prnewswire.com", "prn_table"),
+    "globenewswire": SourcePageConfig(
+        "globenewswire", "globenewswire.com", "gnw_table"
+    ),
+}
+
+
 def get_source_policy(source_code: str) -> str:
     return SOURCE_POLICY.get(source_code, POLICY_VALIDATED_MAPPING_REQUIRED)
 
