@@ -383,9 +383,7 @@ def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
     }
 
 
-def dedupe_articles_by_title(
-    db: Session, *, window_hours: int = 48
-) -> DedupeStats:
+def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> DedupeStats:
     """Merge articles that share the same normalized title within a time window."""
     all_articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
 
@@ -665,7 +663,9 @@ def _apply_revalidation(
             or 0
         )
 
-    return _RevalidationOutcome("deleted", False, bool(existing_ids), at_count, rfi_count)
+    return _RevalidationOutcome(
+        "deleted", False, bool(existing_ids), at_count, rfi_count
+    )
 
 
 def purge_token_only_articles(
@@ -692,6 +692,18 @@ def purge_token_only_articles(
         .correlate(Article)
         .exists()
     )
+    plain_token_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(
+            and_(
+                ArticleTicker.article_id == Article.id,
+                ArticleTicker.match_type == "token",
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
     low_confidence_exists = (
         select(func.max(ArticleTicker.confidence))
         .where(ArticleTicker.article_id == Article.id)
@@ -705,7 +717,9 @@ def purge_token_only_articles(
         .correlate(Article)
         .exists()
     )
-    bw_source_id = db.scalar(select(Source.id).where(Source.code == GENERAL_SOURCE_CODE))
+    bw_source_id = db.scalar(
+        select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
+    )
     bw_exists = (
         select(1)
         .select_from(RawFeedItem)
@@ -736,7 +750,12 @@ def purge_token_only_articles(
             select(Article)
             .where(mapped_exists)
             .where(has_any_raw)
-            .where(low_confidence_exists < MIN_PERSIST_CONFIDENCE)
+            .where(
+                or_(
+                    low_confidence_exists < MIN_PERSIST_CONFIDENCE,
+                    plain_token_exists,
+                )
+            )
         )
         if bw_exists is not None:
             query = query.where(~bw_exists)
@@ -768,7 +787,9 @@ def purge_token_only_articles(
             break
 
         article_ids = [article.id for article in articles]
-        raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = {}
+        raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = (
+            {}
+        )
         raw_context_rows = db.execute(
             select(
                 RawFeedItem.article_id,
@@ -807,6 +828,30 @@ def purge_token_only_articles(
 
             has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
             existing_for_article = existing_rows_by_article.get(article.id)
+            preserved_existing_hits = {
+                id_to_symbol[ticker_id]: (row.match_type, row.confidence)
+                for ticker_id, row in (existing_for_article or {}).items()
+                if ticker_id in id_to_symbol
+                and row.confidence >= MIN_PERSIST_CONFIDENCE
+                and row.match_type != "token"
+            }
+            if preserved_existing_hits and len(preserved_existing_hits) < len(
+                existing_for_article or {}
+            ):
+                outcome = _apply_revalidation(
+                    db,
+                    article,
+                    preserved_existing_hits,
+                    has_general_provenance,
+                    symbol_to_id,
+                    existing_rows=existing_for_article,
+                    dry_run=dry_run,
+                )
+                if outcome.changed_mappings:
+                    purged += 1
+                    deleted_at += outcome.deleted_article_tickers
+                continue
+
             existing_symbols = {
                 id_to_symbol[ticker_id]
                 for ticker_id in (existing_for_article or {}).keys()
@@ -821,6 +866,18 @@ def purge_token_only_articles(
                 stop_when_existing_symbols_verified=existing_symbols,
             )
             if verified_hits:
+                outcome = _apply_revalidation(
+                    db,
+                    article,
+                    verified_hits,
+                    has_general_provenance,
+                    symbol_to_id,
+                    existing_rows=existing_for_article,
+                    dry_run=dry_run,
+                )
+                if outcome.changed_mappings:
+                    purged += 1
+                    deleted_at += outcome.deleted_article_tickers
                 continue
 
             outcome = _apply_revalidation(
@@ -851,3 +908,4 @@ def purge_token_only_articles(
         "deleted_article_tickers": deleted_at,
         "deleted_raw_feed_items": deleted_rfi,
     }
+

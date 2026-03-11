@@ -26,7 +26,15 @@ from app.feed_runtime import (
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
-from app.models import Article, ArticleTicker, FeedPollState, IngestionRun, RawFeedItem, Source, Ticker
+from app.models import (
+    Article,
+    ArticleTicker,
+    FeedPollState,
+    IngestionRun,
+    RawFeedItem,
+    Source,
+    Ticker,
+)
 from app.utils import sha256_str
 
 
@@ -177,7 +185,9 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
         return OkResponse()
 
     monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
-    monkeypatch.setattr("app.feed_runtime.time.sleep", lambda seconds: slept.append(float(seconds)))
+    monkeypatch.setattr(
+        "app.feed_runtime.time.sleep", lambda seconds: slept.append(float(seconds))
+    )
 
     response = _fetch_feed_with_retries(
         feed_url="https://example.com/feed.xml",
@@ -279,7 +289,11 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
         fetch_backoff_jitter_seconds=0.0,
     )
 
-    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == "https://example.com/conditional.xml"))
+    state = db.scalar(
+        select(FeedPollState).where(
+            FeedPollState.feed_url == "https://example.com/conditional.xml"
+        )
+    )
 
     assert first["status"] == "success"
     assert second["status"] == "success"
@@ -307,11 +321,17 @@ def test_ingest_feed_dedupes_raw_feed_rows(db_session, monkeypatch):
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[feed_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Business Wire"}, entries=[feed_entry]
+        ),
     )
 
     first = ingest_feed(
@@ -337,20 +357,27 @@ def test_ingest_feed_dedupes_raw_feed_rows(db_session, monkeypatch):
         fetch_backoff_jitter_seconds=0.0,
     )
 
-    raw_rows = db.scalars(select(RawFeedItem).where(RawFeedItem.source_id == source.id)).all()
+    raw_rows = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.source_id == source.id)
+    ).all()
     assert first["status"] == "success"
     assert second["status"] == "success"
     assert len(raw_rows) == 1
 
 
-def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure(db_session, monkeypatch):
+def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure(
+    db_session, monkeypatch
+):
     db = db_session
     db.add(Ticker(symbol="GOF", active=True))
     db.commit()
 
     csv_path = Path(__file__).with_name(".tmp") / "tickers-retry.csv"
     csv_path.parent.mkdir(exist_ok=True)
-    csv_path.write_text("ticker,fund_name,sponsor,active\nGOF,Guggenheim,Guggenheim,true\n", encoding="utf-8")
+    csv_path.write_text(
+        "ticker,fund_name,sponsor,active\nGOF,Guggenheim,Guggenheim,true\n",
+        encoding="utf-8",
+    )
 
     call_count = {"count": 0}
 
@@ -374,10 +401,11 @@ def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure
     finally:
         if csv_path.exists():
             csv_path.unlink()
-    
 
 
-def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, monkeypatch):
+def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(
+    db_session, monkeypatch
+):
     db = db_session
     yahoo = _seed_source(
         db,
@@ -410,11 +438,17 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, 
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]
+        ),
     )
     yahoo_run = ingest_feed(
         db,
@@ -430,7 +464,9 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, 
 
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[bw_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Business Wire"}, entries=[bw_entry]
+        ),
     )
     bw_run = ingest_feed(
         db,
@@ -449,17 +485,25 @@ def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(db_session, 
     assert yahoo_run["status"] == "success"
     assert bw_run["status"] == "success"
     assert len(articles) == 1
-    assert articles[0].canonical_url == "https://www.businesswire.com/news/home/20260301000001/en"
+    assert (
+        articles[0].canonical_url
+        == "https://www.businesswire.com/news/home/20260301000001/en"
+    )
     raw_links_by_source = {row.source_id: row.raw_link for row in raw_rows}
     assert raw_links_by_source.get(yahoo.id) == (
         "https://www.businesswire.com/news/home/20260301000001/en"
         "?feedref=JjAwJuNHiystnCoBq_hl-XxV8f8yqXw8M0Q"
     )
     if businesswire.id in raw_links_by_source:
-        assert raw_links_by_source[businesswire.id] == "https://www.businesswire.com/news/home/20260301000001/en"
+        assert (
+            raw_links_by_source[businesswire.id]
+            == "https://www.businesswire.com/news/home/20260301000001/en"
+        )
 
 
-def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(db_session, monkeypatch):
+def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(
+    db_session, monkeypatch
+):
     db = db_session
     yahoo = _seed_source(
         db,
@@ -507,11 +551,17 @@ def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(db_session,
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Yahoo Finance"}, entries=[yahoo_entry]
+        ),
     )
 
     result = ingest_feed(
@@ -535,7 +585,9 @@ def test_ingest_feed_mirrored_bw_url_does_not_prune_existing_tickers(db_session,
     assert tickers_after[0].ticker_id == ticker.id
 
 
-def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(db_session, monkeypatch):
+def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(
+    db_session, monkeypatch
+):
     db = db_session
     yahoo = _seed_source(
         db,
@@ -570,11 +622,17 @@ def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(db_se
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Yahoo Finance"}, entries=[mirror_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Yahoo Finance"}, entries=[mirror_entry]
+        ),
     )
 
     result = ingest_feed(
@@ -593,14 +651,18 @@ def test_ingest_feed_mirrored_bw_url_does_not_overwrite_canonical_metadata(db_se
     assert result["status"] == "success"
     assert article_after is not None
     assert article_after.title == "Canonical BW headline"
-    assert article_after.summary == "Canonical Business Wire summary with richer details."
+    assert (
+        article_after.summary == "Canonical Business Wire summary with richer details."
+    )
     assert article_after.source_name == "Business Wire"
     assert article_after.provider_name == "Business Wire"
     assert article_after.published_at is not None
     assert article_after.published_at.replace(tzinfo=timezone.utc) == published
 
 
-def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(db_session, monkeypatch):
+def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -650,11 +712,17 @@ def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(db_ses
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[entry]
+        ),
     )
 
     result = ingest_feed(
@@ -681,7 +749,9 @@ def test_ingest_feed_non_bw_query_url_still_allows_exact_update_and_prune(db_ses
     assert ticker_rows_after[0].ticker_id == new_ticker.id
 
 
-def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(db_session, monkeypatch):
+def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -729,13 +799,21 @@ def test_ingest_feed_exact_url_transient_miss_keeps_existing_tickers(db_session,
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[entry]
+        ),
     )
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     result = ingest_feed(
         db,
@@ -812,13 +890,21 @@ def test_ingest_feed_exact_url_sub_threshold_hits_still_refresh_existing_article
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[entry]
+        ),
     )
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     result = ingest_feed(
         db,
@@ -886,13 +972,21 @@ def test_ingest_feed_rejected_strict_source_entry_persists_detached_raw_row(
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[entry]
+        ),
     )
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     result = ingest_feed(
         db,
@@ -962,13 +1056,21 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[bad_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[bad_entry]
+        ),
     )
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     first = ingest_feed(
         db,
@@ -985,7 +1087,9 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
 
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "PR Newswire"}, entries=[good_entry]),
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[good_entry]
+        ),
     )
 
     second = ingest_feed(
@@ -1058,8 +1162,12 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_po
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(
@@ -1067,7 +1175,9 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_po
             entries=[bad_entry, good_entry],
         ),
     )
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     result = ingest_feed(
         db,
@@ -1095,7 +1205,9 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_po
     assert sum(1 for row in raw_rows if row.article_id is not None) == 1
 
 
-def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(db_session, monkeypatch):
+def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(db)
     entries = [
@@ -1123,11 +1235,17 @@ def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(db_sessio
         def raise_for_status(self) -> None:
             return None
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse())
-    monkeypatch.setattr("app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.ticker_extraction.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
-        lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=entries),
+        lambda _content: SimpleNamespace(
+            feed={"title": "Business Wire"}, entries=entries
+        ),
     )
 
     result = ingest_feed(
@@ -1184,38 +1302,40 @@ def test_dedupe_businesswire_url_variants_merges_historical_rows(db_session):
     db.add(ticker)
     db.commit()
     db.refresh(ticker)
-    db.add_all([
-        ArticleTicker(
-            article_id=yahoo_article.id,
-            ticker_id=ticker.id,
-            match_type="token",
-            confidence=0.62,
-        ),
-        ArticleTicker(
-            article_id=businesswire_article.id,
-            ticker_id=ticker.id,
-            match_type="exchange",
-            confidence=0.88,
-        ),
-        RawFeedItem(
-            source_id=yahoo.id,
-            article_id=yahoo_article.id,
-            feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
-            raw_guid="y-guid-1",
-            raw_link=query_url,
-            raw_pub_date=published,
-            raw_payload_json={},
-        ),
-        RawFeedItem(
-            source_id=businesswire.id,
-            article_id=businesswire_article.id,
-            feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
-            raw_guid="bw-guid-1",
-            raw_link=clean_url,
-            raw_pub_date=published,
-            raw_payload_json={},
-        ),
-    ])
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=yahoo_article.id,
+                ticker_id=ticker.id,
+                match_type="token",
+                confidence=0.62,
+            ),
+            ArticleTicker(
+                article_id=businesswire_article.id,
+                ticker_id=ticker.id,
+                match_type="exchange",
+                confidence=0.88,
+            ),
+            RawFeedItem(
+                source_id=yahoo.id,
+                article_id=yahoo_article.id,
+                feed_url="https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+                raw_guid="y-guid-1",
+                raw_link=query_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+            RawFeedItem(
+                source_id=businesswire.id,
+                article_id=businesswire_article.id,
+                feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+                raw_guid="bw-guid-1",
+                raw_link=clean_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
     db.commit()
 
     result = dedupe_businesswire_url_variants(db)
@@ -1311,7 +1431,11 @@ def test_ingest_feed_skips_when_feed_is_in_failure_backoff(db_session, monkeypat
         failure_backoff_max_seconds=600.0,
     )
 
-    state = db.scalar(select(FeedPollState).where(FeedPollState.feed_url == "https://example.com/backoff.xml"))
+    state = db.scalar(
+        select(FeedPollState).where(
+            FeedPollState.feed_url == "https://example.com/backoff.xml"
+        )
+    )
 
     assert first["status"] == "failed"
     assert second["status"] == "skipped_backoff"
@@ -1359,7 +1483,8 @@ def test_prune_raw_feed_items_respects_retention_window(db_session):
         now=now,
     )
     remaining_guids = {
-        row.raw_guid for row in db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
+        row.raw_guid
+        for row in db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
     }
 
     assert deleted == 1
@@ -1567,7 +1692,351 @@ def test_purge_token_only_articles_skips_high_confidence_verified_rows(
     assert result["deleted_raw_feed_items"] == 0
 
 
-def test_remap_source_articles_unmapped_miss_is_non_destructive(db_session, monkeypatch):
+def test_purge_token_only_articles_skips_high_confidence_page_derived_paren_rows(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
+    published = datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url=(
+            "https://www.globenewswire.com/en/news-release/2026/03/10/3253311/0/en/"
+            "Artiva-Biotherapeutics-Reports-Full-Year-2025-Financial-Results-and-Recent-Business-Highlights.html"
+        ),
+        title="Distribution update",
+        summary="",
+        published_at=published,
+        source_name="GlobeNewswire",
+        provider_name="GlobeNewswire",
+    )
+    ticker = Ticker(
+        symbol="RA",
+        fund_name="Brookfield Real Assets Income Fund Inc.",
+        sponsor="Brookfield Public Securities Group LLC",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="paren",
+                confidence=0.75,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url=(
+                    "https://rss.globenewswire.com/en/RssFeed/subjectcode/"
+                    "13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/"
+                    "Earnings%20Releases%20And%20Operating%20Results"
+                ),
+                raw_guid="gnw-guid-page-derived-paren",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "high-confidence page-derived rows should not be revalidated destructively"
+            )
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=True,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 0
+    assert result["purged_articles"] == 0
+    assert result["deleted_article_tickers"] == 0
+    assert result["deleted_raw_feed_items"] == 0
+
+
+def test_purge_token_only_articles_skips_high_confidence_page_derived_validated_token_rows(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/calamos-302701173.html",
+        title="Distribution update",
+        summary="",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(
+        symbol="CGO",
+        fund_name="Calamos Global Total Return Fund",
+        sponsor="Calamos",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="validated_token",
+                confidence=0.68,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid="prn-guid-page-derived-validated-token",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "high-confidence page-derived rows should not be revalidated destructively"
+            )
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=True,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 0
+    assert result["purged_articles"] == 0
+    assert result["deleted_article_tickers"] == 0
+    assert result["deleted_raw_feed_items"] == 0
+
+
+def test_purge_token_only_articles_prunes_token_rows_when_verified_rows_already_exist(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
+    published = datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url=(
+            "https://www.globenewswire.com/en/news-release/2026/03/10/3253311/0/en/"
+            "Artiva-Biotherapeutics-Reports-Full-Year-2025-Financial-Results-and-Recent-Business-Highlights.html"
+        ),
+        title="Distribution update",
+        summary="",
+        published_at=published,
+        source_name="GlobeNewswire",
+        provider_name="GlobeNewswire",
+    )
+    verified_ticker = Ticker(
+        symbol="RA",
+        fund_name="Brookfield Real Assets Income Fund Inc.",
+        sponsor="Brookfield Public Securities Group LLC",
+        active=True,
+    )
+    token_ticker = Ticker(
+        symbol="ARTV",
+        fund_name="Artiva Biotherapeutics, Inc.",
+        sponsor="Artiva",
+        active=True,
+    )
+    db.add_all([verified_ticker, token_ticker])
+    db.commit()
+    db.refresh(verified_ticker)
+    db.refresh(token_ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=verified_ticker.id,
+                match_type="paren",
+                confidence=0.75,
+            ),
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=token_ticker.id,
+                match_type="token",
+                confidence=0.2,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url=(
+                    "https://rss.globenewswire.com/en/RssFeed/subjectcode/"
+                    "13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/"
+                    "Earnings%20Releases%20And%20Operating%20Results"
+                ),
+                raw_guid="gnw-guid-mixed-page-derived-token",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "mixed verified articles should prune token rows without refetching"
+            )
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    remaining_rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+    remaining_raw = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.article_id == article.id)
+    ).all()
+
+    assert result["scanned_articles"] == 1
+    assert result["purged_articles"] == 1
+    assert result["deleted_article_tickers"] == 1
+    assert result["deleted_raw_feed_items"] == 0
+    assert len(remaining_rows) == 1
+    assert remaining_rows[0].ticker_id == verified_ticker.id
+    assert len(remaining_raw) == 1
+
+
+def test_purge_token_only_articles_prunes_stale_rows_after_partial_revalidation(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/calamos-302701173.html",
+        title="Calamos Global Total Return Fund CGO declares monthly distribution",
+        summary="Legacy PMO mention should be removed",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    verified_ticker = Ticker(
+        symbol="CGO",
+        fund_name="Calamos Global Total Return Fund",
+        sponsor="Calamos",
+        active=True,
+    )
+    stale_ticker = Ticker(
+        symbol="PMO",
+        fund_name="Putnam Municipal Opportunities Trust",
+        sponsor="Putnam",
+        active=True,
+    )
+    db.add_all([verified_ticker, stale_ticker])
+    db.commit()
+    db.refresh(verified_ticker)
+    db.refresh(stale_ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=verified_ticker.id,
+                match_type="token",
+                confidence=0.62,
+            ),
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=stale_ticker.id,
+                match_type="token",
+                confidence=0.62,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid="prn-guid-partial-revalidation",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args: "")
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    remaining_rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+
+    assert result["scanned_articles"] == 1
+    assert result["purged_articles"] == 1
+    assert result["deleted_article_tickers"] == 1
+    assert result["deleted_raw_feed_items"] == 0
+    assert len(remaining_rows) == 1
+    assert remaining_rows[0].ticker_id == verified_ticker.id
+    assert remaining_rows[0].match_type == "validated_token"
+
+
+def test_remap_source_articles_unmapped_miss_is_non_destructive(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -1647,7 +2116,9 @@ def test_remap_source_articles_unmapped_miss_is_non_destructive(db_session, monk
     assert raw_rows[0].article_id == article.id
 
 
-def test_remap_source_articles_full_remap_miss_is_non_destructive(db_session, monkeypatch):
+def test_remap_source_articles_full_remap_miss_is_non_destructive(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -1696,7 +2167,9 @@ def test_remap_source_articles_full_remap_miss_is_non_destructive(db_session, mo
     )
     db.commit()
 
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
 
     result = remap_source_articles(
         db,
@@ -1724,7 +2197,9 @@ def test_remap_source_articles_full_remap_miss_is_non_destructive(db_session, mo
     assert raw_rows[0].article_id == article.id
 
 
-def test_remap_source_articles_full_remap_partial_hits_stay_additive(db_session, monkeypatch):
+def test_remap_source_articles_full_remap_partial_hits_stay_additive(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -1814,7 +2289,9 @@ def test_remap_source_articles_full_remap_partial_hits_stay_additive(db_session,
     assert {row.ticker_id for row in ticker_rows} == {gof.id, pdi.id}
 
 
-def test_remap_source_articles_uses_verified_fallback_after_low_confidence_tokens(db_session, monkeypatch):
+def test_remap_source_articles_uses_verified_fallback_after_low_confidence_tokens(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -1975,7 +2452,9 @@ def test_remap_source_articles_ignores_other_source_verification_but_stays_non_d
     assert ticker_rows[0].ticker_id == ticker.id
 
 
-def test_remap_source_articles_only_adds_from_requested_source_when_unmapped(db_session):
+def test_remap_source_articles_only_adds_from_requested_source_when_unmapped(
+    db_session,
+):
     db = db_session
     prn_source = _seed_source(
         db,
@@ -2046,7 +2525,9 @@ def test_remap_source_articles_only_adds_from_requested_source_when_unmapped(db_
     assert ticker_rows == []
 
 
-def test_purge_token_only_articles_limit_applies_to_distinct_articles(db_session, monkeypatch):
+def test_purge_token_only_articles_limit_applies_to_distinct_articles(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -2142,7 +2623,9 @@ def test_purge_token_only_articles_limit_applies_to_distinct_articles(db_session
     )
     db.commit()
 
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args: ""
+    )
 
     result = purge_token_only_articles(
         db,
@@ -2157,7 +2640,9 @@ def test_purge_token_only_articles_limit_applies_to_distinct_articles(db_session
     assert result["deleted_raw_feed_items"] == 2
 
 
-def test_purge_token_only_articles_pages_past_recent_valid_rows(db_session, monkeypatch):
+def test_purge_token_only_articles_pages_past_recent_valid_rows(
+    db_session, monkeypatch
+):
     db = db_session
     source = _seed_source(
         db,
@@ -2294,7 +2779,9 @@ def test_purge_token_only_articles_pages_past_recent_valid_rows(db_session, monk
     assert result["deleted_raw_feed_items"] == 1
 
 
-def test_purge_token_only_articles_dry_run_false_detaches_raw_rows(db_session, monkeypatch):
+def test_purge_token_only_articles_dry_run_false_detaches_raw_rows(
+    db_session, monkeypatch
+):
     """Verify the real purge path removes the article and detaches raw rows."""
     db = db_session
     source = _seed_source(
@@ -2343,7 +2830,9 @@ def test_purge_token_only_articles_dry_run_false_detaches_raw_rows(db_session, m
     )
     db.commit()
 
-    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args: "")
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args: ""
+    )
 
     result = purge_token_only_articles(
         db,
@@ -2373,8 +2862,15 @@ def test_purge_token_only_articles_dry_run_false_detaches_raw_rows(db_session, m
 def test_dedupe_articles_by_title_merges_duplicates(db_session):
     """Basic coverage: two non-BW articles with the same normalized title get merged."""
     db = db_session
-    prn_source = _seed_source(db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com")
-    gnw_source = _seed_source(db, code="globenewswire", name="GlobeNewswire", base_url="https://rss.globenewswire.com")
+    prn_source = _seed_source(
+        db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com"
+    )
+    gnw_source = _seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
 
     published = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
     title = "Acme Corp Declares Quarterly Distribution"
@@ -2405,8 +2901,18 @@ def test_dedupe_articles_by_title_merges_duplicates(db_session):
 
     db.add_all(
         [
-            ArticleTicker(article_id=article_prn.id, ticker_id=ticker.id, match_type="exchange", confidence=0.88),
-            ArticleTicker(article_id=article_gnw.id, ticker_id=ticker.id, match_type="paren", confidence=0.75),
+            ArticleTicker(
+                article_id=article_prn.id,
+                ticker_id=ticker.id,
+                match_type="exchange",
+                confidence=0.88,
+            ),
+            ArticleTicker(
+                article_id=article_gnw.id,
+                ticker_id=ticker.id,
+                match_type="paren",
+                confidence=0.75,
+            ),
             RawFeedItem(
                 source_id=prn_source.id,
                 article_id=article_prn.id,
@@ -2454,7 +2960,3 @@ def test_dedupe_articles_by_title_merges_duplicates(db_session):
         select(RawFeedItem).where(RawFeedItem.article_id == winner.id)
     ).all()
     assert len(raw_items) == 2
-
-
-
-

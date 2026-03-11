@@ -38,6 +38,14 @@ HTML_NOISE_ELEMENT_PATTERN = re.compile(
     r"<(?:nav|aside|footer)\b[^>]*>.*?</(?:nav|aside|footer)>",
     flags=re.IGNORECASE | re.DOTALL,
 )
+HTML_SIDEBAR_DIV_OPEN_PATTERN = re.compile(
+    r"<div\b[^>]*\bclass=\"[^\"]*sidebar[^\"]*\"[^>]*>",
+    flags=re.IGNORECASE,
+)
+HTML_RELATED_NEWS_PATTERN = re.compile(
+    r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles))\b",
+    flags=re.IGNORECASE,
+)
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
     r"<td[^>]*>(?:\s|<[^>]+>)*([A-Z][A-Z0-9\.\-]{0,9})(?:\s|<[^>]+>)*</td>",
@@ -109,6 +117,7 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "strategies",
         "select",
         "quality",
+        "real",
         "enhanced",
         "diversified",
         "dynamic",
@@ -117,6 +126,7 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "limited",
         "duration",
         "term",
+        "assets",
         "corp",
         "corporation",
         "company",
@@ -131,6 +141,7 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "rate",
         "floating",
         "short",
+        "first",
     }
 )
 _SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
@@ -351,8 +362,42 @@ def _html_to_plain_text(html_text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _strip_sidebar_divs(html_text: str) -> str:
+    result: list[str] = []
+    i = 0
+    for match in HTML_SIDEBAR_DIV_OPEN_PATTERN.finditer(html_text):
+        start = match.start()
+        if start < i:
+            continue
+        result.append(html_text[i:start])
+        depth = 1
+        j = match.end()
+        while j < len(html_text) and depth > 0:
+            div_open = html_text.find("<div", j)
+            div_close = html_text.find("</div>", j)
+            if div_close == -1:
+                j = len(html_text)
+                break
+            if div_open != -1 and div_open < div_close:
+                depth += 1
+                j = div_open + 4
+            else:
+                depth -= 1
+                j = div_close + 6
+        result.append(" ")
+        i = j
+    result.append(html_text[i:])
+    return "".join(result)
+
+
 def _strip_noise_elements(html_text: str) -> str:
-    return HTML_NOISE_ELEMENT_PATTERN.sub(" ", html_text)
+    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
+    text = HTML_NOISE_ELEMENT_PATTERN.sub(" ", text)
+    text = _strip_sidebar_divs(text)
+    related = HTML_RELATED_NEWS_PATTERN.search(text)
+    if related is not None:
+        text = text[: related.start() + 1]
+    return text
 
 
 def _extract_source_fallback_tickers(

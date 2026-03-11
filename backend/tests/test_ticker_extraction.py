@@ -766,6 +766,41 @@ def test_real_world_asa_page_false_positive_stays_subthreshold(monkeypatch):
     assert hits["ASA"] == ("prn_table", 0.62)
 
 
+def test_real_world_ra_page_false_positive_stays_subthreshold(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Real-world data suggest deep responses in refractory rheumatoid arthritis (RA).</p>
+            <table>
+              <tr><th>Line Item</th><th>Value</th></tr>
+              <tr><td>Assets</td><td>$108,008</td></tr>
+            </table>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "RA", "Brookfield Real Assets Income Fund Inc.", "Brookfield Public Securities Group LLC")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Artiva Biotherapeutics Reports Full Year 2025 Financial Results and Recent Business Highlights",
+        "Initial clinical response data for AlloNK in refractory rheumatoid arthritis (RA) expected in first half of 2026",
+        "https://www.globenewswire.com/en/news-release/2026/03/10/example",
+        "https://rss.globenewswire.com/en/RssFeed/subjectcode/13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/Earnings%20Releases%20And%20Operating%20Results",
+        {"RA"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "RA" not in hits
+
+
 def test_keywordless_cef_table_hit_reaches_persist_threshold(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
 
@@ -962,6 +997,71 @@ def test_paren_stopword_ticker_allowed_with_fund_name():
     assert "USA" in hits
     assert hits["USA"][0] == "paren"
     assert hits["USA"][1] == 0.75
+
+
+def test_first_trust_ffa_not_validated_by_common_word_first():
+    """'first' is too generic to validate FFA token matches."""
+    known = {"FFA"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "FFA", "First Trust Enhanced Equity Income", "First Trust Advisors L.P.")]
+    )
+    assert sym_kws["FFA"] == frozenset()
+
+    hits = _extract_entry_tickers(
+        "FFA members held their first annual meeting",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "FFA" in hits
+    assert hits["FFA"][0] == "token"
+    assert hits["FFA"][1] < MIN_PERSIST_CONFIDENCE
+
+
+def test_sidebar_related_article_does_not_tag_main_article(monkeypatch):
+    """BW sidebar 'More News' with NYSE: FFA must not tag the unrelated main article."""
+    config = PAGE_FETCH_CONFIGS["businesswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <h1>First Trust Advisors L.P. Announces Distribution for
+                First Trust Income Opportunities ETF</h1>
+            <table>
+              <tr><th>Ticker</th><th>Exchange</th><th>Fund Name</th></tr>
+              <tr><td>FCEF</td><td>Nasdaq</td>
+                  <td>First Trust Income Opportunities ETF</td></tr>
+            </table>
+          </article>
+          <div class="ui-kit-press-release__sidebar bg-blue100">
+            <div class="ui-kit-press-release-sidebar">
+              <h2>More News From First Trust Advisors L.P.</h2>
+              <a href="/other"><h2>First Trust Enhanced Equity Income Fund
+                  Declares its Quarterly Distribution</h2></a>
+              <div class="rich-text">First Trust Enhanced Equity Income Fund
+                  (the "Fund") (NYSE: FFA) has declared the Fund's
+                  regularly scheduled quarterly distribution.</div>
+            </div>
+          </div>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "First Trust Advisors L.P. Announces Distribution for First Trust Income Opportunities ETF",
+        "",
+        "https://www.businesswire.com/news/home/20260310285136/en",
+        "",
+        {"FFA", "FCEF"},
+        timeout_seconds=5,
+        config=config,
+    )
+
+    assert "FFA" not in hits
 
 
 def test_businesswire_fallback_preserves_stopword_ticker_with_keywords(monkeypatch):
