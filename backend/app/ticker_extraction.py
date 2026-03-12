@@ -43,7 +43,7 @@ HTML_SIDEBAR_DIV_OPEN_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 HTML_RELATED_NEWS_PATTERN = re.compile(
-    r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles))\b",
+    r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles)|Also\s+from\s+this\s+source)\b",
     flags=re.IGNORECASE,
 )
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
