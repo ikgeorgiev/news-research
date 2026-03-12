@@ -115,6 +115,13 @@ class ReloadTickersResponse(BaseModel):
     source_remaps: list[SourceRemapResponse] | None = None
 
 
+class RevalidationResponse(BaseModel):
+    scanned: int
+    revalidated: int
+    purged: int
+    unchanged: int
+
+
 class PushVapidKeyResponse(BaseModel):
     enabled: bool
     public_key: str | None = None

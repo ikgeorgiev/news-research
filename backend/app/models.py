@@ -31,6 +31,7 @@ class Ticker(Base):
     symbol: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     fund_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sponsor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    validation_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
@@ -96,6 +97,7 @@ class ArticleTicker(Base):
     ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id", ondelete="CASCADE"), index=True)
     match_type: Mapped[str] = mapped_column(String(32), default="token")
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    extraction_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     article: Mapped[Article] = relationship(back_populates="tickers")
     ticker: Mapped[Ticker] = relationship()

@@ -38,6 +38,8 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _ensure_article_audit_columns(engine)
+    _ensure_ticker_columns(engine)
+    _ensure_article_ticker_columns(engine)
 
 
 def _ensure_article_audit_columns(engine) -> None:
@@ -58,12 +60,14 @@ def _ensure_article_audit_columns(engine) -> None:
 
         first_seen_added = _add_column_if_missing(
             connection,
+            table_name="articles",
             existing_cols=existing_cols,
             column_name="first_seen_at",
             column_type_sql=first_seen_type,
         )
         _add_column_if_missing(
             connection,
+            table_name="articles",
             existing_cols=existing_cols,
             column_name="first_alert_sent_at",
             column_type_sql=first_alert_type,
@@ -85,8 +89,36 @@ def _ensure_article_audit_columns(engine) -> None:
         )
 
 
+def _ensure_ticker_columns(engine) -> None:
+    """Best-effort schema patch for ticker metadata added without migrations."""
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        existing_cols = {col["name"] for col in inspector.get_columns("tickers")}
+        _add_column_if_missing(
+            connection,
+            table_name="tickers",
+            existing_cols=existing_cols,
+            column_name="validation_keywords",
+            column_type_sql="TEXT",
+        )
+
+
+def _ensure_article_ticker_columns(engine) -> None:
+    """Best-effort schema patch for article ticker metadata added without migrations."""
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        existing_cols = {col["name"] for col in inspector.get_columns("article_tickers")}
+        _add_column_if_missing(
+            connection,
+            table_name="article_tickers",
+            existing_cols=existing_cols,
+            column_name="extraction_version",
+            column_type_sql="INTEGER DEFAULT 1 NOT NULL",
+        )
+
+
 def _add_column_if_missing(
-    connection, *, existing_cols: set[str], column_name: str, column_type_sql: str
+    connection, *, table_name: str, existing_cols: set[str], column_name: str, column_type_sql: str
 ) -> bool:
     if column_name in existing_cols:
         return False
@@ -95,7 +127,7 @@ def _add_column_if_missing(
         # only rolls back this statement, not the entire transaction.
         # The context manager auto-rolls back on exception.
         with connection.begin_nested():
-            connection.execute(text(f"ALTER TABLE articles ADD COLUMN {column_name} {column_type_sql}"))
+            connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type_sql}"))
         existing_cols.add(column_name)
         return True
     except DBAPIError as exc:

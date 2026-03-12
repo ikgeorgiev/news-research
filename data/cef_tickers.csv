@@ -1,4 +1,4 @@
-ticker,fund_name,sponsor,active
+ticker,fund_name,sponsor,active,validation_keywords
 ACP,abrdn Income Credit Strategies Fund,abrdn Investments Limited,TRUE
 ADX,Adams Diversified Equity Fund,Adams Diversified Equity Fund Inc,TRUE
 AFB,AllianceBernstein National Mun Inc,AllianceBernstein L.P.,TRUE
@@ -60,7 +60,7 @@ DIAX,Nuveen Dow 30 Dynamic Overwrite,"Nuveen Fund Advisors, LLC.",TRUE
 DLY,DoubleLine Yield Opportunities Fund,DoubleLine Capital LP,TRUE
 DMB,BNY Mellon Muni Bond Infrastructure Fund,BNY Mellon,TRUE
 DMO,Western Asset Mortgage Opp Fund Inc.,"Franklin Templeton Fund Adviser, LLC",TRUE
-DNP,DNP Select Income,Duff & Phelps Inv Mgmt Co (IL),TRUE
+DNP,DNP Select Income,Duff & Phelps Inv Mgmt Co (IL),TRUE,"duff,phelps"
 DPG,Duff & Phelps Utility and Infra Fund Inc,Duff & Phelps Inv Mgmt Co (IL),TRUE
 DSL,DoubleLine Income Solutions Fund,DoubleLine Capital LP,TRUE
 DSM,BNY Mellon Strategic Muni Bond,BNY Mellon,TRUE
@@ -98,7 +98,7 @@ EVV,Eaton Vance Limited Duration Income,Eaton Vance,TRUE
 EXG,Eaton Vance Tax-Mgd Glb Divrs Equity Inc,Eaton Vance Management,TRUE
 FCO,"abrdn Global Income Fund, Inc.",abrdn Inc.,TRUE
 FCT,First Trust Senior FR Inc II,First Trust Advisors L.P.,TRUE
-FFA,First Trust Enhanced Equity Income,First Trust Advisors L.P.,TRUE
+FFA,First Trust Enhanced Equity Income,First Trust Advisors L.P.,TRUE,"first trust"
 FFC,Flah&Crum Preferred Securities,Flaherty & Crumrine Inc,TRUE
 FINS,Angel Oak Financial Strats Income Term,"Angel Oak Capital Advisors, LLC",TRUE
 FLC,Flah&Crum Total Return Fund,Flaherty & Crumrine Inc,TRUE

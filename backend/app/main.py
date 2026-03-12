@@ -17,6 +17,7 @@ from app.article_maintenance import (
     dedupe_businesswire_url_variants,
     purge_token_only_articles,
     remap_source_articles,
+    revalidate_stale_article_tickers,
 )
 from app.config import get_settings
 from app.database import db_health_check, get_db, get_session_factory, init_db
@@ -36,6 +37,7 @@ from app.schemas import (
     NewsItem,
     NewsListResponse,
     PurgeFalsePositiveResponse,
+    RevalidationResponse,
     ReloadTickersResponse,
     RunIngestionResponse,
     SourceRemapResponse,
@@ -816,6 +818,28 @@ def admin_purge_false_positives(
         purged_articles=result["purged_articles"],
         deleted_article_tickers=result["deleted_article_tickers"],
         deleted_raw_feed_items=result["deleted_raw_feed_items"],
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/admin/revalidate",
+    response_model=RevalidationResponse,
+    dependencies=[Depends(require_admin_api_key)],
+)
+def admin_revalidate_articles(
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+):
+    result = revalidate_stale_article_tickers(
+        db,
+        limit=limit,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    return RevalidationResponse(
+        scanned=int(result["scanned"]),
+        revalidated=int(result["revalidated"]),
+        purged=int(result["purged"]),
+        unchanged=int(result["unchanged"]),
     )
 
 

@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.article_ingest import ingest_feed
 from app.article_maintenance import (
+    _upsert_article_tickers,
     dedupe_articles_by_title,
     dedupe_businesswire_url_variants,
     purge_token_only_articles,
     remap_source_articles,
+    revalidate_stale_article_tickers,
 )
 from app.config import Settings
 from app.feed_runtime import (
@@ -35,6 +37,7 @@ from app.models import (
     Source,
     Ticker,
 )
+from app.ticker_extraction import EXTRACTION_VERSION
 from app.utils import sha256_str
 
 
@@ -2960,3 +2963,248 @@ def test_dedupe_articles_by_title_merges_duplicates(db_session):
         select(RawFeedItem).where(RawFeedItem.article_id == winner.id)
     ).all()
     assert len(raw_items) == 2
+
+
+
+def test_upsert_article_tickers_force_update_lowers_confidence(db_session):
+    db = db_session
+    article = _seed_article(
+        db,
+        canonical_url="https://example.com/revalidate-upsert",
+        title="Article",
+        summary="",
+        published_at=datetime(2026, 3, 11, tzinfo=timezone.utc),
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(symbol="CGO", fund_name="Calamos Global Total Return Fund", sponsor="Calamos", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    row = ArticleTicker(
+        article_id=article.id,
+        ticker_id=ticker.id,
+        match_type="exchange",
+        confidence=0.88,
+        extraction_version=1,
+    )
+    db.add(row)
+    db.commit()
+
+    _upsert_article_tickers(
+        db,
+        article.id,
+        {"CGO": ("token", 0.62)},
+        {"CGO": ticker.id},
+        force_update=True,
+    )
+    db.commit()
+    db.refresh(row)
+
+    assert row.match_type == "token"
+    assert row.confidence == 0.62
+    assert row.extraction_version == EXTRACTION_VERSION
+
+
+def test_upsert_stamps_extraction_version_on_all_rows(db_session):
+    db = db_session
+    article = _seed_article(
+        db,
+        canonical_url="https://example.com/revalidate-stamp",
+        title="Article",
+        summary="",
+        published_at=datetime(2026, 3, 11, 1, tzinfo=timezone.utc),
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(symbol="FFA", fund_name="First Trust Enhanced Equity Income", sponsor="First Trust Advisors L.P.", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    row = ArticleTicker(
+        article_id=article.id,
+        ticker_id=ticker.id,
+        match_type="validated_token",
+        confidence=0.68,
+        extraction_version=1,
+    )
+    db.add(row)
+    db.commit()
+
+    _upsert_article_tickers(
+        db,
+        article.id,
+        {"FFA": ("validated_token", 0.68)},
+        {"FFA": ticker.id},
+        force_update=True,
+    )
+    db.commit()
+    db.refresh(row)
+
+    assert row.extraction_version == EXTRACTION_VERSION
+
+
+def test_revalidation_processes_stale_rows(db_session, monkeypatch):
+    db = db_session
+    source = _seed_source(db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com")
+    published = datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/first-trust-302701173.html",
+        title="First Trust declares quarterly distribution for FFA",
+        summary="",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(
+        symbol="FFA",
+        fund_name="First Trust Enhanced Equity Income",
+        sponsor="First Trust Advisors L.P.",
+        validation_keywords="first trust",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="token",
+                confidence=0.62,
+                extraction_version=1,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid="prn-guid-revalidation",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: None)
+
+    result = revalidate_stale_article_tickers(db, limit=10, timeout_seconds=5)
+    row = db.scalar(select(ArticleTicker).where(ArticleTicker.article_id == article.id))
+
+    assert result["scanned"] == 1
+    assert result["revalidated"] == 1
+    assert result["purged"] == 0
+    assert row is not None
+    assert row.match_type == "validated_token"
+    assert row.confidence == 0.68
+    assert row.extraction_version == EXTRACTION_VERSION
+
+
+def test_revalidation_updates_version_after_processing(db_session, monkeypatch):
+    db = db_session
+    source = _seed_source(db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com")
+    published = datetime(2026, 3, 10, 20, 10, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/calamos-302701173.html",
+        title="Calamos Global Total Return Fund CGO declares distribution",
+        summary="",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(symbol="CGO", fund_name="Calamos Global Total Return Fund", sponsor="Calamos", active=True)
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="validated_token",
+                confidence=0.68,
+                extraction_version=1,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid="prn-guid-revalidation-version",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: None)
+
+    result = revalidate_stale_article_tickers(db, limit=10, timeout_seconds=5)
+    row = db.scalar(select(ArticleTicker).where(ArticleTicker.article_id == article.id))
+
+    assert result["unchanged"] == 1
+    assert row is not None
+    assert row.extraction_version == EXTRACTION_VERSION
+
+
+def test_revalidation_respects_limit(db_session, monkeypatch):
+    db = db_session
+    source = _seed_source(db, code="prnewswire", name="PR Newswire", base_url="https://www.prnewswire.com")
+    ticker = Ticker(
+        symbol="FFA",
+        fund_name="First Trust Enhanced Equity Income",
+        sponsor="First Trust Advisors L.P.",
+        validation_keywords="first trust",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+
+    for idx in range(3):
+        published = datetime(2026, 3, 10, 21, idx, tzinfo=timezone.utc)
+        article = _seed_article(
+            db,
+            canonical_url=f"https://example.com/revalidation-limit/{idx}",
+            title=f"First Trust update {idx} for FFA",
+            summary="",
+            published_at=published,
+            source_name="PR Newswire",
+            provider_name="PR Newswire",
+        )
+        db.add(
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="token",
+                confidence=0.62,
+                extraction_version=1,
+            )
+        )
+        db.add(
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid=f"prn-guid-revalidation-limit-{idx}",
+                raw_link=article.canonical_url,
+                raw_pub_date=published,
+                raw_payload_json={},
+            )
+        )
+        db.commit()
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: None)
+
+    result = revalidate_stale_article_tickers(db, limit=2, timeout_seconds=5)
+    stale_rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.extraction_version < EXTRACTION_VERSION)
+    ).all()
+
+    assert result["scanned"] == 2
+    assert len(stale_rows) == 1

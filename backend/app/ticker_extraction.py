@@ -85,6 +85,8 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
     "IDE",
 }
 MIN_PERSIST_CONFIDENCE = 0.65
+NO_KEYWORDS_CONFIDENCE = 0.70
+EXTRACTION_VERSION = 2
 
 _FUND_KEYWORD_STOPWORDS = frozenset(
     {
@@ -211,6 +213,16 @@ def _text_matches_validation_keywords(
     return len(set(matched_keywords)) >= 2
 
 
+def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:
+    if not raw_value:
+        return frozenset()
+    return frozenset(
+        keyword
+        for keyword in (part.strip().lower() for part in raw_value.split(","))
+        if keyword
+    )
+
+
 def _build_symbol_keywords(
     ticker_rows: list,
 ) -> dict[str, frozenset[str]]:
@@ -220,9 +232,16 @@ def _build_symbol_keywords(
         symbol_lower = symbol.lower()
         fund_name = row[2] if len(row) > 2 else None
         sponsor = row[3] if len(row) > 3 else None
+        validation_kw_raw = row[4] if len(row) > 4 else None
+
+        override_keywords = _normalize_validation_keywords(validation_kw_raw)
+        if override_keywords:
+            result[symbol.upper()] = override_keywords
+            continue
+
         keywords: set[str] = set()
+        cleaned_fund_words: list[str] = []
         if fund_name:
-            cleaned_fund_words: list[str] = []
             word_supports_phrase: list[bool] = []
             for idx, raw_word in enumerate(fund_name.split()):
                 cleaned = raw_word.strip(".,;()\"'").lower()
@@ -260,6 +279,21 @@ def _build_symbol_keywords(
                     is_leading_sponsor_word=idx == 0,
                 ):
                     keywords.add(cleaned)
+
+            sponsor_words = [
+                word.strip(".,;()\"'").lower()
+                for word in sponsor.split()
+            ]
+            sponsor_words = [word for word in sponsor_words if word]
+            brand_words: list[str] = []
+            for idx, sponsor_word in enumerate(sponsor_words):
+                if idx < len(cleaned_fund_words) and cleaned_fund_words[idx] == sponsor_word:
+                    brand_words.append(sponsor_word)
+                else:
+                    break
+            if len(brand_words) >= 2:
+                keywords.add(" ".join(brand_words))
+
         result[symbol.upper()] = frozenset(keywords)
     return result
 
@@ -400,6 +434,25 @@ def _strip_noise_elements(html_text: str) -> str:
     return text
 
 
+def _extract_article_body(html_text: str) -> str | None:
+    """Extract main article body with trafilatura when available."""
+    try:
+        import trafilatura
+
+        result = trafilatura.extract(
+            html_text,
+            include_tables=True,
+            include_comments=False,
+            include_links=False,
+            no_fallback=False,
+        )
+    except Exception:
+        return None
+    if result and len(result.strip()) > 50:
+        return result
+    return None
+
+
 def _extract_source_fallback_tickers(
     title: str,
     summary: str,
@@ -415,8 +468,13 @@ def _extract_source_fallback_tickers(
     if not html_text:
         return {}
 
-    body_html = _strip_noise_elements(html_text)
-    plain_text = _html_to_plain_text(body_html)
+    table_html = _strip_noise_elements(html_text)
+    trafilatura_text = _extract_article_body(html_text)
+    plain_text = (
+        trafilatura_text
+        if trafilatura_text is not None
+        else _html_to_plain_text(table_html)
+    )
     validation_text_lower = (
         " ".join([part for part in [title, summary, plain_text] if part]).lower()
         if symbol_keywords is not None
@@ -440,14 +498,14 @@ def _extract_source_fallback_tickers(
         if hit[1] >= MIN_PERSIST_CONFIDENCE
     }
 
-    for symbol in _extract_table_cell_symbols_from_html(body_html, known_symbols):
+    for symbol in _extract_table_cell_symbols_from_html(table_html, known_symbols):
         confidence = 0.62
         if symbol_keywords is None:
             confidence = 0.84
         else:
             kws = symbol_keywords.get(symbol, frozenset())
             if not kws:
-                confidence = 0.84
+                confidence = NO_KEYWORDS_CONFIDENCE
             elif (
                 validation_text_lower is not None
                 and _text_matches_validation_keywords(validation_text_lower, kws)
@@ -504,7 +562,7 @@ def _extract_entry_tickers(
         if symbol_keywords is not None:
             kws = symbol_keywords.get(upper, frozenset())
             if not kws:
-                add(upper, "paren", 0.75)
+                add(upper, "paren", NO_KEYWORDS_CONFIDENCE)
                 continue
             if (
                 text_lower is not None

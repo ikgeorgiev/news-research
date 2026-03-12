@@ -14,7 +14,12 @@ Local-first RSS aggregation platform for closed-end funds.
 - Polls configured feeds every minute (configurable)
 - Normalizes RSS entries into a unified article model
 - URL + title-window dedupe
-- Ticker mapping from context, exchange patterns, and token match
+- Tiered ticker extraction: context, exchange, paren, table cell, validated token, and token match types with confidence scoring
+- Source page fallback extraction (fetches article HTML from BW/PRN/GNW when RSS metadata is insufficient)
+- trafilatura-based article body extraction with regex fallback
+- Per-symbol validation keywords (auto-generated from sponsor brand + fund name, with CSV override)
+- Automated maintenance: deduplication, false-positive purge, source remap, stale mapping revalidation
+- Push notifications (Web Push / VAPID)
 - Filterable API (`ticker`, `provider`, `source`, `q`, `from`, `to`) with cursor pagination
 - Feed UI with provider/ticker/search filters and load-more pagination
 
@@ -196,17 +201,31 @@ For frontend on `3000` instead:
 
 ## API Endpoints
 
+### Public
+
 - `GET /health`
-- `GET /api/v1/tickers`
-- `GET /api/v1/news`
-- `GET /api/v1/news/{id}`
-- `GET /api/v1/push/vapid-key`
-- `PUT /api/v1/push/subscription`
-- `DELETE /api/v1/push/subscription`
-- `POST /api/v1/admin/ingest/run-once`
-- `GET /api/v1/admin/ingest/status`
-- `POST /api/v1/admin/tickers/reload`
-- `POST /api/v1/admin/remap/{source_code}`
+- `GET /api/v1/tickers` — list active tickers (`?q=` prefix search)
+- `GET /api/v1/news` — list articles (filters: `ticker`, `provider`, `source`, `q`, `from`, `to`)
+- `GET /api/v1/news/ids` — cursor-paginated article IDs (`limit`, `cursor`)
+- `GET /api/v1/news/{id}` — single article detail
+
+### Push Notifications
+
+- `GET /api/v1/push/vapid-key` — VAPID public key (or `enabled: false`)
+- `PUT /api/v1/push/subscription` — create/update push subscription
+- `DELETE /api/v1/push/subscription` — remove push subscription
+
+### Admin (require `X-API-Key` header)
+
+- `POST /api/v1/admin/ingest/run-once` — trigger one ingestion cycle
+- `GET /api/v1/admin/ingest/status` — recent ingestion run history
+- `POST /api/v1/admin/tickers/reload` — reload CSV + auto-remap unmapped articles
+- `POST /api/v1/admin/remap/{source_code}` — re-extract tickers for a source (`businesswire`, `prnewswire`, `globenewswire`)
+- `POST /api/v1/admin/revalidate` — revalidate stale ArticleTicker rows against current extraction logic
+- `POST /api/v1/admin/purge/false-positives` — remove token-only false-positive mappings (`?dry_run=true` default)
+- `POST /api/v1/admin/dedupe/businesswire-url-variants` — merge BW URL variant duplicates
+- `POST /api/v1/admin/dedupe/title` — merge title-based duplicates
+- `POST /api/v1/news/alerts/sent` — mark articles as alerted (internal)
 
 `GET /api/v1/news` defaults to mapped CEF-linked articles only.
 Mapped means linked to at least one active ticker.
@@ -249,10 +268,14 @@ Ingestion reliability controls are configurable via env vars:
 Edit `data/cef_tickers.csv` with your full list:
 
 ```csv
-ticker,fund_name,sponsor,active
-GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,true
+ticker,fund_name,sponsor,active,validation_keywords
+GOF,Guggenheim Strategic Opportunities Fund,Guggenheim,true,
+FFA,First Trust Enhanced Equity Income Fund,First Trust,true,first trust
+DNP,Duff & Phelps Utility and Corporate Bond Trust,Duff & Phelps,true,"duff,phelps"
 ...
 ```
+
+The `validation_keywords` column is optional. When set, it overrides auto-generated keywords for that symbol. Comma-separated values are treated as independent keywords (any match validates). Leave blank to use the default logic (sponsor brand + fund name words, with common fund-industry stopwords removed).
 
 ## Notes
 

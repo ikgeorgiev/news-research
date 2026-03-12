@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.article_maintenance import (
     SourceRemapStats,
     remap_source_articles,
+    revalidate_stale_article_tickers,
 )
 from app.article_ingest import (
     IngestFeedResult,
@@ -138,7 +139,13 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
     }
 
     ticker_rows = db.execute(
-        select(Ticker.id, Ticker.symbol, Ticker.fund_name, Ticker.sponsor).where(
+        select(
+            Ticker.id,
+            Ticker.symbol,
+            Ticker.fund_name,
+            Ticker.sponsor,
+            Ticker.validation_keywords,
+        ).where(
             Ticker.active.is_(True)
         )
     ).all()
@@ -271,6 +278,24 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
                     db, settings, source_code=code, limit=500, only_unmapped=True
                 )
             )
+    try:
+        revalidation_stats = revalidate_stale_article_tickers(
+            db,
+            limit=100,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+        if revalidation_stats["scanned"]:
+            logger.info(
+                "Revalidated %s stale article mappings (%s changed, %s purged, %s unchanged)",
+                revalidation_stats["scanned"],
+                revalidation_stats["revalidated"],
+                revalidation_stats["purged"],
+                revalidation_stats["unchanged"],
+            )
+    except Exception:
+        logger.exception("Revalidation failed, continuing ingestion cycle")
+        db.rollback()
+
     prune_interval_seconds = settings.raw_feed_prune_interval_seconds
     if _should_run_raw_feed_prune(prune_interval_seconds):
         pruned_raw_items = prune_raw_feed_items(

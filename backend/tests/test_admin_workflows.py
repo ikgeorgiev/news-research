@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.main import admin_dedupe_businesswire_url_variants, admin_reload_tickers
+from app.main import (
+    admin_dedupe_businesswire_url_variants,
+    admin_reload_tickers,
+    admin_revalidate_articles,
+)
 
 
 def test_admin_reload_tickers_returns_source_remaps(monkeypatch, db_session):
@@ -104,3 +108,20 @@ def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, d
     assert response.ticker_rows_relinked == 3
     assert response.ticker_rows_updated == 1
     assert response.ticker_rows_deleted == 2
+
+
+
+def test_admin_revalidate_articles_response_contract(monkeypatch, db_session):
+    def fake_revalidate(_db: Session, *, limit: int, timeout_seconds: int):  # noqa: ANN001
+        assert limit == 321
+        assert timeout_seconds > 0
+        return {"scanned": 12, "revalidated": 4, "purged": 3, "unchanged": 5}
+
+    monkeypatch.setattr("app.main.revalidate_stale_article_tickers", fake_revalidate)
+
+    response = admin_revalidate_articles(limit=321, db=db_session)
+
+    assert response.scanned == 12
+    assert response.revalidated == 4
+    assert response.purged == 3
+    assert response.unchanged == 5

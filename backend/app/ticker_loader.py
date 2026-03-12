@@ -59,6 +59,7 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
 
             fund_name = (row.get("fund_name") or "").strip() or None
             sponsor = (row.get("sponsor") or "").strip() or None
+            validation_keywords = (row.get("validation_keywords") or "").strip() or None
             active_raw = (row.get("active") or "true").strip().lower()
             active = active_raw not in {"0", "false", "no", "n"}
 
@@ -68,6 +69,7 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
                     symbol=symbol,
                     fund_name=fund_name,
                     sponsor=sponsor,
+                    validation_keywords=validation_keywords,
                     active=active,
                 )
                 try:
@@ -91,6 +93,9 @@ def load_tickers_from_csv(db: Session, csv_path: str) -> dict[str, int]:
                 changed = True
             if item.sponsor != sponsor:
                 item.sponsor = sponsor
+                changed = True
+            if item.validation_keywords != validation_keywords:
+                item.validation_keywords = validation_keywords
                 changed = True
             if item.active != active:
                 item.active = active
