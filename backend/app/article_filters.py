@@ -162,12 +162,28 @@ def build_article_query(
     if q:
         q_text = q.strip()
         if q_text:
-            query = query.where(
-                Article.title.ilike(
-                    contains_literal_pattern(q_text),
-                    escape="\\",
-                )
+            title_match = Article.title.ilike(
+                contains_literal_pattern(q_text),
+                escape="\\",
             )
+            ticker_q_match = (
+                select(1)
+                .select_from(ArticleTicker)
+                .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+                .where(
+                    and_(
+                        ArticleTicker.article_id == Article.id,
+                        Ticker.symbol.ilike(
+                            contains_literal_pattern(q_text.upper()),
+                            escape="\\",
+                        ),
+                        Ticker.active.is_(True),
+                    )
+                )
+                .correlate(Article)
+                .exists()
+            )
+            query = query.where(or_(title_match, ticker_q_match))
 
     if from_:
         query = query.where(publish_sort_key >= from_)

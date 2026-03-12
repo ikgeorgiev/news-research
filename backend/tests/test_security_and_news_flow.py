@@ -790,3 +790,55 @@ def test_list_news_search_treats_wildcard_chars_as_literals(db_session: Session)
     )
 
     assert [item.id for item in response.items] == [literal.id]
+
+
+def test_list_news_search_matches_ticker_symbol(db_session: Session):
+    """Searching 'XFLT' via q= should return articles mapped to XFLT even if
+    the title doesn't contain 'XFLT'."""
+    db = db_session
+
+    ticker = Ticker(symbol="XFLT", fund_name="XAI Octagon", sponsor="XAI", active=True)
+    db.add(ticker)
+    db.flush()
+
+    mapped = _seed_article(
+        db,
+        slug="mapped-no-title-match",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        title="Fund Declares Monthly Distribution",
+    )
+    db.add(ArticleTicker(article_id=mapped.id, ticker_id=ticker.id, match_type="context", confidence=0.90))
+
+    title_match = _seed_article(
+        db,
+        slug="title-match-no-mapping",
+        published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        title="XFLT announces earnings",
+    )
+
+    _unrelated = _seed_article(
+        db,
+        slug="unrelated",
+        published_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        title="Some other news",
+    )
+    db.commit()
+
+    response = list_news(
+        ticker=None,
+        source=None,
+        provider=None,
+        q="XFLT",
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    returned_ids = {item.id for item in response.items}
+    assert mapped.id in returned_ids, "Article mapped to XFLT ticker should appear"
+    assert title_match.id in returned_ids, "Article with XFLT in title should appear"
+    assert _unrelated.id not in returned_ids
