@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.main import list_tickers
+from app.routes.news import list_tickers
 from app.models import Ticker
 
 

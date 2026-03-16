@@ -11,23 +11,24 @@ from fastapi.routing import APIRoute
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
-from app.main import (
-    app,
+from app.config import get_settings
+from app.deps import require_admin_api_key
+from app.main import app, health
+from app.routes.news import (
     EPOCH_UTC,
     _first_seen_at_for_response,
     _published_at_for_response,
     get_news_item,
-    health,
     list_news,
     list_news_ids,
     mark_news_alerts_sent,
-    require_admin_api_key,
-    settings,
 )
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.schemas import MarkAlertsSentRequest
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import sha256_str
+
+settings = get_settings()
 
 
 def _seed_article(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.main import (
+from app.routes.admin import (
     admin_dedupe_businesswire_url_variants,
     admin_reload_tickers,
     admin_revalidate_articles,
@@ -39,8 +39,8 @@ def test_admin_reload_tickers_returns_source_remaps(monkeypatch, db_session):
             "only_unmapped": only_unmapped,
         }
 
-    monkeypatch.setattr("app.main.load_tickers_from_csv", fake_load_tickers)
-    monkeypatch.setattr("app.main.remap_source_articles", fake_remap)
+    monkeypatch.setattr("app.routes.admin.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.routes.admin.remap_source_articles", fake_remap)
 
     response = admin_reload_tickers(
         remap_unmapped=True,
@@ -71,8 +71,8 @@ def test_admin_reload_tickers_can_skip_remap(monkeypatch, db_session):
         calls["remap_called"] += 1
         return {"processed": 0, "articles_with_hits": 0, "remapped_articles": 0, "only_unmapped": True}
 
-    monkeypatch.setattr("app.main.load_tickers_from_csv", fake_load_tickers)
-    monkeypatch.setattr("app.main.remap_source_articles", fake_remap)
+    monkeypatch.setattr("app.routes.admin.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.routes.admin.remap_source_articles", fake_remap)
 
     response = admin_reload_tickers(
         remap_unmapped=False,
@@ -97,7 +97,7 @@ def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, d
             "ticker_rows_deleted": 2,
         }
 
-    monkeypatch.setattr("app.main.dedupe_businesswire_url_variants", fake_dedupe)
+    monkeypatch.setattr("app.routes.admin.dedupe_businesswire_url_variants", fake_dedupe)
 
     response = admin_dedupe_businesswire_url_variants(db=db_session)
 
@@ -117,7 +117,7 @@ def test_admin_revalidate_articles_response_contract(monkeypatch, db_session):
         assert timeout_seconds > 0
         return {"scanned": 12, "revalidated": 4, "purged": 3, "unchanged": 5}
 
-    monkeypatch.setattr("app.main.revalidate_stale_article_tickers", fake_revalidate)
+    monkeypatch.setattr("app.routes.admin.revalidate_stale_article_tickers", fake_revalidate)
 
     response = admin_revalidate_articles(limit=321, db=db_session)
 

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ingestion import run_ingestion_cycle
-from app.main import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
+from app.routes.push import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.push_alerts import check_and_send_alerts
 from app.schemas import (
@@ -108,7 +108,7 @@ def _push_payload(*, endpoint: str, manage_token: str | None = None) -> PushUpse
 
 
 def test_get_push_vapid_key_disabled_when_not_configured(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("app.main.push_runtime_enabled", lambda _settings: False)
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: False)
     response = get_push_vapid_key()
     assert response.enabled is False
     assert response.public_key is None
@@ -118,7 +118,7 @@ def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Se
     db = db_session
     article = _seed_mapped_article(db, slug="seeded")
 
-    monkeypatch.setattr("app.main.push_runtime_enabled", lambda _settings: True)
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
     created = upsert_push_subscription(
         _push_payload(endpoint="https://push.example/sub-a"),
@@ -149,7 +149,7 @@ def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Se
 
 def test_delete_push_subscription_requires_valid_manage_token(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
-    monkeypatch.setattr("app.main.push_runtime_enabled", lambda _settings: True)
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
     created = upsert_push_subscription(
         _push_payload(endpoint="https://push.example/sub-delete"),
@@ -551,4 +551,3 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
     assert int(second_sub_after.last_notified_json.get("all", 0) or 0) == first.id
     assert second_article is not None
     assert second_article.first_alert_sent_at is not None
-
