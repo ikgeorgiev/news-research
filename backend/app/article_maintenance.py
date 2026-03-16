@@ -14,6 +14,7 @@ from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_p
 from app.ticker_extraction import (
     EXTRACTION_VERSION,
     MIN_PERSIST_CONFIDENCE,
+    NO_KEYWORDS_CONFIDENCE,
     _build_symbol_keywords,
     _canonical_businesswire_article_url,
     _extract_entry_tickers,
@@ -274,21 +275,31 @@ def remap_source_articles(
 
 
 def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
-    candidate_rows = db.scalars(
-        select(Article)
-        .where(Article.canonical_url.ilike("%businesswire.com%"))
-        .order_by(Article.id.asc())
-    ).all()
-
     grouped: dict[str, list[Article]] = {}
     scanned_articles = 0
-    for article in candidate_rows:
-        canonical_candidate = canonicalize_url(article.canonical_url)
-        if not _is_businesswire_article_url(canonical_candidate):
-            continue
-        scanned_articles += 1
-        normalized = _canonical_businesswire_article_url(canonical_candidate)
-        grouped.setdefault(normalized, []).append(article)
+    batch_size = 500
+    cursor_id = 0
+
+    while True:
+        batch = db.scalars(
+            select(Article)
+            .where(
+                Article.canonical_url.ilike("%businesswire.com%"),
+                Article.id > cursor_id,
+            )
+            .order_by(Article.id.asc())
+            .limit(batch_size)
+        ).all()
+        if not batch:
+            break
+        cursor_id = batch[-1].id
+        for article in batch:
+            canonical_candidate = canonicalize_url(article.canonical_url)
+            if not _is_businesswire_article_url(canonical_candidate):
+                continue
+            scanned_articles += 1
+            normalized = _canonical_businesswire_article_url(canonical_candidate)
+            grouped.setdefault(normalized, []).append(article)
 
     duplicate_groups = 0
     merged_articles = 0
@@ -405,13 +416,26 @@ def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
 
 def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> DedupeStats:
     """Merge articles that share the same normalized title within a time window."""
-    all_articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    # Only load title hashes that have more than one article (potential dupes).
+    dupe_hashes = db.execute(
+        select(Article.title_normalized_hash)
+        .group_by(Article.title_normalized_hash)
+        .having(func.count(Article.id) > 1)
+    ).scalars().all()
 
     grouped: dict[str, list[Article]] = {}
-    for article in all_articles:
-        grouped.setdefault(article.title_normalized_hash, []).append(article)
-
-    scanned_articles = len(all_articles)
+    scanned_articles = 0
+    batch_size = 500
+    for offset in range(0, len(dupe_hashes), batch_size):
+        hash_batch = dupe_hashes[offset : offset + batch_size]
+        batch_articles = db.scalars(
+            select(Article)
+            .where(Article.title_normalized_hash.in_(hash_batch))
+            .order_by(Article.id.asc())
+        ).all()
+        scanned_articles += len(batch_articles)
+        for article in batch_articles:
+            grouped.setdefault(article.title_normalized_hash, []).append(article)
     duplicate_groups = 0
     merged_articles = 0
     raw_items_relinked = 0
@@ -564,13 +588,23 @@ def _reextract_purge_article_tickers(
     *,
     symbol_keywords: dict[str, frozenset[str]] | None = None,
     stop_when_existing_symbols_verified: set[str] | None = None,
+    page_fetch_status: list[str] | None = None,
 ) -> dict[str, tuple[str, float]]:
+    """Re-extract tickers from raw contexts.
+
+    If *page_fetch_status* is provided (a mutable list), the function appends
+    ``"ok"`` when at least one page fetch succeeded, or ``"failed"`` when all
+    attempted page fetches failed.  When no page fetch was attempted the list
+    is left unchanged.
+    """
     hits: dict[str, tuple[str, float]] = {}
     required_symbols = {
         symbol.upper()
         for symbol in (stop_when_existing_symbols_verified or set())
         if symbol
     }
+    any_fetch_attempted = False
+    any_fetch_succeeded = False
     for source_code, raw_link, feed_url in raw_contexts:
         entry_hits = _extract_entry_tickers(
             article.title,
@@ -582,10 +616,13 @@ def _reextract_purge_article_tickers(
         )
         _merge_ticker_hits(hits, _verified_ticker_hits(source_code, entry_hits))
         if required_symbols and required_symbols.issubset(hits.keys()):
+            if page_fetch_status is not None and any_fetch_attempted:
+                page_fetch_status.append("ok" if any_fetch_succeeded else "failed")
             return hits
         config = PAGE_FETCH_CONFIGS.get(source_code)
         if config is None:
             continue
+        any_fetch_attempted = True
         fallback_hits = _extract_source_fallback_tickers(
             article.title,
             article.summary or "",
@@ -596,10 +633,16 @@ def _reextract_purge_article_tickers(
             config,
             symbol_keywords=symbol_keywords,
         )
-        _merge_ticker_hits(hits, _verified_ticker_hits(source_code, fallback_hits))
+        if fallback_hits is not None:
+            any_fetch_succeeded = True
+            _merge_ticker_hits(hits, _verified_ticker_hits(source_code, fallback_hits))
         if required_symbols and required_symbols.issubset(hits.keys()):
+            if page_fetch_status is not None:
+                page_fetch_status.append("ok" if any_fetch_succeeded else "failed")
             return hits
 
+    if page_fetch_status is not None and any_fetch_attempted:
+        page_fetch_status.append("ok" if any_fetch_succeeded else "failed")
     return hits
 
 
@@ -623,6 +666,7 @@ def _apply_revalidation(
     prune_verified_hits: bool = True,
     dry_run: bool = False,
     force_update: bool = False,
+    stamp_retained_version: bool = False,
 ) -> _RevalidationOutcome:
     if existing_rows is None:
         existing_rows = {
@@ -667,6 +711,14 @@ def _apply_revalidation(
                 prune_missing=prune_verified_hits,
                 force_update=force_update,
             )
+            if stamp_retained_version:
+                for symbol in verified_hits:
+                    ticker_id = symbol_to_id.get(symbol)
+                    if ticker_id is None:
+                        continue
+                    retained_row = existing_rows.get(ticker_id)
+                    if retained_row is not None:
+                        retained_row.extraction_version = EXTRACTION_VERSION
         return _RevalidationOutcome("kept", True, changed, removed_count, 0)
 
     at_count = len(existing_ids)
@@ -877,6 +929,18 @@ def purge_token_only_articles(
         .correlate(Article)
         .exists()
     )
+    stale_version_exists = (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(
+            and_(
+                ArticleTicker.article_id == Article.id,
+                ArticleTicker.extraction_version < EXTRACTION_VERSION,
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
     low_confidence_exists = (
         select(func.max(ArticleTicker.confidence))
         .where(ArticleTicker.article_id == Article.id)
@@ -927,6 +991,7 @@ def purge_token_only_articles(
                 or_(
                     low_confidence_exists < MIN_PERSIST_CONFIDENCE,
                     plain_token_exists,
+                    stale_version_exists,
                 )
             )
         )
@@ -1001,16 +1066,28 @@ def purge_token_only_articles(
 
             has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
             existing_for_article = existing_rows_by_article.get(article.id)
+            has_stale_existing_rows = any(
+                (row.extraction_version or 0) < EXTRACTION_VERSION
+                for row in (existing_for_article or {}).values()
+            )
             preserved_existing_hits = {
                 id_to_symbol[ticker_id]: (row.match_type, row.confidence)
                 for ticker_id, row in (existing_for_article or {}).items()
                 if ticker_id in id_to_symbol
-                and row.confidence >= MIN_PERSIST_CONFIDENCE
+                and row.confidence >= NO_KEYWORDS_CONFIDENCE
                 and row.match_type != "token"
             }
-            if preserved_existing_hits and len(preserved_existing_hits) < len(
-                existing_for_article or {}
-            ):
+            # When the only rows outside preserved_existing_hits are token
+            # rows, we can prune them without a page fetch.
+            non_preserved_non_token = any(
+                id_to_symbol.get(ticker_id)
+                and id_to_symbol[ticker_id] not in preserved_existing_hits
+                and row.match_type != "token"
+                for ticker_id, row in (existing_for_article or {}).items()
+            )
+            if preserved_existing_hits and not non_preserved_non_token and len(
+                preserved_existing_hits
+            ) < len(existing_for_article or {}):
                 outcome = _apply_revalidation(
                     db,
                     article,
@@ -1019,6 +1096,7 @@ def purge_token_only_articles(
                     symbol_to_id,
                     existing_rows=existing_for_article,
                     dry_run=dry_run,
+                    stamp_retained_version=has_stale_existing_rows,
                 )
                 if outcome.changed_mappings:
                     purged += 1
@@ -1027,9 +1105,11 @@ def purge_token_only_articles(
 
             existing_symbols = {
                 id_to_symbol[ticker_id]
-                for ticker_id in (existing_for_article or {}).keys()
+                for ticker_id, row in (existing_for_article or {}).items()
                 if ticker_id in id_to_symbol
+                and row.match_type != "token"
             }
+            fetch_status: list[str] = []
             verified_hits = _reextract_purge_article_tickers(
                 article,
                 raw_contexts,
@@ -1037,6 +1117,7 @@ def purge_token_only_articles(
                 timeout_seconds,
                 symbol_keywords=symbol_keywords,
                 stop_when_existing_symbols_verified=existing_symbols,
+                page_fetch_status=fetch_status,
             )
             if verified_hits:
                 outcome = _apply_revalidation(
@@ -1047,10 +1128,30 @@ def purge_token_only_articles(
                     symbol_to_id,
                     existing_rows=existing_for_article,
                     dry_run=dry_run,
+                    stamp_retained_version=has_stale_existing_rows,
                 )
                 if outcome.changed_mappings:
                     purged += 1
                     deleted_at += outcome.deleted_article_tickers
+                continue
+
+            page_fetch_failed = fetch_status and fetch_status[0] == "failed"
+            if preserved_existing_hits and page_fetch_failed:
+                # Re-extraction returned nothing and the page fetch failed.
+                # The article had high-confidence non-token mappings so this
+                # is likely a transient miss — stamp only the preserved rows
+                # so they leave the stale queue.  Non-preserved rows stay
+                # stale so they are retried on the next cycle.
+                if has_stale_existing_rows and not dry_run:
+                    preserved_ticker_ids = {
+                        ticker_id
+                        for ticker_id, row in (existing_for_article or {}).items()
+                        if ticker_id in id_to_symbol
+                        and id_to_symbol[ticker_id] in preserved_existing_hits
+                    }
+                    for ticker_id, row in (existing_for_article or {}).items():
+                        if ticker_id in preserved_ticker_ids:
+                            row.extraction_version = EXTRACTION_VERSION
                 continue
 
             outcome = _apply_revalidation(

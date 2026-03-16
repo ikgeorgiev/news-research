@@ -260,7 +260,7 @@ def _build_payload(db: Session, *, article_ids: list[int], scope_keys: list[str]
         "article_ids": [row.id for row in rows],
         "scope_keys": scope_keys,
         "dedupe_key": f"push:{max(row.id for row in rows)}",
-        "tag": "cef-news",
+        "tag": f"cef-news-{max(row.id for row in rows)}",
     }
 
 

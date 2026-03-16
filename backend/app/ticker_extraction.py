@@ -86,7 +86,7 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
 }
 MIN_PERSIST_CONFIDENCE = 0.65
 NO_KEYWORDS_CONFIDENCE = 0.70
-EXTRACTION_VERSION = 2
+EXTRACTION_VERSION = 3
 
 _FUND_KEYWORD_STOPWORDS = frozenset(
     {
@@ -269,6 +269,7 @@ def _build_symbol_keywords(
                     f"{cleaned_fund_words[idx]} {cleaned_fund_words[idx + 1]}"
                 )
         if sponsor:
+            sponsor_distinctive_words: list[str] = []
             for idx, raw_word in enumerate(sponsor.split()):
                 cleaned = raw_word.strip(".,;()\"'").lower()
                 if cleaned == symbol_lower:
@@ -279,6 +280,11 @@ def _build_symbol_keywords(
                     is_leading_sponsor_word=idx == 0,
                 ):
                     keywords.add(cleaned)
+                elif (
+                    len(cleaned) >= 4
+                    and cleaned not in _FUND_KEYWORD_STOPWORDS
+                ):
+                    sponsor_distinctive_words.append(cleaned)
 
             sponsor_words = [
                 word.strip(".,;()\"'").lower()
@@ -293,6 +299,8 @@ def _build_symbol_keywords(
                     break
             if len(brand_words) >= 2:
                 keywords.add(" ".join(brand_words))
+            elif not keywords and len(sponsor_distinctive_words) == 2:
+                keywords.add(" ".join(sponsor_distinctive_words))
 
         result[symbol.upper()] = frozenset(keywords)
     return result
@@ -399,6 +407,7 @@ def _html_to_plain_text(html_text: str) -> str:
 def _strip_sidebar_divs(html_text: str) -> str:
     result: list[str] = []
     i = 0
+    html_lower = html_text.lower()
     for match in HTML_SIDEBAR_DIV_OPEN_PATTERN.finditer(html_text):
         start = match.start()
         if start < i:
@@ -407,8 +416,8 @@ def _strip_sidebar_divs(html_text: str) -> str:
         depth = 1
         j = match.end()
         while j < len(html_text) and depth > 0:
-            div_open = html_text.find("<div", j)
-            div_close = html_text.find("</div>", j)
+            div_open = html_lower.find("<div", j)
+            div_close = html_lower.find("</div>", j)
             if div_close == -1:
                 j = len(html_text)
                 break
@@ -463,10 +472,10 @@ def _extract_source_fallback_tickers(
     config: SourcePageConfig,
     *,
     symbol_keywords: dict[str, frozenset[str]] | None = None,
-) -> dict[str, tuple[str, float]]:
+) -> dict[str, tuple[str, float]] | None:
     html_text = _fetch_source_page_html(link, timeout_seconds, config)
     if not html_text:
-        return {}
+        return None
 
     table_html = _strip_noise_elements(html_text)
     trafilatura_text = _extract_article_body(html_text)

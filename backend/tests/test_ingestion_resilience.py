@@ -1116,9 +1116,8 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
     assert first["items_inserted"] == 0
     assert second["items_inserted"] == 1
     assert len(articles) == 1
-    assert len(raw_rows) == 2
-    assert sum(1 for row in raw_rows if row.article_id is None) == 1
-    assert sum(1 for row in raw_rows if row.article_id is not None) == 1
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id == articles[0].id
 
 
 def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_poll(
@@ -1203,9 +1202,117 @@ def test_ingest_feed_detached_raw_row_does_not_block_later_valid_copy_in_same_po
     assert result["status"] == "success"
     assert result["items_inserted"] == 1
     assert len(articles) == 1
-    assert len(raw_rows) == 2
-    assert sum(1 for row in raw_rows if row.article_id is None) == 1
-    assert sum(1 for row in raw_rows if row.article_id is not None) == 1
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id == articles[0].id
+
+
+def test_ingest_feed_rechecks_attached_raw_row_when_prefetch_is_stale(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    ticker = Ticker(
+        symbol="CGO",
+        fund_name="Calamos Global Total Return Fund",
+        sponsor="Calamos",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+
+    published = datetime(2026, 3, 1, 0, 15, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/calamos-302700004.html",
+        title="Calamos Global Total Return Fund CGO declares distribution",
+        summary="",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="validated_token",
+                confidence=0.68,
+                extraction_version=EXTRACTION_VERSION,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/financial-services-latest-news/dividends-list.rss",
+                raw_guid="prn-guid-stale-prefetch",
+                raw_link=article.canonical_url,
+                raw_title=article.title,
+                raw_pub_date=published,
+                raw_payload_json={"title": article.title, "summary": ""},
+            ),
+        ]
+    )
+    db.commit()
+
+    entry = {
+        "id": "prn-guid-stale-prefetch",
+        "guid": "prn-guid-stale-prefetch",
+        "title": article.title,
+        "link": article.canonical_url,
+        "summary": "",
+        "published": "2026-03-01T00:15:00Z",
+    }
+
+    class FakeResponse:
+        content = b"<rss />"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "app.feed_runtime.requests.get", lambda *_args, **_kwargs: FakeResponse()
+    )
+    monkeypatch.setattr(
+        "app.article_ingest.feedparser.parse",
+        lambda _content: SimpleNamespace(
+            feed={"title": "PR Newswire"}, entries=[entry]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.article_ingest._prefetch_recorded_raw_keys",
+        lambda *_args, **_kwargs: (set(), set()),
+    )
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args, **_kwargs: ""
+    )
+
+    result = ingest_feed(
+        db,
+        source=source,
+        feed_url="https://www.prnewswire.com/rss/financial-services-latest-news/dividends-list.rss",
+        known_symbols={"CGO"},
+        symbol_to_id={"CGO": ticker.id},
+        symbol_keywords={"CGO": frozenset({"calamos", "calamos global"})},
+        timeout_seconds=5,
+        fetch_max_attempts=1,
+        fetch_backoff_seconds=0.0,
+        fetch_backoff_jitter_seconds=0.0,
+    )
+
+    raw_rows = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.raw_guid == "prn-guid-stale-prefetch")
+    ).all()
+
+    assert result["status"] == "success"
+    assert result["items_inserted"] == 0
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id == article.id
 
 
 def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(
@@ -1659,6 +1766,7 @@ def test_purge_token_only_articles_skips_high_confidence_verified_rows(
                 ticker_id=ticker.id,
                 match_type="exchange",
                 confidence=0.88,
+                extraction_version=EXTRACTION_VERSION,
             ),
             RawFeedItem(
                 source_id=source.id,
@@ -1735,6 +1843,7 @@ def test_purge_token_only_articles_skips_high_confidence_page_derived_paren_rows
                 ticker_id=ticker.id,
                 match_type="paren",
                 confidence=0.75,
+                extraction_version=EXTRACTION_VERSION,
             ),
             RawFeedItem(
                 source_id=source.id,
@@ -1812,6 +1921,7 @@ def test_purge_token_only_articles_skips_high_confidence_page_derived_validated_
                 ticker_id=ticker.id,
                 match_type="validated_token",
                 confidence=0.68,
+                extraction_version=EXTRACTION_VERSION,
             ),
             RawFeedItem(
                 source_id=source.id,
@@ -2033,8 +2143,269 @@ def test_purge_token_only_articles_prunes_stale_rows_after_partial_revalidation(
     assert result["deleted_article_tickers"] == 1
     assert result["deleted_raw_feed_items"] == 0
     assert len(remaining_rows) == 1
-    assert remaining_rows[0].ticker_id == verified_ticker.id
-    assert remaining_rows[0].match_type == "validated_token"
+
+
+def test_purge_token_only_articles_rechecks_stale_high_confidence_rows(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 12, 14, 50, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url=(
+            "https://www.prnewswire.com/news-releases/"
+            "ecovadis-and-watershed-partner-to-close-the-scope-3-data-gap-302712475.html"
+        ),
+        title="EcoVadis and Watershed partner to close the Scope 3 data gap",
+        summary=(
+            "Combined with the launch of EcoVadis PCF Calculator, the partnership "
+            "with Watershed is a cornerstone of EcoVadis' mission."
+        ),
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(
+        symbol="PCF",
+        fund_name="High Income Securities",
+        sponsor="Bulldog Investors LLP",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="paren",
+                confidence=0.70,
+                extraction_version=EXTRACTION_VERSION - 1,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+                raw_guid="prn-guid-stale-high-confidence-pcf",
+                raw_link=article.canonical_url,
+                raw_title=article.title,
+                raw_pub_date=published,
+                raw_payload_json={"summary": article.summary, "title": article.title},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (
+            "<html><body><article><p>"
+            "EcoVadis and Watershed partner to close the Scope 3 data gap."
+            "</p></article></body></html>"
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 1
+    assert result["purged_articles"] == 1
+    assert result["deleted_article_tickers"] == 1
+    remaining_article = db.scalar(select(Article).where(Article.id == article.id))
+    remaining_rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+    detached_raw = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.raw_guid == "prn-guid-stale-high-confidence-pcf")
+    ).all()
+
+    assert remaining_article is None
+    assert remaining_rows == []
+    assert detached_raw and all(row.article_id is None for row in detached_raw)
+
+
+def test_purge_token_only_articles_restamps_unchanged_stale_verified_rows(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 12, 15, 10, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/calamos-302712476.html",
+        title="Calamos Global Total Return Fund CGO declares monthly distribution",
+        summary="",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(
+        symbol="CGO",
+        fund_name="Calamos Global Total Return Fund",
+        sponsor="Calamos",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="validated_token",
+                confidence=0.68,
+                extraction_version=EXTRACTION_VERSION - 1,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+                raw_guid="prn-guid-stale-unchanged-cgo",
+                raw_link=article.canonical_url,
+                raw_title=article.title,
+                raw_pub_date=published,
+                raw_payload_json={"summary": article.summary, "title": article.title},
+            ),
+        ]
+    )
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("verified entry hits should avoid fallback fetch")
+        ),
+    )
+
+    first = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+    refreshed_row = db.scalar(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    )
+    second = purge_token_only_articles(
+        db,
+        dry_run=True,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert first["scanned_articles"] == 1
+    assert first["purged_articles"] == 0
+    assert first["deleted_article_tickers"] == 0
+    assert refreshed_row is not None
+    assert refreshed_row.extraction_version == EXTRACTION_VERSION
+    assert second["scanned_articles"] == 0
+    assert second["purged_articles"] == 0
+
+
+def test_purge_token_only_articles_preserves_stale_high_confidence_on_fetch_miss(
+    db_session,
+    monkeypatch,
+):
+    """A stale exchange:0.88 row whose symbol only appeared on the source page
+    must survive a transient page-fetch failure during purge."""
+    db = db_session
+    source = _seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 11, 21, 0, tzinfo=timezone.utc)
+    article = _seed_article(
+        db,
+        canonical_url="https://www.prnewswire.com/news-releases/thornburg-awards-302711484.html",
+        title="With Intelligence Honors Thornburg with Two 2026 Mutual Fund & ETF Awards",
+        summary="Thornburg takes top accolades in multi-asset mutual fund of the year.",
+        published_at=published,
+        source_name="PR Newswire",
+        provider_name="PR Newswire",
+    )
+    ticker = Ticker(
+        symbol="TBLD",
+        fund_name="Thornburg Income Builder Opp Trust",
+        sponsor="Thornburg Investment Management Inc",
+        active=True,
+    )
+    db.add(ticker)
+    db.commit()
+    db.refresh(ticker)
+    db.add_all(
+        [
+            ArticleTicker(
+                article_id=article.id,
+                ticker_id=ticker.id,
+                match_type="exchange",
+                confidence=0.88,
+                extraction_version=EXTRACTION_VERSION - 1,
+            ),
+            RawFeedItem(
+                source_id=source.id,
+                article_id=article.id,
+                feed_url="https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+                raw_guid="prn-guid-tbld-stale-page-miss",
+                raw_link=article.canonical_url,
+                raw_title=article.title,
+                raw_pub_date=published,
+                raw_payload_json={"title": article.title, "summary": article.summary},
+            ),
+        ]
+    )
+    db.commit()
+
+    # Source page returns None — simulates timeout / 404.
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    remaining_article = db.scalar(select(Article).where(Article.id == article.id))
+    remaining_row = db.scalar(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    )
+
+    assert result["purged_articles"] == 0
+    assert remaining_article is not None
+    assert remaining_row is not None
+    assert remaining_row.match_type == "exchange"
+    assert remaining_row.confidence == 0.88
+    assert remaining_row.extraction_version == EXTRACTION_VERSION
+
+    # Second run should not re-select this article.
+    second = purge_token_only_articles(
+        db, dry_run=True, limit=10, timeout_seconds=5,
+    )
+    assert second["scanned_articles"] == 0
 
 
 def test_remap_source_articles_unmapped_miss_is_non_destructive(

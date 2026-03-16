@@ -70,6 +70,71 @@ def _acquire_dedupe_locks(db: Session, url_hash: str, title_hash: str) -> None:
         db.execute(select(func.pg_advisory_xact_lock(key)))
 
 
+def _acquire_raw_item_locks(
+    db: Session,
+    *,
+    source_id: int,
+    raw_guid: str | None,
+    raw_link: str,
+    published_at: datetime,
+) -> None:
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+
+    lock_hashes = {
+        sha256_str(f"raw-pair:{source_id}:{raw_link}:{published_at.isoformat()}")
+    }
+    if raw_guid:
+        lock_hashes.add(sha256_str(f"raw-guid:{source_id}:{raw_guid}"))
+
+    for key in sorted(_hash_hex_to_signed_bigint(value) for value in lock_hashes):
+        db.execute(select(func.pg_advisory_xact_lock(key)))
+
+
+def _find_existing_raw_feed_item(
+    db: Session,
+    *,
+    source_id: int,
+    raw_guid: str | None,
+    raw_link: str,
+    published_at: datetime,
+    require_attached: bool,
+) -> RawFeedItem | None:
+    attachment_filter = (
+        RawFeedItem.article_id.is_not(None)
+        if require_attached
+        else RawFeedItem.article_id.is_(None)
+    )
+    base_filters = [
+        RawFeedItem.source_id == source_id,
+        attachment_filter,
+    ]
+
+    if raw_guid:
+        row = db.scalar(
+            select(RawFeedItem)
+            .where(and_(*base_filters, RawFeedItem.raw_guid == raw_guid))
+            .order_by(RawFeedItem.id.desc())
+            .limit(1)
+        )
+        if row is not None:
+            return row
+
+    return db.scalar(
+        select(RawFeedItem)
+        .where(
+            and_(
+                *base_filters,
+                RawFeedItem.raw_link == raw_link,
+                RawFeedItem.raw_pub_date == published_at,
+            )
+        )
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+    )
+
+
 def _extract_provider(entry: feedparser.FeedParserDict, fallback: str) -> str:
     source = entry.get("source")
     if isinstance(source, dict):
@@ -191,23 +256,28 @@ def _upsert_article(
         raise RuntimeError("article upsert failed to resolve target row")
 
     if not created:
-        should_overwrite_on_url_match = (
-            not matched_by_url
-        ) or allow_url_match_overwrite
-        if should_overwrite_on_url_match:
+        if matched_by_url and allow_url_match_overwrite:
+            # Same URL, exact source — safe to overwrite all fields.
             article.title = title
             article.source_name = source_name
             article.provider_name = provider_name
             article.content_hash = content_hash
             article.cluster_key = cluster_key
-        if summary:
-            if matched_by_url and allow_url_match_overwrite:
+            if summary:
                 article.summary = summary
-            elif (not matched_by_url) and (
+            article_published = article.published_at
+            if article_published is None or to_utc(published_at) > to_utc(
+                article_published
+            ):
+                article.published_at = published_at
+        elif not matched_by_url:
+            # Title-window match from a different feed entry.  Only enrich
+            # — do NOT overwrite source_name/provider_name/title to avoid
+            # a cross-source attribution swap (e.g. PRN → BW).
+            if summary and (
                 not article.summary or len(summary) > len(article.summary)
             ):
                 article.summary = summary
-        if should_overwrite_on_url_match:
             article_published = article.published_at
             if article_published is None or to_utc(published_at) > to_utc(
                 article_published
@@ -364,6 +434,23 @@ def ingest_feed(
                                 prepared.published_at,
                             ) in recorded_pairs:
                                 continue
+                            _acquire_raw_item_locks(
+                                db,
+                                source_id=source.id,
+                                raw_guid=prepared.raw_guid,
+                                raw_link=prepared.raw_link,
+                                published_at=prepared.published_at,
+                            )
+                            existing_raw = _find_existing_raw_feed_item(
+                                db,
+                                source_id=source.id,
+                                raw_guid=prepared.raw_guid,
+                                raw_link=prepared.raw_link,
+                                published_at=prepared.published_at,
+                                require_attached=True,
+                            )
+                            if existing_raw is not None:
+                                continue
 
                             raw_summary = (
                                 str(
@@ -401,7 +488,8 @@ def ingest_feed(
                                     page_config,
                                     symbol_keywords=symbol_keywords,
                                 )
-                                _merge_ticker_hits(ticker_hits, fallback_hits)
+                                if fallback_hits:
+                                    _merge_ticker_hits(ticker_hits, fallback_hits)
 
                             should_persist_tickers = _should_persist_entry(
                                 source.code, ticker_hits
@@ -465,36 +553,14 @@ def ingest_feed(
                                 "source": entry_source_name,
                             }
                             detached_row: RawFeedItem | None = None
-                            if article is None:
-                                if prepared.raw_guid:
-                                    detached_row = db.scalar(
-                                        select(RawFeedItem)
-                                        .where(
-                                            and_(
-                                                RawFeedItem.source_id == source.id,
-                                                RawFeedItem.article_id.is_(None),
-                                                RawFeedItem.raw_guid == prepared.raw_guid,
-                                            )
-                                        )
-                                        .order_by(RawFeedItem.id.desc())
-                                        .limit(1)
-                                    )
-                                if detached_row is None:
-                                    detached_row = db.scalar(
-                                        select(RawFeedItem)
-                                        .where(
-                                            and_(
-                                                RawFeedItem.source_id == source.id,
-                                                RawFeedItem.article_id.is_(None),
-                                                RawFeedItem.raw_link == prepared.raw_link,
-                                                RawFeedItem.raw_pub_date
-                                                == prepared.published_at,
-                                            )
-                                        )
-                                        .order_by(RawFeedItem.id.desc())
-                                        .limit(1)
-                                    )
-
+                            detached_row = _find_existing_raw_feed_item(
+                                db,
+                                source_id=source.id,
+                                raw_guid=prepared.raw_guid,
+                                raw_link=prepared.raw_link,
+                                published_at=prepared.published_at,
+                                require_attached=False,
+                            )
                             if detached_row is None:
                                 db.add(
                                     RawFeedItem(
@@ -509,6 +575,9 @@ def ingest_feed(
                                     )
                                 )
                             else:
+                                detached_row.article_id = (
+                                    article.id if article is not None else None
+                                )
                                 detached_row.feed_url = feed_url
                                 detached_row.raw_guid = prepared.raw_guid
                                 detached_row.raw_title = prepared.raw_title
