@@ -35,7 +35,7 @@ GLOBENEWSWIRE_FEEDS: list[str] = [
 ]
 
 BUSINESSWIRE_FEEDS: list[str] = [
-    "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpRXEMGSQ5SVFJQFkBXFUBdUlNDFUkQUhFUVl5XEE0=",
+    "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
 ]
 
 
