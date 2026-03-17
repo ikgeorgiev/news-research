@@ -21,44 +21,15 @@ from app.schemas import (
 )
 from app.sources import SourceFeed
 from app.utils import sha256_str
-
-
-def _seed_mapped_article(db: Session, *, slug: str) -> Article:
-    ticker = db.scalar(select(Ticker).where(Ticker.symbol == "GOF"))
-    if ticker is None:
-        ticker = Ticker(symbol="GOF", active=True)
-        db.add(ticker)
-        db.commit()
-        db.refresh(ticker)
-
-    article = Article(
-        canonical_url=f"https://example.com/{slug}",
-        canonical_url_hash=sha256_str(f"https://example.com/{slug}"),
-        title=f"Title {slug}",
-        summary=f"Summary {slug}",
-        published_at=datetime.now(timezone.utc),
-        source_name="Test Source",
-        provider_name="Test Provider",
-        content_hash=sha256_str(f"content-{slug}"),
-        title_normalized_hash=sha256_str(f"title-{slug}"),
-        cluster_key=sha256_str(f"cluster-{slug}"),
-    )
-    db.add(article)
-    db.commit()
-    db.refresh(article)
-
-    db.add(ArticleTicker(article_id=article.id, ticker_id=ticker.id))
-    db.commit()
-    db.refresh(article)
-    return article
+from tests.helpers import seed_article
 
 
 def _seed_article_with_ticker(
     db: Session,
     *,
     slug: str,
-    symbol: str,
-    active: bool,
+    symbol: str = "GOF",
+    active: bool = True,
 ) -> Article:
     ticker = db.scalar(select(Ticker).where(Ticker.symbol == symbol))
     if ticker is None:
@@ -67,21 +38,7 @@ def _seed_article_with_ticker(
         db.commit()
         db.refresh(ticker)
 
-    article = Article(
-        canonical_url=f"https://example.com/{slug}",
-        canonical_url_hash=sha256_str(f"https://example.com/{slug}"),
-        title=f"Title {slug}",
-        summary=f"Summary {slug}",
-        published_at=datetime.now(timezone.utc),
-        source_name="Test Source",
-        provider_name="Test Provider",
-        content_hash=sha256_str(f"content-{slug}"),
-        title_normalized_hash=sha256_str(f"title-{slug}"),
-        cluster_key=sha256_str(f"cluster-{slug}"),
-    )
-    db.add(article)
-    db.commit()
-    db.refresh(article)
+    article = seed_article(db, slug=slug, published_at=datetime.now(timezone.utc))
 
     db.add(ArticleTicker(article_id=article.id, ticker_id=ticker.id))
     db.commit()
@@ -116,7 +73,7 @@ def test_get_push_vapid_key_disabled_when_not_configured(monkeypatch: pytest.Mon
 
 def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
-    article = _seed_mapped_article(db, slug="seeded")
+    article = _seed_article_with_ticker(db, slug="seeded")
 
     monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
@@ -180,8 +137,8 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
 
 def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
-    first = _seed_mapped_article(db, slug="push-gone-1")
-    second = _seed_mapped_article(db, slug="push-gone-2")
+    first = _seed_article_with_ticker(db, slug="push-gone-1")
+    second = _seed_article_with_ticker(db, slug="push-gone-2")
 
     sub = PushSubscription(
         endpoint="https://push.example/sub-gone",
@@ -286,8 +243,8 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session
 
 def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
-    first = _seed_mapped_article(db, slug="retry-1")
-    second = _seed_mapped_article(db, slug="retry-2")
+    first = _seed_article_with_ticker(db, slug="retry-1")
+    second = _seed_article_with_ticker(db, slug="retry-2")
 
     sub = PushSubscription(
         endpoint="https://push.example/sub-retry",
@@ -334,7 +291,7 @@ def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
     monkeypatch: pytest.MonkeyPatch,
 ):
     db = db_session
-    seeded_articles = [_seed_mapped_article(db, slug=f"backlog-{idx}") for idx in range(6)]
+    seeded_articles = [_seed_article_with_ticker(db, slug=f"backlog-{idx}") for idx in range(6)]
 
     sub = PushSubscription(
         endpoint="https://push.example/sub-backlog",
@@ -402,7 +359,7 @@ def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers
     monkeypatch: pytest.MonkeyPatch,
 ):
     db = db_session
-    first = _seed_mapped_article(db, slug="active-baseline")
+    first = _seed_article_with_ticker(db, slug="active-baseline")
     _inactive_only = _seed_article_with_ticker(db, slug="inactive-only", symbol="AAA", active=False)
 
     sub = PushSubscription(
@@ -445,8 +402,8 @@ def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers
 
 def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
-    first = _seed_mapped_article(db, slug="repeat-error-1")
-    _second = _seed_mapped_article(db, slug="repeat-error-2")
+    first = _seed_article_with_ticker(db, slug="repeat-error-1")
+    _second = _seed_article_with_ticker(db, slug="repeat-error-2")
 
     sub = PushSubscription(
         endpoint="https://push.example/sub-repeat-error",
@@ -492,8 +449,8 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
     monkeypatch: pytest.MonkeyPatch,
 ):
     db = db_session
-    first = _seed_mapped_article(db, slug="persist-success-1")
-    second = _seed_mapped_article(db, slug="persist-success-2")
+    first = _seed_article_with_ticker(db, slug="persist-success-1")
+    second = _seed_article_with_ticker(db, slug="persist-success-2")
 
     first_sub = PushSubscription(
         endpoint="https://push.example/sub-persist-1",

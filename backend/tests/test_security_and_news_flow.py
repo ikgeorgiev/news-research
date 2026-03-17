@@ -27,38 +27,9 @@ from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.schemas import MarkAlertsSentRequest
 from app.ticker_loader import load_tickers_from_csv
 from app.utils import sha256_str
+from tests.helpers import seed_article
 
 settings = get_settings()
-
-
-def _seed_article(
-    db: Session,
-    *,
-    slug: str,
-    published_at: datetime,
-    created_at: datetime | None = None,
-    canonical_url: str | None = None,
-    title: str | None = None,
-) -> Article:
-    url = canonical_url or f"https://example.com/{slug}"
-    article = Article(
-        canonical_url=url,
-        canonical_url_hash=sha256_str(url),
-        title=title or f"Title {slug}",
-        summary=f"Summary {slug}",
-        published_at=published_at,
-        source_name="Test Source",
-        provider_name="Test Provider",
-        content_hash=sha256_str(f"content-{slug}"),
-        title_normalized_hash=sha256_str(f"title-{slug}"),
-        cluster_key=sha256_str(f"cluster-{slug}"),
-        created_at=created_at or published_at,
-        updated_at=created_at or published_at,
-    )
-    db.add(article)
-    db.commit()
-    db.refresh(article)
-    return article
 
 
 def test_require_admin_api_key_rejects_when_not_configured(monkeypatch: pytest.MonkeyPatch):
@@ -119,12 +90,12 @@ def test_list_news_keeps_empty_ticker_input_on_mapped_only_path(db_session: Sess
     db.commit()
     db.refresh(ticker)
 
-    mapped_article = _seed_article(
+    mapped_article = seed_article(
         db,
         slug="mapped-empty-ticker",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
     )
-    _unmapped_article = _seed_article(
+    _unmapped_article = seed_article(
         db,
         slug="unmapped-empty-ticker",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -158,12 +129,12 @@ def test_inactive_only_ticker_mapping_is_treated_as_unmapped(db_session: Session
     db.refresh(active_ticker)
     db.refresh(inactive_ticker)
 
-    active_article = _seed_article(
+    active_article = seed_article(
         db,
         slug="active-mapped",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
     )
-    inactive_only_article = _seed_article(
+    inactive_only_article = seed_article(
         db,
         slug="inactive-only-mapped",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -217,7 +188,7 @@ def test_ticker_filter_excludes_inactive_only_mappings(db_session: Session):
     db.commit()
     db.refresh(inactive_ticker)
 
-    article = _seed_article(
+    article = seed_article(
         db,
         slug="inactive-filter",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -260,7 +231,7 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw(db_s
 
     canonical_url = "https://www.businesswire.com/news/home/20260301000001/en"
     yahoo_variant_url = canonical_url + "?feedref=abc123"
-    article = _seed_article(
+    article = seed_article(
         db,
         slug="bw-provider",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -351,7 +322,7 @@ def test_list_news_uses_single_statement_for_enriched_rows(db_session: Session):
     db.refresh(gof)
     db.refresh(utf)
 
-    article = _seed_article(
+    article = seed_article(
         db,
         slug="single-statement",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -430,7 +401,7 @@ def test_get_news_item_uses_single_statement_for_enriched_row(db_session: Sessio
     db.refresh(businesswire)
     db.refresh(gof)
 
-    article = _seed_article(
+    article = seed_article(
         db,
         slug="detail-single-statement",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -491,12 +462,12 @@ def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scop
     db.refresh(businesswire)
     db.refresh(gof)
 
-    mapped_article = _seed_article(
+    mapped_article = seed_article(
         db,
         slug="global-summary-mapped",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
     )
-    bw_general_article = _seed_article(
+    bw_general_article = seed_article(
         db,
         slug="global-summary-general",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -555,19 +526,19 @@ def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scop
 
 def test_list_news_cursor_paginates_consistently(db_session: Session):
     db = db_session
-    newest = _seed_article(
+    newest = seed_article(
         db,
         slug="newest",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
         created_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
     )
-    middle = _seed_article(
+    middle = seed_article(
         db,
         slug="middle",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
         created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
     )
-    oldest = _seed_article(
+    oldest = seed_article(
         db,
         slug="oldest",
         published_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -610,17 +581,17 @@ def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
 
 def test_list_news_ids_supports_cursor_pagination(db_session: Session):
     db = db_session
-    first = _seed_article(
+    first = seed_article(
         db,
         slug="first",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
     )
-    second = _seed_article(
+    second = seed_article(
         db,
         slug="second",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
     )
-    third = _seed_article(
+    third = seed_article(
         db,
         slug="third",
         published_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -697,7 +668,7 @@ def test_ticker_loader_handles_more_than_sqlite_parameter_limit(db_session: Sess
 
 def test_mark_news_alerts_sent_sets_first_timestamp_once(db_session: Session):
     db = db_session
-    article = _seed_article(
+    article = seed_article(
         db,
         slug="alert-mark",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -763,13 +734,13 @@ def test_mark_news_alerts_sent_chunks_large_updates(db_session: Session):
 
 def test_list_news_search_treats_wildcard_chars_as_literals(db_session: Session):
     db = db_session
-    literal = _seed_article(
+    literal = seed_article(
         db,
         slug="literal-wildcard",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
         title="Yield 100%_covered",
     )
-    _other = _seed_article(
+    _other = seed_article(
         db,
         slug="plain-text",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -802,7 +773,7 @@ def test_list_news_search_matches_ticker_symbol(db_session: Session):
     db.add(ticker)
     db.flush()
 
-    mapped = _seed_article(
+    mapped = seed_article(
         db,
         slug="mapped-no-title-match",
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
@@ -810,14 +781,14 @@ def test_list_news_search_matches_ticker_symbol(db_session: Session):
     )
     db.add(ArticleTicker(article_id=mapped.id, ticker_id=ticker.id, match_type="context", confidence=0.90))
 
-    title_match = _seed_article(
+    title_match = seed_article(
         db,
         slug="title-match-no-mapping",
         published_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
         title="XFLT announces earnings",
     )
 
-    _unrelated = _seed_article(
+    _unrelated = seed_article(
         db,
         slug="unrelated",
         published_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
