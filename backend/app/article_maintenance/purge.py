@@ -13,8 +13,9 @@ from app.article_maintenance._common import (
     load_raw_contexts,
 )
 from app.models import Article, ArticleTicker, RawFeedItem, Source
+from app.query_utils import any_ticker_mapped_exists
 from app.ticker_context import load_ticker_context
-from app.ticker_extraction import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
+from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.utils import GENERAL_SOURCE_CODE
 
 
@@ -34,13 +35,7 @@ def purge_token_only_articles(
 ) -> PurgeFalsePositiveStats:
     ticker_context = load_ticker_context(db)
 
-    mapped_exists = (
-        select(1)
-        .select_from(ArticleTicker)
-        .where(ArticleTicker.article_id == Article.id)
-        .correlate(Article)
-        .exists()
-    )
+    mapped_exists = any_ticker_mapped_exists()
     plain_token_exists = (
         select(1)
         .select_from(ArticleTicker)

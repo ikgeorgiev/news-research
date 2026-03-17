@@ -95,10 +95,10 @@ def parse_datetime(value: Any) -> datetime | None:
             return None
         try:
             dt = parsedate_to_datetime(text)
-        except Exception:
+        except Exception:  # fault-isolation: broad catch intentional
             try:
                 dt = dt_parser.parse(text)
-            except Exception:
+            except Exception:  # fault-isolation: broad catch intentional
                 return None
 
     if dt.tzinfo is None:

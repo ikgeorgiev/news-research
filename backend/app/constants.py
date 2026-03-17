@@ -1,1 +1,15 @@
 TITLE_DEDUP_WINDOW_HOURS = 48
+
+# Ticker extraction confidence thresholds (shared across article_ingest,
+# article_maintenance, ticker_extraction)
+MIN_PERSIST_CONFIDENCE = 0.65
+NO_KEYWORDS_CONFIDENCE = 0.70
+EXTRACTION_VERSION = 3
+
+# Named confidence levels for extraction match types
+CONFIDENCE_CONTEXT = 0.93
+CONFIDENCE_EXCHANGE = 0.88
+CONFIDENCE_PAREN = 0.75
+CONFIDENCE_VALIDATED_TOKEN = 0.68
+CONFIDENCE_TABLE_VALIDATED = 0.84
+CONFIDENCE_UNVALIDATED = 0.62

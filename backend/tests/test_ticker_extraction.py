@@ -5,9 +5,8 @@ import pytest
 
 from app.article_ingest import _clamp_label
 from app.sources import PAGE_FETCH_CONFIGS
+from app.constants import MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.ticker_extraction import (
-    MIN_PERSIST_CONFIDENCE,
-    NO_KEYWORDS_CONFIDENCE,
     _extract_article_body,
     _build_symbol_keywords,
     _extract_entry_tickers,

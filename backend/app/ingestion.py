@@ -277,7 +277,7 @@ def _run_stale_revalidation(db: Session, settings: Settings) -> None:
                 revalidation_stats["purged"],
                 revalidation_stats["unchanged"],
             )
-    except Exception:
+    except Exception:  # fault-isolation: broad catch intentional
         logger.exception("Revalidation failed, continuing ingestion cycle")
         db.rollback()
 

@@ -37,7 +37,7 @@ from app.models import (
     Source,
     Ticker,
 )
-from app.ticker_extraction import EXTRACTION_VERSION
+from app.constants import EXTRACTION_VERSION
 from app.utils import sha256_str
 
 

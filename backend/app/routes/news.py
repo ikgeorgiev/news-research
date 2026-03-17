@@ -10,7 +10,7 @@ from app.article_filters import build_article_query
 from app.database import get_db
 from app.deps import require_admin_api_key
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.query_utils import iter_chunks, prefix_literal_pattern
+from app.query_utils import active_ticker_mapped_exists, iter_chunks, prefix_literal_pattern
 from app.schemas import (
     MarkAlertsSentRequest,
     MarkAlertsSentResponse,
@@ -227,19 +227,7 @@ def _build_enriched_news_select(db: Session, news_page):
 
 def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
     sort_key = _article_sort_key_expr()
-    mapped_exists = (
-        select(1)
-        .select_from(ArticleTicker)
-        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-        .where(
-            and_(
-                ArticleTicker.article_id == Article.id,
-                Ticker.active.is_(True),
-            )
-        )
-        .correlate(Article)
-        .exists()
-    )
+    mapped_exists = active_ticker_mapped_exists()
     include_provider_exists = (
         select(1)
         .select_from(RawFeedItem)

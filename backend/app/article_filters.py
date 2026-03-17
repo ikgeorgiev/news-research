@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.query_utils import contains_literal_pattern
+from app.query_utils import active_ticker_mapped_exists, contains_literal_pattern
 
 
 def _normalized_ticker_symbols(
@@ -52,19 +52,7 @@ def build_article_query(
     ticker_symbols = _normalized_ticker_symbols(ticker=ticker, tickers=tickers)
     ticker_filter_supplied = ticker is not None or tickers is not None
 
-    mapped_exists = (
-        select(1)
-        .select_from(ArticleTicker)
-        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
-        .where(
-            and_(
-                ArticleTicker.article_id == Article.id,
-                Ticker.active.is_(True),
-            )
-        )
-        .correlate(Article)
-        .exists()
-    )
+    mapped_exists = active_ticker_mapped_exists()
 
     if ticker_symbols:
         ticker_match_exists = (

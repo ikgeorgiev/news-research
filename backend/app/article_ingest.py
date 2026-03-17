@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 from urllib.parse import urlparse
@@ -23,8 +24,8 @@ from app.feed_runtime import (
 )
 from app.models import Article, IngestionRun, RawFeedItem, Source
 from app.sources import PAGE_FETCH_CONFIGS
+from app.constants import MIN_PERSIST_CONFIDENCE
 from app.ticker_extraction import (
-    MIN_PERSIST_CONFIDENCE,
     _canonical_businesswire_article_url,
     _extract_entry_tickers,
     _extract_source_fallback_tickers,
@@ -147,6 +148,87 @@ def _extract_provider(entry: feedparser.FeedParserDict, fallback: str) -> str:
     return _clamp_label(fallback)
 
 
+@dataclass(slots=True)
+class ArticleMatch:
+    article: Article | None = None
+    matched_by_url: bool = False
+
+
+def _find_matching_article(
+    db: Session,
+    *,
+    url_hash: str,
+    title_hash: str,
+    window_start: datetime,
+    window_end: datetime,
+    source_code: str,
+) -> ArticleMatch:
+    article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
+    if article is not None:
+        return ArticleMatch(article=article, matched_by_url=True)
+
+    if source_code == GENERAL_SOURCE_CODE:
+        article = _find_title_window_match(
+            db,
+            title_hash=title_hash,
+            window_start=window_start,
+            window_end=window_end,
+            exclude_source_code=source_code,
+        )
+    else:
+        article = _find_title_window_match(
+            db,
+            title_hash=title_hash,
+            window_start=window_start,
+            window_end=window_end,
+        )
+    if article is not None:
+        return ArticleMatch(article=article, matched_by_url=False)
+
+    return ArticleMatch()
+
+
+def _find_title_window_match(
+    db: Session,
+    *,
+    title_hash: str,
+    window_start: datetime,
+    window_end: datetime,
+    exclude_source_code: str | None = None,
+) -> Article | None:
+    conditions = [
+        Article.title_normalized_hash == title_hash,
+        Article.published_at >= window_start,
+        Article.published_at <= window_end,
+    ]
+    if exclude_source_code:
+        has_excluded_source = (
+            select(1)
+            .select_from(RawFeedItem)
+            .join(Source, Source.id == RawFeedItem.source_id)
+            .where(
+                and_(
+                    RawFeedItem.article_id == Article.id,
+                    Source.code == exclude_source_code,
+                )
+            )
+            .correlate(Article)
+            .exists()
+        )
+        has_any_raw = (
+            select(1)
+            .select_from(RawFeedItem)
+            .where(RawFeedItem.article_id == Article.id)
+            .correlate(Article)
+            .exists()
+        )
+        conditions.append(has_any_raw)
+        conditions.append(~has_excluded_source)
+    return db.scalar(
+        select(Article).where(and_(*conditions)).order_by(desc(Article.id)).limit(1)
+    )
+
+
 def _upsert_article(
     db: Session,
     *,
@@ -172,52 +254,17 @@ def _upsert_article(
     window_start = published_at - timedelta(hours=TITLE_DEDUP_WINDOW_HOURS)
     window_end = published_at + timedelta(hours=TITLE_DEDUP_WINDOW_HOURS)
 
-    def _find_title_window_match(
-        *, exclude_source_code: str | None = None
-    ) -> Article | None:
-        conditions = [
-            Article.title_normalized_hash == title_hash,
-            Article.published_at >= window_start,
-            Article.published_at <= window_end,
-        ]
-        if exclude_source_code:
-            has_excluded_source = (
-                select(1)
-                .select_from(RawFeedItem)
-                .join(Source, Source.id == RawFeedItem.source_id)
-                .where(
-                    and_(
-                        RawFeedItem.article_id == Article.id,
-                        Source.code == exclude_source_code,
-                    )
-                )
-                .correlate(Article)
-                .exists()
-            )
-            has_any_raw = (
-                select(1)
-                .select_from(RawFeedItem)
-                .where(RawFeedItem.article_id == Article.id)
-                .correlate(Article)
-                .exists()
-            )
-            conditions.append(has_any_raw)
-            conditions.append(~has_excluded_source)
-        return db.scalar(
-            select(Article).where(and_(*conditions)).order_by(desc(Article.id)).limit(1)
-        )
-
-    article = db.scalar(select(Article).where(Article.canonical_url_hash == url_hash))
-    matched_by_url = article is not None
+    match = _find_matching_article(
+        db,
+        url_hash=url_hash,
+        title_hash=title_hash,
+        window_start=window_start,
+        window_end=window_end,
+        source_code=source_code,
+    )
+    article = match.article
+    matched_by_url = match.matched_by_url
     created = False
-
-    if article is None:
-        if source_code == GENERAL_SOURCE_CODE:
-            article = _find_title_window_match(exclude_source_code=source_code)
-        else:
-            article = _find_title_window_match()
-        if article is not None:
-            matched_by_url = False
 
     if article is None:
         new_article = Article(
@@ -239,17 +286,16 @@ def _upsert_article(
             article = new_article
             created = True
         except IntegrityError:
-            article = db.scalar(
-                select(Article).where(Article.canonical_url_hash == url_hash)
+            match = _find_matching_article(
+                db,
+                url_hash=url_hash,
+                title_hash=title_hash,
+                window_start=window_start,
+                window_end=window_end,
+                source_code=source_code,
             )
-            matched_by_url = article is not None
-            if article is None:
-                if source_code == GENERAL_SOURCE_CODE:
-                    article = _find_title_window_match(exclude_source_code=source_code)
-                else:
-                    article = _find_title_window_match()
-                if article is not None:
-                    matched_by_url = False
+            article = match.article
+            matched_by_url = match.matched_by_url
             if article is None:
                 raise
 
@@ -286,6 +332,267 @@ def _upsert_article(
                 article.published_at = published_at
 
     return article, created, matched_by_url
+
+
+@dataclass(slots=True)
+class EntryResult:
+    created_article: bool = False
+    persisted_raw: bool = False
+    has_article: bool = False
+    raw_guid: str | None = None
+    raw_pair: tuple[str, datetime] | None = None
+
+
+def _prepare_feed_entries(
+    entries: list,
+    now_utc: datetime,
+) -> list[PreparedFeedEntry]:
+    prepared: list[PreparedFeedEntry] = []
+    for entry in entries:
+        raw_title = str(entry.get("title") or "").strip()
+        title = clean_summary_text(raw_title)
+        raw_link_input = str(entry.get("link") or "").strip()
+        raw_link = canonicalize_url(raw_link_input)
+        if not title or not raw_link:
+            continue
+
+        parsed_input = urlparse(raw_link_input)
+        is_businesswire_link = _is_businesswire_article_url(raw_link)
+        article_url = raw_link
+        if is_businesswire_link:
+            article_url = _canonical_businesswire_article_url(raw_link)
+            is_exact_source_url = (
+                not parsed_input.query
+                and not parsed_input.fragment
+                and raw_link == article_url
+            )
+        else:
+            is_exact_source_url = raw_link == article_url
+
+        published_at = (
+            parse_datetime(entry.get("published") or entry.get("updated"))
+            or now_utc
+        )
+        raw_guid = (
+            str(entry.get("id") or entry.get("guid") or "").strip() or None
+        )
+        prepared.append(
+            PreparedFeedEntry(
+                entry=entry,
+                raw_title=raw_title,
+                title=title,
+                raw_link=raw_link,
+                article_url=article_url,
+                is_exact_source_url=is_exact_source_url,
+                published_at=published_at,
+                raw_guid=raw_guid,
+            )
+        )
+    return prepared
+
+
+def _persist_raw_feed_item(
+    db: Session,
+    *,
+    source_id: int,
+    article: Article | None,
+    prepared: PreparedFeedEntry,
+    feed_url: str,
+    raw_summary: str | None,
+    entry_source_name: str,
+) -> None:
+    payload = {
+        "title": prepared.raw_title,
+        "link": prepared.raw_link,
+        "published": prepared.entry.get("published")
+        or prepared.entry.get("updated"),
+        "summary": raw_summary,
+        "source": entry_source_name,
+    }
+    detached_row = _find_existing_raw_feed_item(
+        db,
+        source_id=source_id,
+        raw_guid=prepared.raw_guid,
+        raw_link=prepared.raw_link,
+        published_at=prepared.published_at,
+        require_attached=False,
+    )
+    if detached_row is None:
+        db.add(
+            RawFeedItem(
+                source_id=source_id,
+                article_id=article.id if article is not None else None,
+                feed_url=feed_url,
+                raw_guid=prepared.raw_guid,
+                raw_title=prepared.raw_title,
+                raw_link=prepared.raw_link,
+                raw_pub_date=prepared.published_at,
+                raw_payload_json=to_json_safe(payload),
+            )
+        )
+    else:
+        detached_row.article_id = (
+            article.id if article is not None else None
+        )
+        detached_row.feed_url = feed_url
+        detached_row.raw_guid = prepared.raw_guid
+        detached_row.raw_title = prepared.raw_title
+        detached_row.raw_link = prepared.raw_link
+        detached_row.raw_pub_date = prepared.published_at
+        detached_row.raw_payload_json = to_json_safe(payload)
+        detached_row.fetched_at = datetime.now(timezone.utc)
+
+
+def _process_single_entry(
+    db: Session,
+    *,
+    prepared: PreparedFeedEntry,
+    source: Source,
+    source_name: str,
+    provider_name: str,
+    feed_url: str,
+    known_symbols: set[str],
+    symbol_to_id: dict[str, int],
+    timeout_seconds: int,
+    page_config,
+    recorded_guids: set[str],
+    recorded_pairs: set[tuple[str, datetime]],
+    symbol_keywords: dict[str, frozenset[str]] | None = None,
+) -> EntryResult:
+    result = EntryResult()
+    article: Article | None = None
+
+    if prepared.raw_guid and prepared.raw_guid in recorded_guids:
+        return result
+    if (prepared.raw_link, prepared.published_at) in recorded_pairs:
+        return result
+
+    with db.begin_nested():
+        _acquire_raw_item_locks(
+            db,
+            source_id=source.id,
+            raw_guid=prepared.raw_guid,
+            raw_link=prepared.raw_link,
+            published_at=prepared.published_at,
+        )
+        existing_raw = _find_existing_raw_feed_item(
+            db,
+            source_id=source.id,
+            raw_guid=prepared.raw_guid,
+            raw_link=prepared.raw_link,
+            published_at=prepared.published_at,
+            require_attached=True,
+        )
+        if existing_raw is not None:
+            return result
+
+        raw_summary = (
+            str(
+                prepared.entry.get("summary")
+                or prepared.entry.get("description")
+                or ""
+            ).strip()
+            or None
+        )
+        summary = clean_summary_text(raw_summary)
+
+        entry_source_name = _extract_provider(
+            prepared.entry, source_name
+        )
+        ticker_hits = _extract_entry_tickers(
+            prepared.title,
+            summary or "",
+            prepared.raw_link,
+            feed_url,
+            known_symbols,
+            symbol_keywords=symbol_keywords,
+        )
+        max_hit_conf = _max_ticker_confidence(ticker_hits)
+        if (
+            max_hit_conf < MIN_PERSIST_CONFIDENCE
+            and page_config is not None
+        ):
+            fallback_hits = _extract_source_fallback_tickers(
+                prepared.title,
+                summary or "",
+                prepared.raw_link,
+                feed_url,
+                known_symbols,
+                timeout_seconds,
+                page_config,
+                symbol_keywords=symbol_keywords,
+            )
+            if fallback_hits:
+                _merge_ticker_hits(ticker_hits, fallback_hits)
+
+        should_persist_tickers = _should_persist_entry(
+            source.code, ticker_hits
+        )
+        allow_existing_exact_url = False
+        if (
+            not should_persist_tickers
+            and source.code != GENERAL_SOURCE_CODE
+            and prepared.is_exact_source_url
+        ):
+            existing_article_id = db.scalar(
+                select(Article.id)
+                .where(
+                    Article.canonical_url_hash
+                    == sha256_str(prepared.article_url)
+                )
+                .limit(1)
+            )
+            allow_existing_exact_url = (
+                existing_article_id is not None
+            )
+        effective_ticker_hits = _verified_ticker_hits(
+            source.code,
+            ticker_hits,
+        )
+        if should_persist_tickers or allow_existing_exact_url:
+            article, created, matched_by_url = _upsert_article(
+                db,
+                source_code=source.code,
+                canonical_url=prepared.article_url,
+                title=prepared.title,
+                summary=summary,
+                published_at=prepared.published_at,
+                source_name=source_name,
+                provider_name=provider_name,
+                allow_url_match_overwrite=prepared.is_exact_source_url,
+            )
+            result.created_article = created
+
+            existing_rows = {} if created else None
+            _upsert_article_tickers(
+                db,
+                article.id,
+                effective_ticker_hits,
+                symbol_to_id,
+                existing_rows=existing_rows,
+                prune_missing=(
+                    source.code != GENERAL_SOURCE_CODE
+                    and matched_by_url
+                    and prepared.is_exact_source_url
+                    and bool(effective_ticker_hits)
+                ),
+            )
+
+        _persist_raw_feed_item(
+            db,
+            source_id=source.id,
+            article=article,
+            prepared=prepared,
+            feed_url=feed_url,
+            raw_summary=raw_summary,
+            entry_source_name=entry_source_name,
+        )
+        result.persisted_raw = True
+        result.has_article = article is not None
+        result.raw_guid = prepared.raw_guid
+        result.raw_pair = (prepared.raw_link, prepared.published_at)
+
+    return result
 
 
 def ingest_feed(
@@ -365,47 +672,7 @@ def ingest_feed(
                 items_seen = len(entries)
 
                 now_utc = datetime.now(timezone.utc)
-                prepared_entries: list[PreparedFeedEntry] = []
-                for entry in entries:
-                    raw_title = str(entry.get("title") or "").strip()
-                    title = clean_summary_text(raw_title)
-                    raw_link_input = str(entry.get("link") or "").strip()
-                    raw_link = canonicalize_url(raw_link_input)
-                    if not title or not raw_link:
-                        continue
-
-                    parsed_input = urlparse(raw_link_input)
-                    is_businesswire_link = _is_businesswire_article_url(raw_link)
-                    article_url = raw_link
-                    if is_businesswire_link:
-                        article_url = _canonical_businesswire_article_url(raw_link)
-                        is_exact_source_url = (
-                            not parsed_input.query
-                            and not parsed_input.fragment
-                            and raw_link == article_url
-                        )
-                    else:
-                        is_exact_source_url = raw_link == article_url
-
-                    published_at = (
-                        parse_datetime(entry.get("published") or entry.get("updated"))
-                        or now_utc
-                    )
-                    raw_guid = (
-                        str(entry.get("id") or entry.get("guid") or "").strip() or None
-                    )
-                    prepared_entries.append(
-                        PreparedFeedEntry(
-                            entry=entry,
-                            raw_title=raw_title,
-                            title=title,
-                            raw_link=raw_link,
-                            article_url=article_url,
-                            is_exact_source_url=is_exact_source_url,
-                            published_at=published_at,
-                            raw_guid=raw_guid,
-                        )
-                    )
+                prepared_entries = _prepare_feed_entries(entries, now_utc)
 
                 recorded_guids, recorded_pairs = _prefetch_recorded_raw_keys(
                     db,
@@ -418,187 +685,31 @@ def ingest_feed(
 
                 for prepared in prepared_entries:
                     try:
-                        created_article = False
-                        persisted_raw = False
-                        persisted_raw_guid: str | None = None
-                        persisted_pair: tuple[str, datetime] | None = None
-                        article: Article | None = None
+                        entry_result = _process_single_entry(
+                            db,
+                            prepared=prepared,
+                            source=source,
+                            source_name=source_name,
+                            provider_name=provider_name,
+                            feed_url=feed_url,
+                            known_symbols=known_symbols,
+                            symbol_to_id=symbol_to_id,
+                            timeout_seconds=timeout_seconds,
+                            page_config=page_config,
+                            recorded_guids=recorded_guids,
+                            recorded_pairs=recorded_pairs,
+                            symbol_keywords=symbol_keywords,
+                        )
 
-                        with db.begin_nested():
-                            if (
-                                prepared.raw_guid
-                                and prepared.raw_guid in recorded_guids
-                            ):
-                                continue
-                            if (
-                                prepared.raw_link,
-                                prepared.published_at,
-                            ) in recorded_pairs:
-                                continue
-                            _acquire_raw_item_locks(
-                                db,
-                                source_id=source.id,
-                                raw_guid=prepared.raw_guid,
-                                raw_link=prepared.raw_link,
-                                published_at=prepared.published_at,
-                            )
-                            existing_raw = _find_existing_raw_feed_item(
-                                db,
-                                source_id=source.id,
-                                raw_guid=prepared.raw_guid,
-                                raw_link=prepared.raw_link,
-                                published_at=prepared.published_at,
-                                require_attached=True,
-                            )
-                            if existing_raw is not None:
-                                continue
-
-                            raw_summary = (
-                                str(
-                                    prepared.entry.get("summary")
-                                    or prepared.entry.get("description")
-                                    or ""
-                                ).strip()
-                                or None
-                            )
-                            summary = clean_summary_text(raw_summary)
-
-                            entry_source_name = _extract_provider(
-                                prepared.entry, source_name
-                            )
-                            ticker_hits = _extract_entry_tickers(
-                                prepared.title,
-                                summary or "",
-                                prepared.raw_link,
-                                feed_url,
-                                known_symbols,
-                                symbol_keywords=symbol_keywords,
-                            )
-                            max_hit_conf = _max_ticker_confidence(ticker_hits)
-                            if (
-                                max_hit_conf < MIN_PERSIST_CONFIDENCE
-                                and page_config is not None
-                            ):
-                                fallback_hits = _extract_source_fallback_tickers(
-                                    prepared.title,
-                                    summary or "",
-                                    prepared.raw_link,
-                                    feed_url,
-                                    known_symbols,
-                                    timeout_seconds,
-                                    page_config,
-                                    symbol_keywords=symbol_keywords,
-                                )
-                                if fallback_hits:
-                                    _merge_ticker_hits(ticker_hits, fallback_hits)
-
-                            should_persist_tickers = _should_persist_entry(
-                                source.code, ticker_hits
-                            )
-                            allow_existing_exact_url = False
-                            if (
-                                not should_persist_tickers
-                                and source.code != GENERAL_SOURCE_CODE
-                                and prepared.is_exact_source_url
-                            ):
-                                existing_article_id = db.scalar(
-                                    select(Article.id)
-                                    .where(
-                                        Article.canonical_url_hash
-                                        == sha256_str(prepared.article_url)
-                                    )
-                                    .limit(1)
-                                )
-                                allow_existing_exact_url = (
-                                    existing_article_id is not None
-                                )
-                            effective_ticker_hits = _verified_ticker_hits(
-                                source.code,
-                                ticker_hits,
-                            )
-                            if should_persist_tickers or allow_existing_exact_url:
-                                article, created, matched_by_url = _upsert_article(
-                                    db,
-                                    source_code=source.code,
-                                    canonical_url=prepared.article_url,
-                                    title=prepared.title,
-                                    summary=summary,
-                                    published_at=prepared.published_at,
-                                    source_name=source_name,
-                                    provider_name=provider_name,
-                                    allow_url_match_overwrite=prepared.is_exact_source_url,
-                                )
-                                created_article = created
-
-                                existing_rows = {} if created else None
-                                _upsert_article_tickers(
-                                    db,
-                                    article.id,
-                                    effective_ticker_hits,
-                                    symbol_to_id,
-                                    existing_rows=existing_rows,
-                                    prune_missing=(
-                                        source.code != GENERAL_SOURCE_CODE
-                                        and matched_by_url
-                                        and prepared.is_exact_source_url
-                                        and bool(effective_ticker_hits)
-                                    ),
-                                )
-
-                            payload = {
-                                "title": prepared.raw_title,
-                                "link": prepared.raw_link,
-                                "published": prepared.entry.get("published")
-                                or prepared.entry.get("updated"),
-                                "summary": raw_summary,
-                                "source": entry_source_name,
-                            }
-                            detached_row: RawFeedItem | None = None
-                            detached_row = _find_existing_raw_feed_item(
-                                db,
-                                source_id=source.id,
-                                raw_guid=prepared.raw_guid,
-                                raw_link=prepared.raw_link,
-                                published_at=prepared.published_at,
-                                require_attached=False,
-                            )
-                            if detached_row is None:
-                                db.add(
-                                    RawFeedItem(
-                                        source_id=source.id,
-                                        article_id=article.id if article is not None else None,
-                                        feed_url=feed_url,
-                                        raw_guid=prepared.raw_guid,
-                                        raw_title=prepared.raw_title,
-                                        raw_link=prepared.raw_link,
-                                        raw_pub_date=prepared.published_at,
-                                        raw_payload_json=to_json_safe(payload),
-                                    )
-                                )
-                            else:
-                                detached_row.article_id = (
-                                    article.id if article is not None else None
-                                )
-                                detached_row.feed_url = feed_url
-                                detached_row.raw_guid = prepared.raw_guid
-                                detached_row.raw_title = prepared.raw_title
-                                detached_row.raw_link = prepared.raw_link
-                                detached_row.raw_pub_date = prepared.published_at
-                                detached_row.raw_payload_json = to_json_safe(payload)
-                                detached_row.fetched_at = datetime.now(timezone.utc)
-                            persisted_raw = True
-                            persisted_raw_guid = prepared.raw_guid
-                            persisted_pair = (prepared.raw_link, prepared.published_at)
-
-                        if persisted_raw:
-                            if created_article:
+                        if entry_result.persisted_raw:
+                            if entry_result.created_article:
                                 items_inserted += 1
-                            if article is not None and persisted_raw_guid:
-                                recorded_guids.add(persisted_raw_guid)
-                            if article is not None and persisted_pair:
-                                recorded_pairs.add(persisted_pair)
+                            if entry_result.has_article and entry_result.raw_guid:
+                                recorded_guids.add(entry_result.raw_guid)
+                            if entry_result.has_article and entry_result.raw_pair:
+                                recorded_pairs.add(entry_result.raw_pair)
 
-                    except Exception as entry_exc:
+                    except Exception as entry_exc:  # fault-isolation: broad catch intentional
                         entry_errors += 1
                         error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
                         continue

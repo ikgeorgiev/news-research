@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Article, ArticleTicker
 from app.ticker_context import load_ticker_context
-from app.ticker_extraction import EXTRACTION_VERSION
+from app.constants import EXTRACTION_VERSION
 
 from app.article_maintenance._common import (
     _apply_revalidation,

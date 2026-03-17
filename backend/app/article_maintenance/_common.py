@@ -9,10 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_policy
+from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.ticker_extraction import (
-    EXTRACTION_VERSION,
-    MIN_PERSIST_CONFIDENCE,
-    NO_KEYWORDS_CONFIDENCE,
     _build_symbol_keywords,
     _extract_entry_tickers,
     _extract_source_fallback_tickers,

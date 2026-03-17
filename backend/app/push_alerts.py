@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -305,6 +306,133 @@ def _truncate_error(value: str | None) -> str | None:
     return text[:MAX_ERROR_TEXT_LEN]
 
 
+@dataclass(slots=True)
+class SubscriptionOutcome:
+    sent: int = 0
+    failed: int = 0
+    deactivated: int = 0
+
+
+def _record_push_failure(
+    subscription: PushSubscription,
+    error_text: str | None,
+    max_consecutive_failures: int,
+    outcome: SubscriptionOutcome,
+) -> None:
+    outcome.failed += 1
+    subscription.failure_count = int(subscription.failure_count or 0) + 1
+    subscription.last_error = _truncate_error(error_text)
+    if int(subscription.failure_count or 0) >= max_consecutive_failures:
+        subscription.active = False
+        outcome.deactivated += 1
+        record_push_delivery("error_deactivated")
+    else:
+        record_push_delivery("error")
+
+
+def _process_subscription_alerts(
+    db: Session,
+    settings: Settings,
+    subscription: PushSubscription,
+    max_consecutive_failures: int,
+) -> SubscriptionOutcome:
+    outcome = SubscriptionOutcome()
+
+    try:
+        scopes = normalize_scopes(subscription.alert_scopes_json)
+        scope_queries = _iter_scope_queries(scopes)
+        if not scope_queries:
+            return outcome
+
+        stable_watermarks, _seeded = seed_last_notified_watermarks(
+            db,
+            scopes=scopes,
+            existing=subscription.last_notified_json,
+        )
+        advanced_watermarks = dict(stable_watermarks)
+        article_ids: set[int] = set()
+        fresh_ids_by_scope: dict[str, list[int]] = {}
+        touched_scope_keys: list[str] = []
+
+        for scope_key, scope_params in scope_queries:
+            previous = int(stable_watermarks.get(scope_key, 0) or 0)
+            fresh_ids = _scope_new_article_ids(
+                db,
+                scope_params=scope_params,
+                after_id=previous,
+                limit=settings.push_max_per_cycle,
+            )
+            if fresh_ids:
+                article_ids.update(fresh_ids)
+                fresh_ids_by_scope[scope_key] = fresh_ids
+                touched_scope_keys.append(scope_key)
+
+        subscription.alert_scopes_json = scopes
+        # Keep stable watermark by default; only advance after successful push.
+        subscription.last_notified_json = stable_watermarks
+
+        if not article_ids:
+            db.commit()
+            return outcome
+
+        payload = _build_payload(
+            db,
+            article_ids=sorted(article_ids, reverse=True),
+            scope_keys=sorted(set(touched_scope_keys)),
+        )
+        if not payload:
+            db.commit()
+            return outcome
+
+        started_at = time.perf_counter()
+        status, error_text = _send_push_notification(
+            settings,
+            subscription=subscription,
+            payload=payload,
+        )
+        record_push_delivery_duration(time.perf_counter() - started_at)
+
+        now_utc = datetime.now(timezone.utc)
+        if status == "success":
+            outcome.sent += 1
+            for scope_key, fresh_ids in fresh_ids_by_scope.items():
+                advanced_watermarks[scope_key] = max(fresh_ids)
+            subscription.last_notified_json = advanced_watermarks
+            subscription.failure_count = 0
+            subscription.last_error = None
+            subscription.last_success_at = now_utc
+            for chunk in iter_chunks(sorted(article_ids)):
+                db.execute(
+                    update(Article)
+                    .where(
+                        Article.id.in_(chunk),
+                        Article.first_alert_sent_at.is_(None),
+                    )
+                    .values(first_alert_sent_at=now_utc)
+                )
+            record_push_delivery("success")
+        elif status == "gone":
+            outcome.deactivated += 1
+            subscription.active = False
+            subscription.failure_count = int(subscription.failure_count or 0) + 1
+            subscription.last_error = _truncate_error(error_text)
+            record_push_delivery("gone")
+        else:
+            _record_push_failure(
+                subscription, error_text, max_consecutive_failures, outcome
+            )
+        db.commit()
+    except Exception as exc:  # pragma: no cover - defensive guard
+        db.rollback()
+        logger.exception("Push delivery loop failed for subscription id=%s", subscription.id)
+        _record_push_failure(
+            subscription, str(exc), max_consecutive_failures, outcome
+        )
+        db.commit()
+
+    return outcome
+
+
 def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
     active_before = db.scalar(
         select(func.count()).select_from(select(PushSubscription.id).where(PushSubscription.active.is_(True)).subquery())
@@ -333,109 +461,13 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
 
     for subscription in subscriptions:
         scanned += 1
-        try:
-            scopes = normalize_scopes(subscription.alert_scopes_json)
-            scope_queries = _iter_scope_queries(scopes)
-            if not scope_queries:
-                continue
+        outcome = _process_subscription_alerts(
+            db, settings, subscription, max_consecutive_failures
+        )
+        sent += outcome.sent
+        failed += outcome.failed
+        deactivated += outcome.deactivated
 
-            stable_watermarks, _seeded = seed_last_notified_watermarks(
-                db,
-                scopes=scopes,
-                existing=subscription.last_notified_json,
-            )
-            advanced_watermarks = dict(stable_watermarks)
-            article_ids: set[int] = set()
-            fresh_ids_by_scope: dict[str, list[int]] = {}
-            touched_scope_keys: list[str] = []
-
-            for scope_key, scope_params in scope_queries:
-                previous = int(stable_watermarks.get(scope_key, 0) or 0)
-                fresh_ids = _scope_new_article_ids(
-                    db,
-                    scope_params=scope_params,
-                    after_id=previous,
-                    limit=settings.push_max_per_cycle,
-                )
-                if fresh_ids:
-                    article_ids.update(fresh_ids)
-                    fresh_ids_by_scope[scope_key] = fresh_ids
-                    touched_scope_keys.append(scope_key)
-
-            subscription.alert_scopes_json = scopes
-            # Keep stable watermark by default; only advance after successful push.
-            subscription.last_notified_json = stable_watermarks
-
-            if not article_ids:
-                db.commit()
-                continue
-
-            payload = _build_payload(
-                db,
-                article_ids=sorted(article_ids, reverse=True),
-                scope_keys=sorted(set(touched_scope_keys)),
-            )
-            if not payload:
-                db.commit()
-                continue
-
-            started_at = time.perf_counter()
-            status, error_text = _send_push_notification(
-                settings,
-                subscription=subscription,
-                payload=payload,
-            )
-            record_push_delivery_duration(time.perf_counter() - started_at)
-
-            now_utc = datetime.now(timezone.utc)
-            if status == "success":
-                sent += 1
-                for scope_key, fresh_ids in fresh_ids_by_scope.items():
-                    advanced_watermarks[scope_key] = max(fresh_ids)
-                subscription.last_notified_json = advanced_watermarks
-                subscription.failure_count = 0
-                subscription.last_error = None
-                subscription.last_success_at = now_utc
-                for chunk in iter_chunks(sorted(article_ids)):
-                    db.execute(
-                        update(Article)
-                        .where(
-                            Article.id.in_(chunk),
-                            Article.first_alert_sent_at.is_(None),
-                        )
-                        .values(first_alert_sent_at=now_utc)
-                    )
-                record_push_delivery("success")
-            elif status == "gone":
-                deactivated += 1
-                subscription.active = False
-                subscription.failure_count = int(subscription.failure_count or 0) + 1
-                subscription.last_error = _truncate_error(error_text)
-                record_push_delivery("gone")
-            else:
-                failed += 1
-                subscription.failure_count = int(subscription.failure_count or 0) + 1
-                subscription.last_error = _truncate_error(error_text)
-                if int(subscription.failure_count or 0) >= max_consecutive_failures:
-                    subscription.active = False
-                    deactivated += 1
-                    record_push_delivery("error_deactivated")
-                else:
-                    record_push_delivery("error")
-            db.commit()
-        except Exception as exc:  # pragma: no cover - defensive guard
-            db.rollback()
-            logger.exception("Push delivery loop failed for subscription id=%s", subscription.id)
-            failed += 1
-            subscription.failure_count = int(subscription.failure_count or 0) + 1
-            subscription.last_error = _truncate_error(str(exc))
-            if int(subscription.failure_count or 0) >= max_consecutive_failures:
-                subscription.active = False
-                deactivated += 1
-                record_push_delivery("error_deactivated")
-            else:
-                record_push_delivery("error")
-            db.commit()
     active_after = db.scalar(
         select(func.count()).select_from(select(PushSubscription.id).where(PushSubscription.active.is_(True)).subquery())
     )

@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import TypeVar
 
+from sqlalchemy import and_, select
+
+from app.models import Article, ArticleTicker, Ticker
+
 
 SQLITE_SAFE_IN_CHUNK_SIZE = 900
 
@@ -34,3 +38,31 @@ def contains_literal_pattern(value: str) -> str:
 
 def prefix_literal_pattern(value: str) -> str:
     return f"{escape_like_literal(value.strip())}%"
+
+
+def active_ticker_mapped_exists():
+    """Correlated EXISTS: article has at least one active-ticker mapping."""
+    return (
+        select(1)
+        .select_from(ArticleTicker)
+        .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
+        .where(
+            and_(
+                ArticleTicker.article_id == Article.id,
+                Ticker.active.is_(True),
+            )
+        )
+        .correlate(Article)
+        .exists()
+    )
+
+
+def any_ticker_mapped_exists():
+    """Correlated EXISTS: article has at least one ticker mapping (any status)."""
+    return (
+        select(1)
+        .select_from(ArticleTicker)
+        .where(ArticleTicker.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )

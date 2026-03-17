@@ -10,6 +10,18 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 import requests
 
+from app.constants import (
+    CONFIDENCE_CONTEXT,
+    CONFIDENCE_EXCHANGE,
+    CONFIDENCE_PAREN,
+    CONFIDENCE_TABLE_VALIDATED,
+    CONFIDENCE_UNVALIDATED,
+    CONFIDENCE_VALIDATED_TOKEN,
+    EXTRACTION_VERSION,
+    MIN_PERSIST_CONFIDENCE,
+    NO_KEYWORDS_CONFIDENCE,
+)
+from app.utils import HTML_TAG_PATTERN
 from app.sources import (
     POLICY_GENERAL_ALLOWED,
     POLICY_SCOPED_CONTEXT_REQUIRED,
@@ -46,7 +58,6 @@ HTML_RELATED_NEWS_PATTERN = re.compile(
     r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles)|Also\s+from\s+this\s+source)\b",
     flags=re.IGNORECASE,
 )
-HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
     r"<td[^>]*>(?:\s|<[^>]+>)*([A-Z][A-Z0-9\.\-]{0,9})(?:\s|<[^>]+>)*</td>",
     flags=re.IGNORECASE,
@@ -84,9 +95,6 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
     "FUND",
     "IDE",
 }
-MIN_PERSIST_CONFIDENCE = 0.65
-NO_KEYWORDS_CONFIDENCE = 0.70
-EXTRACTION_VERSION = 3
 
 _FUND_KEYWORD_STOPWORDS = frozenset(
     {
@@ -455,7 +463,7 @@ def _extract_article_body(html_text: str) -> str | None:
             include_links=False,
             no_fallback=False,
         )
-    except Exception:
+    except Exception:  # fault-isolation: broad catch intentional
         return None
     if result and len(result.strip()) > 50:
         return result
@@ -508,9 +516,9 @@ def _extract_source_fallback_tickers(
     }
 
     for symbol in _extract_table_cell_symbols_from_html(table_html, known_symbols):
-        confidence = 0.62
+        confidence = CONFIDENCE_UNVALIDATED
         if symbol_keywords is None:
-            confidence = 0.84
+            confidence = CONFIDENCE_TABLE_VALIDATED
         else:
             kws = symbol_keywords.get(symbol, frozenset())
             if not kws:
@@ -519,7 +527,7 @@ def _extract_source_fallback_tickers(
                 validation_text_lower is not None
                 and _text_matches_validation_keywords(validation_text_lower, kws)
             ):
-                confidence = 0.84
+                confidence = CONFIDENCE_TABLE_VALIDATED
         existing = hits.get(symbol)
         if existing is None or confidence > existing[1]:
             hits[symbol] = (config.table_match_type, confidence)
@@ -548,13 +556,13 @@ def _extract_entry_tickers(
 
     context_symbols = _parse_context_symbols(feed_url)
     if len(context_symbols) == 1:
-        add(context_symbols[0], "context", 0.93)
+        add(context_symbols[0], "context", CONFIDENCE_CONTEXT)
 
     text = " ".join([title or "", summary or "", link or ""])
     text_lower = text.lower() if symbol_keywords is not None else None
 
     for symbol in EXCHANGE_PATTERN.findall(text):
-        add(symbol.upper(), "exchange", 0.88)
+        add(symbol.upper(), "exchange", CONFIDENCE_EXCHANGE)
 
     for symbol in PAREN_SYMBOL_PATTERN.findall(text):
         upper = symbol.upper()
@@ -566,7 +574,7 @@ def _extract_entry_tickers(
             ):
                 kws = symbol_keywords.get(upper, frozenset())
                 if kws and _text_matches_validation_keywords(text_lower, kws):
-                    add(upper, "paren", 0.75)
+                    add(upper, "paren", CONFIDENCE_PAREN)
             continue
         if symbol_keywords is not None:
             kws = symbol_keywords.get(upper, frozenset())
@@ -578,11 +586,11 @@ def _extract_entry_tickers(
                 and kws
                 and _text_matches_validation_keywords(text_lower, kws)
             ):
-                add(upper, "paren", 0.75)
+                add(upper, "paren", CONFIDENCE_PAREN)
             else:
-                add(upper, "paren", 0.62)
+                add(upper, "paren", CONFIDENCE_UNVALIDATED)
             continue
-        add(upper, "paren", 0.75)
+        add(upper, "paren", CONFIDENCE_PAREN)
 
     if include_token:
         for symbol in TOKEN_PATTERN.findall(text):
@@ -592,9 +600,9 @@ def _extract_entry_tickers(
             if symbol_keywords is not None and text_lower is not None:
                 kws = symbol_keywords.get(upper, frozenset())
                 if kws and _text_matches_validation_keywords(text_lower, kws):
-                    add(upper, "validated_token", 0.68)
+                    add(upper, "validated_token", CONFIDENCE_VALIDATED_TOKEN)
                     continue
-            add(upper, "token", 0.62)
+            add(upper, "token", CONFIDENCE_UNVALIDATED)
 
     return hits
 
