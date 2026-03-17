@@ -5,6 +5,7 @@ from typing import TypedDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.constants import TITLE_DEDUP_WINDOW_HOURS
 from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.ticker_extraction import _canonical_businesswire_article_url, _is_businesswire_article_url
 from app.utils import GENERAL_SOURCE_CODE, canonicalize_url, sha256_str, to_utc
@@ -18,6 +19,92 @@ class DedupeStats(TypedDict):
     ticker_rows_relinked: int
     ticker_rows_updated: int
     ticker_rows_deleted: int
+
+
+class _MergeStats(TypedDict):
+    merged_articles: int
+    raw_items_relinked: int
+    ticker_rows_relinked: int
+    ticker_rows_updated: int
+    ticker_rows_deleted: int
+
+
+def _merge_duplicates_into_winner(
+    db: Session,
+    *,
+    winner: Article,
+    duplicates: list[Article],
+    ticker_rows_by_article: dict[int, list[ArticleTicker]],
+    raw_rows: list[RawFeedItem],
+) -> _MergeStats:
+    winner_tickers: dict[int, ArticleTicker] = {
+        row.ticker_id: row for row in ticker_rows_by_article.get(winner.id, [])
+    }
+    duplicate_ids = {row.id for row in duplicates}
+    raw_items_relinked = 0
+    ticker_rows_relinked = 0
+    ticker_rows_updated = 0
+    ticker_rows_deleted = 0
+    merged_articles = 0
+
+    for raw_row in raw_rows:
+        if raw_row.article_id not in duplicate_ids:
+            continue
+        raw_row.article_id = winner.id
+        raw_items_relinked += 1
+
+    for duplicate in duplicates:
+        duplicate_summary = duplicate.summary or ""
+        winner_summary = winner.summary or ""
+        if duplicate_summary and (
+            not winner_summary or len(duplicate_summary) > len(winner_summary)
+        ):
+            winner.summary = duplicate.summary
+        if duplicate.published_at and (
+            winner.published_at is None
+            or duplicate.published_at > winner.published_at
+        ):
+            winner.published_at = duplicate.published_at
+        duplicate_first_seen = duplicate.first_seen_at or duplicate.created_at
+        winner_first_seen = winner.first_seen_at or winner.created_at
+        if duplicate_first_seen and (
+            winner_first_seen is None
+            or to_utc(duplicate_first_seen) < to_utc(winner_first_seen)
+        ):
+            winner.first_seen_at = duplicate_first_seen
+        if duplicate.first_alert_sent_at and (
+            winner.first_alert_sent_at is None
+            or to_utc(duplicate.first_alert_sent_at)
+            < to_utc(winner.first_alert_sent_at)
+        ):
+            winner.first_alert_sent_at = duplicate.first_alert_sent_at
+
+        for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
+            existing = winner_tickers.get(ticker_row.ticker_id)
+            if existing is None:
+                ticker_row.article_id = winner.id
+                winner_tickers[ticker_row.ticker_id] = ticker_row
+                ticker_rows_relinked += 1
+                continue
+
+            if ticker_row.confidence > existing.confidence:
+                existing.confidence = ticker_row.confidence
+                existing.match_type = ticker_row.match_type
+                ticker_rows_updated += 1
+            db.delete(ticker_row)
+            ticker_rows_deleted += 1
+
+        db.flush()
+        db.delete(duplicate)
+        merged_articles += 1
+
+    return {
+        "merged_articles": merged_articles,
+        "raw_items_relinked": raw_items_relinked,
+        "ticker_rows_relinked": ticker_rows_relinked,
+        "ticker_rows_updated": ticker_rows_updated,
+        "ticker_rows_deleted": ticker_rows_deleted,
+    }
 
 
 def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
@@ -92,61 +179,18 @@ def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
             winner.canonical_url = normalized_url
             winner.canonical_url_hash = sha256_str(normalized_url)
 
-        winner_tickers: dict[int, ArticleTicker] = {
-            row.ticker_id: row for row in ticker_rows_by_article.get(winner.id, [])
-        }
-
-        duplicate_ids = {row.id for row in duplicates}
-        for raw_row in raw_rows:
-            if raw_row.article_id not in duplicate_ids:
-                continue
-            raw_row.article_id = winner.id
-            raw_items_relinked += 1
-
-        for duplicate in duplicates:
-            duplicate_summary = duplicate.summary or ""
-            winner_summary = winner.summary or ""
-            if duplicate_summary and (
-                not winner_summary or len(duplicate_summary) > len(winner_summary)
-            ):
-                winner.summary = duplicate.summary
-            if duplicate.published_at and (
-                winner.published_at is None
-                or duplicate.published_at > winner.published_at
-            ):
-                winner.published_at = duplicate.published_at
-            duplicate_first_seen = duplicate.first_seen_at or duplicate.created_at
-            winner_first_seen = winner.first_seen_at or winner.created_at
-            if duplicate_first_seen and (
-                winner_first_seen is None
-                or to_utc(duplicate_first_seen) < to_utc(winner_first_seen)
-            ):
-                winner.first_seen_at = duplicate_first_seen
-            if duplicate.first_alert_sent_at and (
-                winner.first_alert_sent_at is None
-                or to_utc(duplicate.first_alert_sent_at)
-                < to_utc(winner.first_alert_sent_at)
-            ):
-                winner.first_alert_sent_at = duplicate.first_alert_sent_at
-
-            for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
-                existing = winner_tickers.get(ticker_row.ticker_id)
-                if existing is None:
-                    ticker_row.article_id = winner.id
-                    winner_tickers[ticker_row.ticker_id] = ticker_row
-                    ticker_rows_relinked += 1
-                    continue
-
-                if ticker_row.confidence > existing.confidence:
-                    existing.confidence = ticker_row.confidence
-                    existing.match_type = ticker_row.match_type
-                    ticker_rows_updated += 1
-                db.delete(ticker_row)
-                ticker_rows_deleted += 1
-
-            db.flush()
-            db.delete(duplicate)
-            merged_articles += 1
+        merge_stats = _merge_duplicates_into_winner(
+            db,
+            winner=winner,
+            duplicates=duplicates,
+            ticker_rows_by_article=ticker_rows_by_article,
+            raw_rows=raw_rows,
+        )
+        merged_articles += merge_stats["merged_articles"]
+        raw_items_relinked += merge_stats["raw_items_relinked"]
+        ticker_rows_relinked += merge_stats["ticker_rows_relinked"]
+        ticker_rows_updated += merge_stats["ticker_rows_updated"]
+        ticker_rows_deleted += merge_stats["ticker_rows_deleted"]
 
     db.commit()
     return {
@@ -160,7 +204,11 @@ def dedupe_businesswire_url_variants(db: Session) -> DedupeStats:
     }
 
 
-def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> DedupeStats:
+def dedupe_articles_by_title(
+    db: Session,
+    *,
+    window_hours: int = TITLE_DEDUP_WINDOW_HOURS,
+) -> DedupeStats:
     """Merge articles that share the same normalized title within a time window."""
     # Only load title hashes that have more than one article (potential dupes).
     dupe_hashes = db.execute(
@@ -258,61 +306,18 @@ def dedupe_articles_by_title(db: Session, *, window_hours: int = 48) -> DedupeSt
             if not duplicates:
                 continue
 
-            winner_tickers: dict[int, ArticleTicker] = {
-                row.ticker_id: row for row in ticker_rows_by_article.get(winner.id, [])
-            }
-
-            duplicate_ids = {row.id for row in duplicates}
-            for raw_row in raw_rows:
-                if raw_row.article_id not in duplicate_ids:
-                    continue
-                raw_row.article_id = winner.id
-                raw_items_relinked += 1
-
-            for duplicate in duplicates:
-                dup_summary = duplicate.summary or ""
-                win_summary = winner.summary or ""
-                if dup_summary and (
-                    not win_summary or len(dup_summary) > len(win_summary)
-                ):
-                    winner.summary = duplicate.summary
-                if duplicate.published_at and (
-                    winner.published_at is None
-                    or duplicate.published_at > winner.published_at
-                ):
-                    winner.published_at = duplicate.published_at
-                duplicate_first_seen = duplicate.first_seen_at or duplicate.created_at
-                winner_first_seen = winner.first_seen_at or winner.created_at
-                if duplicate_first_seen and (
-                    winner_first_seen is None
-                    or to_utc(duplicate_first_seen) < to_utc(winner_first_seen)
-                ):
-                    winner.first_seen_at = duplicate_first_seen
-                if duplicate.first_alert_sent_at and (
-                    winner.first_alert_sent_at is None
-                    or to_utc(duplicate.first_alert_sent_at)
-                    < to_utc(winner.first_alert_sent_at)
-                ):
-                    winner.first_alert_sent_at = duplicate.first_alert_sent_at
-
-                for ticker_row in ticker_rows_by_article.get(duplicate.id, []):
-                    existing = winner_tickers.get(ticker_row.ticker_id)
-                    if existing is None:
-                        ticker_row.article_id = winner.id
-                        winner_tickers[ticker_row.ticker_id] = ticker_row
-                        ticker_rows_relinked += 1
-                        continue
-
-                    if ticker_row.confidence > existing.confidence:
-                        existing.confidence = ticker_row.confidence
-                        existing.match_type = ticker_row.match_type
-                        ticker_rows_updated += 1
-                    db.delete(ticker_row)
-                    ticker_rows_deleted += 1
-
-                db.flush()
-                db.delete(duplicate)
-                merged_articles += 1
+            merge_stats = _merge_duplicates_into_winner(
+                db,
+                winner=winner,
+                duplicates=duplicates,
+                ticker_rows_by_article=ticker_rows_by_article,
+                raw_rows=raw_rows,
+            )
+            merged_articles += merge_stats["merged_articles"]
+            raw_items_relinked += merge_stats["raw_items_relinked"]
+            ticker_rows_relinked += merge_stats["ticker_rows_relinked"]
+            ticker_rows_updated += merge_stats["ticker_rows_updated"]
+            ticker_rows_deleted += merge_stats["ticker_rows_deleted"]
 
     db.commit()
     return {

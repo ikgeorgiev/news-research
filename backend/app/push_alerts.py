@@ -125,25 +125,8 @@ def _iter_scope_queries(scopes: dict[str, Any]) -> list[tuple[str, dict[str, Any
     return items
 
 
-def _build_scope_query(
-    db: Session,
-    *,
-    tickers: list[str] | None = None,
-    provider: str | None = None,
-    q: str | None = None,
-    include_unmapped_from_provider: str | None = None,
-):
-    return build_article_query(
-        db,
-        tickers=tickers,
-        provider=provider,
-        q=q,
-        include_unmapped_from_provider=include_unmapped_from_provider,
-    )
-
-
 def _scope_max_article_id(db: Session, scope_params: dict[str, Any]) -> int:
-    query = _build_scope_query(
+    query = build_article_query(
         db,
         tickers=scope_params.get("tickers"),
         provider=scope_params.get("provider"),
@@ -161,7 +144,7 @@ def _scope_new_article_ids(
     after_id: int,
     limit: int,
 ) -> list[int]:
-    query = _build_scope_query(
+    query = build_article_query(
         db,
         tickers=scope_params.get("tickers"),
         provider=scope_params.get("provider"),

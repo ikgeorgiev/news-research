@@ -25,9 +25,9 @@ from app.feed_runtime import (
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
+from app.ticker_context import load_ticker_context
 from app.models import (
     Source,
-    Ticker,
 )
 from app.push_alerts import check_and_send_alerts
 from app.sources import (
@@ -36,8 +36,6 @@ from app.sources import (
     build_source_feeds,
     seed_sources,
 )
-from app.ticker_extraction import _build_symbol_keywords
-
 logger = logging.getLogger(__name__)
 
 # Compatibility facade for tests and callers that still import runtime helpers
@@ -113,19 +111,12 @@ def sync_runtime_state(
     }
 
 
-def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult:
-    runtime_sync = sync_runtime_state(
-        db,
-        settings,
-        ticker_loader=_load_tickers_from_csv_if_changed,
-    )
-    stale_runs_fixed = runtime_sync["stale_runs_fixed"]
-    if stale_runs_fixed:
-        logger.warning("Marked %s stale ingestion runs as failed", stale_runs_fixed)
-
-    ticker_sync = runtime_sync["ticker_sync"]
-    source_feeds = runtime_sync["source_feeds"]
-
+def _run_feed_ingestion(
+    db: Session,
+    settings: Settings,
+    *,
+    source_feeds: list[SourceFeed],
+) -> tuple[list[IngestFeedResult], int, int, int]:
     source_map = {
         source.code: source
         for source in db.scalars(
@@ -137,40 +128,19 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
             )
         ).all()
     }
-
-    ticker_rows = db.execute(
-        select(
-            Ticker.id,
-            Ticker.symbol,
-            Ticker.fund_name,
-            Ticker.sponsor,
-            Ticker.validation_keywords,
-        ).where(
-            Ticker.active.is_(True)
-        )
-    ).all()
-    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
-    known_symbols = frozenset(symbol_to_id.keys())
-    symbol_keywords = _build_symbol_keywords(ticker_rows)
-
-    per_feed: list[IngestFeedResult] = []
-    total_seen = 0
-    total_inserted = 0
-    failed = 0
-
+    ticker_context = load_ticker_context(db)
     max_workers = settings.ingestion_max_workers
-    enable_conditional_get = settings.ingestion_enable_conditional_get
     feed_ingest_kwargs = {
-        "known_symbols": known_symbols,
-        "symbol_to_id": symbol_to_id,
+        "known_symbols": ticker_context.known_symbols,
+        "symbol_to_id": ticker_context.symbol_to_id,
         "timeout_seconds": settings.request_timeout_seconds,
         "fetch_max_attempts": settings.feed_fetch_max_attempts,
         "fetch_backoff_seconds": settings.feed_fetch_backoff_seconds,
         "fetch_backoff_jitter_seconds": settings.feed_fetch_backoff_jitter_seconds,
-        "enable_conditional_get": enable_conditional_get,
+        "enable_conditional_get": settings.ingestion_enable_conditional_get,
         "failure_backoff_base_seconds": settings.feed_failure_backoff_base_seconds,
         "failure_backoff_max_seconds": settings.feed_failure_backoff_max_seconds,
-        "symbol_keywords": symbol_keywords,
+        "symbol_keywords": ticker_context.symbol_keywords,
     }
     bind = db.get_bind()
     dialect_name = (
@@ -259,16 +229,27 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
                 except Exception as exc:
                     results.append(_failed_feed_result(source_code, feed_url, str(exc)))
 
-    # Keep results deterministic for logs/reports.
     per_feed = sorted(
         results, key=lambda r: (r.get("source", ""), r.get("feed_url", ""))
     )
+    total_seen = 0
+    total_inserted = 0
+    failed = 0
     for result in per_feed:
         total_seen += int(result["items_seen"])
         total_inserted += int(result["items_inserted"])
         if result["status"] == "failed":
             failed += 1
 
+    return per_feed, total_seen, total_inserted, failed
+
+
+def _run_post_ingestion_remaps(
+    db: Session,
+    settings: Settings,
+    *,
+    ticker_sync: TickerSyncStats,
+) -> list[SourceRemapStats]:
     source_remaps: list[SourceRemapStats] = []
     ticker_changed = ticker_sync["created"] > 0 or ticker_sync["updated"] > 0
     if ticker_changed:
@@ -278,6 +259,10 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
                     db, settings, source_code=code, limit=500, only_unmapped=True
                 )
             )
+    return source_remaps
+
+
+def _run_stale_revalidation(db: Session, settings: Settings) -> None:
     try:
         revalidation_stats = revalidate_stale_article_tickers(
             db,
@@ -296,6 +281,8 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
         logger.exception("Revalidation failed, continuing ingestion cycle")
         db.rollback()
 
+
+def _run_raw_feed_pruning(db: Session, settings: Settings) -> None:
     prune_interval_seconds = settings.raw_feed_prune_interval_seconds
     if _should_run_raw_feed_prune(prune_interval_seconds):
         pruned_raw_items = prune_raw_feed_items(
@@ -312,6 +299,13 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
                 settings.raw_feed_retention_days,
             )
 
+
+def _run_push_alerts(
+    db: Session,
+    settings: Settings,
+    *,
+    total_inserted: int,
+) -> dict[str, int]:
     push_alerts = {
         "scanned": 0,
         "sent": 0,
@@ -320,9 +314,41 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
     }
     if total_inserted > 0:
         try:
-            push_alerts = check_and_send_alerts(db, settings)
+            return check_and_send_alerts(db, settings)
         except Exception:  # Broad catch: push failures must not abort ingestion
             logger.exception("Push alert processing failed after ingestion cycle")
+    return push_alerts
+
+
+def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult:
+    runtime_sync = sync_runtime_state(
+        db,
+        settings,
+        ticker_loader=_load_tickers_from_csv_if_changed,
+    )
+    stale_runs_fixed = runtime_sync["stale_runs_fixed"]
+    if stale_runs_fixed:
+        logger.warning("Marked %s stale ingestion runs as failed", stale_runs_fixed)
+
+    ticker_sync = runtime_sync["ticker_sync"]
+    source_feeds = runtime_sync["source_feeds"]
+    per_feed, total_seen, total_inserted, failed = _run_feed_ingestion(
+        db,
+        settings,
+        source_feeds=source_feeds,
+    )
+    source_remaps = _run_post_ingestion_remaps(
+        db,
+        settings,
+        ticker_sync=ticker_sync,
+    )
+    _run_stale_revalidation(db, settings)
+    _run_raw_feed_pruning(db, settings)
+    push_alerts = _run_push_alerts(
+        db,
+        settings,
+        total_inserted=total_inserted,
+    )
 
     return {
         "total_feeds": len(per_feed),

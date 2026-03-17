@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Article, ArticleTicker, RawFeedItem
+from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_policy
 from app.ticker_extraction import (
     EXTRACTION_VERSION,
@@ -20,13 +21,50 @@ from app.ticker_extraction import (
 )
 
 
+type RawContext = tuple[str, str | None, str | None]
+
+
 def _has_general_allowed_raw_provenance(
-    raw_contexts: list[tuple[str, str | None, str | None]],
+    raw_contexts: list[RawContext],
 ) -> bool:
     return any(
         get_source_policy(source_code) == POLICY_GENERAL_ALLOWED
         for source_code, _, _ in raw_contexts
     )
+
+
+def load_raw_contexts(
+    db: Session,
+    article_ids: Sequence[int],
+    *,
+    source_code: str | None = None,
+) -> dict[int, list[RawContext]]:
+    if not article_ids:
+        return {}
+
+    query = (
+        select(
+            RawFeedItem.article_id,
+            Source.code,
+            RawFeedItem.raw_link,
+            RawFeedItem.feed_url,
+        )
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(RawFeedItem.article_id.in_(article_ids))
+    )
+    if source_code is not None:
+        query = query.where(Source.code == source_code)
+
+    raw_contexts_by_article: dict[int, list[RawContext]] = {}
+    for article_id, raw_source_code, raw_link, feed_url in db.execute(
+        query.order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
+    ).all():
+        if article_id is None:
+            continue
+        raw_contexts_by_article.setdefault(article_id, []).append(
+            (raw_source_code, raw_link, feed_url)
+        )
+    return raw_contexts_by_article
 
 
 def _upsert_article_tickers(
@@ -104,7 +142,7 @@ def _upsert_article_tickers(
 
 def _reextract_purge_article_tickers(
     article: Article,
-    raw_contexts: list[tuple[str, str | None, str | None]],
+    raw_contexts: list[RawContext],
     known_symbols: set[str],
     timeout_seconds: int,
     *,

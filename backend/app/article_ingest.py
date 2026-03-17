@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.article_maintenance import _upsert_article_tickers
+from app.constants import TITLE_DEDUP_WINDOW_HOURS
 from app.feed_runtime import (
     PreparedFeedEntry,
     _fetch_feed_with_retries,
@@ -168,8 +169,8 @@ def _upsert_article(
     provider_name = _clamp_label(provider_name)
     _acquire_dedupe_locks(db, url_hash, title_hash)
 
-    window_start = published_at - timedelta(hours=48)
-    window_end = published_at + timedelta(hours=48)
+    window_start = published_at - timedelta(hours=TITLE_DEDUP_WINDOW_HOURS)
+    window_end = published_at + timedelta(hours=TITLE_DEDUP_WINDOW_HOURS)
 
     def _find_title_window_match(
         *, exclude_source_code: str | None = None

@@ -29,7 +29,7 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run backend tests
-        run: pytest -q
+        run: pytest -q --cov=app --cov-report=term-missing
 
   frontend:
     name: Frontend Tests and Build

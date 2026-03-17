@@ -21,7 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
-UTC_NOW = lambda: datetime.now(timezone.utc)
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Ticker(Base):
@@ -33,8 +34,8 @@ class Ticker(Base):
     sponsor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     validation_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 class Source(Base):
@@ -57,7 +58,7 @@ class FeedPollState(Base):
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 class Article(Base):
@@ -68,22 +69,22 @@ class Article(Base):
     canonical_url_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     source_name: Mapped[str] = mapped_column(String(120), index=True)
     provider_name: Mapped[str] = mapped_column(String(120), index=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     title_normalized_hash: Mapped[str] = mapped_column(String(64), index=True)
     cluster_key: Mapped[str] = mapped_column(String(64), index=True)
     # Time this article first entered our system.
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     # First successful push-alert delivery time for this article (if any).
     first_alert_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     tickers: Mapped[list[ArticleTicker]] = relationship(back_populates="article", cascade="all, delete-orphan")
 
@@ -115,7 +116,7 @@ class RawFeedItem(Base):
     raw_link: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_pub_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw_payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
 class IngestionRun(Base):
@@ -124,7 +125,7 @@ class IngestionRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
     feed_url: Mapped[str] = mapped_column(Text, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="running", index=True)
     items_seen: Mapped[int] = mapped_column(Integer, default=0)
@@ -147,8 +148,8 @@ class PushSubscription(Base):
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=UTC_NOW, onupdate=UTC_NOW)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 Index("ix_articles_published_id", Article.published_at, Article.id)

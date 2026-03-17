@@ -5,13 +5,15 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.ticker_extraction import EXTRACTION_VERSION, _build_symbol_keywords
+from app.models import Article, ArticleTicker
+from app.ticker_context import load_ticker_context
+from app.ticker_extraction import EXTRACTION_VERSION
 
 from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
     _reextract_purge_article_tickers,
+    load_raw_contexts,
 )
 
 
@@ -28,16 +30,8 @@ def revalidate_stale_article_tickers(
     limit: int = 200,
     timeout_seconds: int = 20,
 ) -> RevalidationStats:
-    ticker_rows = db.execute(
-        select(
-            Ticker.id,
-            Ticker.symbol,
-            Ticker.fund_name,
-            Ticker.sponsor,
-            Ticker.validation_keywords,
-        ).where(Ticker.active.is_(True))
-    ).all()
-    if not ticker_rows:
+    ticker_context = load_ticker_context(db)
+    if not ticker_context.symbol_to_id:
         return {"scanned": 0, "revalidated": 0, "purged": 0, "unchanged": 0}
 
     article_rows = db.execute(
@@ -55,22 +49,7 @@ def revalidate_stale_article_tickers(
     articles = db.scalars(select(Article).where(Article.id.in_(article_ids))).all()
     articles_by_id = {article.id: article for article in articles}
 
-    raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = {}
-    raw_context_rows = db.execute(
-        select(
-            RawFeedItem.article_id,
-            Source.code,
-            RawFeedItem.raw_link,
-            RawFeedItem.feed_url,
-        )
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(RawFeedItem.article_id.in_(article_ids))
-        .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
-    ).all()
-    for article_id, source_code, raw_link, feed_url in raw_context_rows:
-        raw_contexts_by_article.setdefault(article_id, []).append(
-            (source_code, raw_link, feed_url)
-        )
+    raw_contexts_by_article = load_raw_contexts(db, article_ids)
 
     existing_rows_by_article: dict[int, dict[int, ArticleTicker]] = {}
     at_rows = db.scalars(
@@ -78,10 +57,6 @@ def revalidate_stale_article_tickers(
     ).all()
     for at_row in at_rows:
         existing_rows_by_article.setdefault(at_row.article_id, {})[at_row.ticker_id] = at_row
-
-    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
-    known_symbols = frozenset(symbol_to_id.keys())
-    symbol_keywords = _build_symbol_keywords(ticker_rows)
 
     scanned = 0
     revalidated = 0
@@ -106,9 +81,9 @@ def revalidate_stale_article_tickers(
         verified_hits = _reextract_purge_article_tickers(
             article,
             raw_contexts,
-            known_symbols,
+            ticker_context.known_symbols,
             timeout_seconds,
-            symbol_keywords=symbol_keywords,
+            symbol_keywords=ticker_context.symbol_keywords,
         )
 
         if not verified_hits:
@@ -124,7 +99,7 @@ def revalidate_stale_article_tickers(
             article,
             verified_hits,
             _has_general_allowed_raw_provenance(raw_contexts),
-            symbol_to_id,
+            ticker_context.symbol_to_id,
             existing_rows=existing_rows_by_article.get(article_id),
             prune_verified_hits=False,
             force_update=True,

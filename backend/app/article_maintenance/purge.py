@@ -6,15 +6,16 @@ from typing import TypedDict
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.ticker_extraction import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE, _build_symbol_keywords
-from app.utils import GENERAL_SOURCE_CODE
-
 from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
     _reextract_purge_article_tickers,
+    load_raw_contexts,
 )
+from app.models import Article, ArticleTicker, RawFeedItem, Source
+from app.ticker_context import load_ticker_context
+from app.ticker_extraction import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
+from app.utils import GENERAL_SOURCE_CODE
 
 
 class PurgeFalsePositiveStats(TypedDict):
@@ -31,21 +32,7 @@ def purge_token_only_articles(
     limit: int = 2000,
     timeout_seconds: int = 20,
 ) -> PurgeFalsePositiveStats:
-    ticker_rows = db.execute(
-        select(
-            Ticker.id,
-            Ticker.symbol,
-            Ticker.fund_name,
-            Ticker.sponsor,
-            Ticker.validation_keywords,
-        ).where(
-            Ticker.active.is_(True)
-        )
-    ).all()
-    symbol_keywords = _build_symbol_keywords(ticker_rows)
-    symbol_to_id = {row[1].upper(): row[0] for row in ticker_rows}
-    id_to_symbol = {row[0]: row[1].upper() for row in ticker_rows}
-    known_symbols = frozenset(symbol_to_id.keys())
+    ticker_context = load_ticker_context(db)
 
     mapped_exists = (
         select(1)
@@ -162,24 +149,7 @@ def purge_token_only_articles(
             break
 
         article_ids = [article.id for article in articles]
-        raw_contexts_by_article: dict[int, list[tuple[str, str | None, str | None]]] = (
-            {}
-        )
-        raw_context_rows = db.execute(
-            select(
-                RawFeedItem.article_id,
-                Source.code,
-                RawFeedItem.raw_link,
-                RawFeedItem.feed_url,
-            )
-            .join(Source, Source.id == RawFeedItem.source_id)
-            .where(RawFeedItem.article_id.in_(article_ids))
-            .order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
-        ).all()
-        for article_id, source_code, raw_link, feed_url in raw_context_rows:
-            raw_contexts_by_article.setdefault(article_id, []).append(
-                (source_code, raw_link, feed_url)
-            )
+        raw_contexts_by_article = load_raw_contexts(db, article_ids)
 
         existing_rows_by_article: dict[int, dict[int, ArticleTicker]] = {}
         if article_ids:
@@ -208,17 +178,17 @@ def purge_token_only_articles(
                 for row in (existing_for_article or {}).values()
             )
             preserved_existing_hits = {
-                id_to_symbol[ticker_id]: (row.match_type, row.confidence)
+                ticker_context.id_to_symbol[ticker_id]: (row.match_type, row.confidence)
                 for ticker_id, row in (existing_for_article or {}).items()
-                if ticker_id in id_to_symbol
+                if ticker_id in ticker_context.id_to_symbol
                 and row.confidence >= NO_KEYWORDS_CONFIDENCE
                 and row.match_type != "token"
             }
             # When the only rows outside preserved_existing_hits are token
             # rows, we can prune them without a page fetch.
             non_preserved_non_token = any(
-                id_to_symbol.get(ticker_id)
-                and id_to_symbol[ticker_id] not in preserved_existing_hits
+                ticker_context.id_to_symbol.get(ticker_id)
+                and ticker_context.id_to_symbol[ticker_id] not in preserved_existing_hits
                 and row.match_type != "token"
                 for ticker_id, row in (existing_for_article or {}).items()
             )
@@ -230,7 +200,7 @@ def purge_token_only_articles(
                     article,
                     preserved_existing_hits,
                     has_general_provenance,
-                    symbol_to_id,
+                    ticker_context.symbol_to_id,
                     existing_rows=existing_for_article,
                     dry_run=dry_run,
                     stamp_retained_version=has_stale_existing_rows,
@@ -241,18 +211,18 @@ def purge_token_only_articles(
                 continue
 
             existing_symbols = {
-                id_to_symbol[ticker_id]
+                ticker_context.id_to_symbol[ticker_id]
                 for ticker_id, row in (existing_for_article or {}).items()
-                if ticker_id in id_to_symbol
+                if ticker_id in ticker_context.id_to_symbol
                 and row.match_type != "token"
             }
             fetch_status: list[str] = []
             verified_hits = _reextract_purge_article_tickers(
                 article,
                 raw_contexts,
-                known_symbols,
+                ticker_context.known_symbols,
                 timeout_seconds,
-                symbol_keywords=symbol_keywords,
+                symbol_keywords=ticker_context.symbol_keywords,
                 stop_when_existing_symbols_verified=existing_symbols,
                 page_fetch_status=fetch_status,
             )
@@ -262,7 +232,7 @@ def purge_token_only_articles(
                     article,
                     verified_hits,
                     has_general_provenance,
-                    symbol_to_id,
+                    ticker_context.symbol_to_id,
                     existing_rows=existing_for_article,
                     dry_run=dry_run,
                     stamp_retained_version=has_stale_existing_rows,
@@ -283,8 +253,8 @@ def purge_token_only_articles(
                     preserved_ticker_ids = {
                         ticker_id
                         for ticker_id, row in (existing_for_article or {}).items()
-                        if ticker_id in id_to_symbol
-                        and id_to_symbol[ticker_id] in preserved_existing_hits
+                        if ticker_id in ticker_context.id_to_symbol
+                        and ticker_context.id_to_symbol[ticker_id] in preserved_existing_hits
                     }
                     for ticker_id, row in (existing_for_article or {}).items():
                         if ticker_id in preserved_ticker_ids:
@@ -296,7 +266,7 @@ def purge_token_only_articles(
                 article,
                 {},
                 has_general_provenance,
-                symbol_to_id,
+                ticker_context.symbol_to_id,
                 existing_rows=existing_for_article,
                 dry_run=dry_run,
             )
