@@ -30,7 +30,51 @@ Local-first RSS aggregation platform for closed-end funds.
 - `data/cef_tickers.csv` ticker universe (edit this for your full 350 list)
 - `docker-compose.yml` local multi-service runtime
 
-## Quick Start (Docker)
+## Recommended Fast Dev Loop (Docker DB + Local App)
+
+This is the primary workflow for local development:
+
+- Keep PostgreSQL in Docker.
+- Run backend and frontend locally with hot reload.
+- Avoid container rebuilds/restarts for every app edit.
+
+### 1) Copy environment template
+
+```bash
+cp .env.example .env
+```
+
+### 2) Start DB only
+
+```powershell
+.\dev-db.ps1 -Wait
+```
+
+### 3) Start backend locally
+
+```powershell
+.\dev-backend.ps1
+```
+
+### 4) Start frontend locally
+
+```powershell
+.\dev-frontend.ps1
+```
+
+### 5) Open app
+
+- UI: http://127.0.0.1:3005
+- API docs: http://127.0.0.1:8001/docs
+
+Script notes:
+
+- `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
+- `dev-backend.ps1` uses `backend/.venv`, sets local env defaults (`localhost:5433` database, local ticker CSV), installs deps if needed, and creates the target DB if absent.
+- `dev-frontend.ps1` uses `frontend/node_modules` and sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
+- You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
+
+## Secondary Path: Full Docker App Startup
 
 1. Copy environment template:
 
@@ -38,13 +82,13 @@ Local-first RSS aggregation platform for closed-end funds.
 cp .env.example .env
 ```
 
-2. Start stack:
+2. Start the core stack:
 
 ```bash
 docker compose up --build
 ```
 
-`NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8000`).
+This starts only `db`, `backend`, and `frontend`. `NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8000`).
 
 3. Open:
 
@@ -76,7 +120,7 @@ Confirm metrics endpoint:
 ### 2) Start monitoring services
 
 ```powershell
-docker compose up -d prometheus grafana
+docker compose --profile monitoring up --build
 ```
 
 ### 3) Open dashboards
@@ -99,48 +143,10 @@ Grafana auto-loads dashboard:
 
 ### Notes
 
+- Default `docker compose up --build` does not start monitoring services.
 - Default scrape targets are `host.docker.internal:8001` and `host.docker.internal:8000`.
 - If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
 - The table panel uses a provisioned Postgres datasource (`db:5432`, `cef/cef`, `cef_news`).
-
-## Recommended Fast Dev Loop (Docker DB + Local App)
-
-This is the fastest workflow when you are making lots of code changes:
-
-- Keep only PostgreSQL in Docker.
-- Run backend and frontend locally with hot reload.
-- Avoid container rebuilds/restarts for every app edit.
-
-### 1) Start DB only
-
-```powershell
-.\dev-db.ps1 -Wait
-```
-
-### 2) Start backend locally
-
-```powershell
-.\dev-backend.ps1
-```
-
-### 3) Start frontend locally
-
-```powershell
-.\dev-frontend.ps1
-```
-
-### 4) Open app
-
-- UI: http://127.0.0.1:3005
-- API docs: http://127.0.0.1:8001/docs
-
-Script notes:
-
-- `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
-- `dev-backend.ps1` sets local env defaults (`localhost:5433` database, local ticker CSV).
-- `dev-frontend.ps1` sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
-- `dev-backend.ps1` auto-creates/fixes `.venv`, installs deps if `uvicorn` is missing, and creates the target DB if absent.
-- You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
 
 ## Manual Local Dev (Without Helper Scripts)
 

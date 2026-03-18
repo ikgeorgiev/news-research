@@ -15,8 +15,7 @@ from app.monitoring import observe_http_request, render_metrics
 from app.routes.admin import admin_router
 from app.routes.news import news_router
 from app.routes.push import push_router
-from app.runtime import set_scheduler
-from app.scheduler import IngestionScheduler
+from app.scheduler import IngestionScheduler, set_scheduler
 from app.ticker_loader import load_tickers_from_csv
 
 logging.basicConfig(level=logging.INFO)

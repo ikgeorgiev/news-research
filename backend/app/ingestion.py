@@ -38,8 +38,8 @@ from app.sources import (
 )
 logger = logging.getLogger(__name__)
 
-# Compatibility facade for tests and callers that still import runtime helpers
-# from app.ingestion while the implementation lives in smaller modules.
+# Public orchestration surface for ingestion flows. Callers should import
+# scheduler/runtime entrypoints from here rather than reaching into helper modules.
 
 
 class TickerSyncStats(TypedDict):

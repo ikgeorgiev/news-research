@@ -1,44 +1,10 @@
 "use client"
 
-import { FormEvent, KeyboardEvent, MouseEvent } from "react"
-
-import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
+import { KeyboardEvent } from "react"
 
 import { BellIcon } from "./page-icons"
 import { watchlistMatchesItem } from "./page-helpers"
-import { ContextMenuState } from "./use-watchlists"
-
-type WatchlistSidebarProps = {
-  activeWatchlistId: string
-  alertIncludeAllNews: boolean
-  closeContextMenu: () => void
-  contextMenu: ContextMenuState
-  customWatchlists: Watchlist[]
-  handleContextDelete: (watchlistId: string) => void
-  handleCreateWatchlist: (event: FormEvent) => void
-  handleFinishRename: () => void
-  handleMarkAllRead: (watchlistId: string) => void
-  handleStartRename: (watchlistId: string) => void
-  handleTogglePushScope: (watchlistId: string, event?: MouseEvent) => void
-  handleWatchlistContextMenu: (event: MouseEvent, watchlistId: string) => void
-  isCreatingWatchlist: boolean
-  isPushScopeEnabled: (watchlistId: string) => boolean
-  newWatchlistName: string
-  readIds: Set<number>
-  renameValue: string
-  renamingWatchlistId: string | null
-  selectWatchlist: (watchlistId: string, watchlist?: Watchlist) => void
-  selectedTickers: Set<string>
-  setIsCreatingWatchlist: (value: boolean) => void
-  setNewWatchlistName: (value: string) => void
-  setRenameValue: (value: string) => void
-  setRenamingWatchlistId: (value: string | null) => void
-  tickers: TickerItem[]
-  togglePushScope: (watchlistId: string) => void
-  toggleTickerSelection: (symbol: string) => void
-  trackedUnreadItems: NewsItem[]
-  unreadCount: number
-}
+import { WatchlistSidebarModel } from "./use-page-controller"
 
 function renderUnreadBadge(active: boolean, count: number) {
   if (count <= 0) return null
@@ -60,36 +26,42 @@ function renderUnreadBadge(active: boolean, count: number) {
 }
 
 export function WatchlistSidebar({
-  activeWatchlistId,
-  alertIncludeAllNews,
-  closeContextMenu,
-  contextMenu,
-  customWatchlists,
-  handleContextDelete,
-  handleCreateWatchlist,
-  handleFinishRename,
-  handleMarkAllRead,
-  handleStartRename,
-  handleTogglePushScope,
-  handleWatchlistContextMenu,
-  isCreatingWatchlist,
-  isPushScopeEnabled,
-  newWatchlistName,
-  readIds,
-  renameValue,
-  renamingWatchlistId,
-  selectWatchlist,
-  selectedTickers,
-  setIsCreatingWatchlist,
-  setNewWatchlistName,
-  setRenameValue,
-  setRenamingWatchlistId,
-  tickers,
-  togglePushScope,
-  toggleTickerSelection,
-  trackedUnreadItems,
-  unreadCount,
-}: WatchlistSidebarProps) {
+  sidebar,
+}: {
+  sidebar: WatchlistSidebarModel
+}) {
+  const {
+    activeWatchlistId,
+    alertIncludeAllNews,
+    closeContextMenu,
+    contextMenu,
+    customWatchlists,
+    handleContextDelete,
+    handleCreateWatchlist,
+    handleFinishRename,
+    handleMarkAllRead,
+    handleStartRename,
+    handleTogglePushScope,
+    handleWatchlistContextMenu,
+    isCreatingWatchlist,
+    isPushScopeEnabled,
+    newWatchlistName,
+    readIds,
+    renameValue,
+    renamingWatchlistId,
+    selectWatchlist,
+    selectedTickers,
+    setIsCreatingWatchlist,
+    setNewWatchlistName,
+    setRenameValue,
+    setRenamingWatchlistId,
+    tickers,
+    togglePushScope,
+    toggleTickerSelection,
+    trackedUnreadItems,
+    unreadCount,
+  } = sidebar
+
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") handleFinishRename()
     if (event.key === "Escape") {

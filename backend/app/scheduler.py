@@ -16,6 +16,7 @@ from app.ingestion import IngestionCycleResult, run_ingestion_cycle
 from app.monitoring import record_ingestion_failure, record_ingestion_skip, record_ingestion_success
 
 logger = logging.getLogger(__name__)
+_scheduler: "IngestionScheduler | None" = None
 
 
 class IngestionScheduler:
@@ -123,3 +124,12 @@ class IngestionScheduler:
             )
         except Exception:
             logger.exception("Ingestion cycle failed with unhandled exception")
+
+
+def get_scheduler() -> IngestionScheduler | None:
+    return _scheduler
+
+
+def set_scheduler(scheduler: IngestionScheduler | None) -> None:
+    global _scheduler
+    _scheduler = scheduler

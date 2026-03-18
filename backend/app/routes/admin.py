@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.deps import require_admin_api_key
 from app.models import IngestionRun, Source
-from app.runtime import get_scheduler
+from app.scheduler import get_scheduler
 from app.schemas import (
     DedupeResponse,
     IngestionRunItem,
@@ -172,7 +172,11 @@ def admin_remap_source(
             f"Supported: {', '.join(sorted(PAGE_FETCH_CONFIGS.keys()))}",
         )
     result = remap_source_articles(
-        db, settings, source_code=source_code, limit=limit, only_unmapped=only_unmapped,
+        db,
+        settings,
+        source_code=source_code,
+        limit=limit,
+        only_unmapped=only_unmapped,
     )
     return _source_remap_response_payload(result)
 
@@ -193,7 +197,11 @@ def admin_reload_tickers(
     if remap_unmapped:
         for code in sorted(PAGE_FETCH_CONFIGS.keys()):
             result = remap_source_articles(
-                db, settings, source_code=code, limit=remap_limit, only_unmapped=True,
+                db,
+                settings,
+                source_code=code,
+                limit=remap_limit,
+                only_unmapped=True,
             )
             source_remap_payloads.append(_source_remap_response_payload(result))
 

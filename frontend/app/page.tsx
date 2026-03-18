@@ -1,217 +1,41 @@
 "use client"
 
-import { FormEvent, MouseEvent, useState } from "react"
-import { usePushSubscription } from "@/hooks/usePushSubscription"
-import { Watchlist } from "@/lib/types"
+import { usePageController } from "./use-page-controller"
 import { NewsFeedSection } from "./news-feed-section"
 import { BellIcon } from "./page-icons"
-import { useFeedPreferences } from "./use-feed-preferences"
-import { useNewsFeed } from "./use-news-feed"
-import { useWatchlists } from "./use-watchlists"
-import { watchlistMatchesItem } from "./page-helpers"
 import { WatchlistSidebar } from "./watchlist-sidebar"
 
-const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
-
 export default function Page() {
-  // Search/Filter state
-  const [ticker, setTicker] = useState("")
-  const [provider, setProvider] = useState("")
-  const [searchInput, setSearchInput] = useState("")
-  const [searchQuery, setSearchQuery] = useState("")
-
-  const syncFiltersToWatchlist = (watchlist?: Watchlist) => {
-    const nextProvider = watchlist?.provider || ""
-    const nextQuery = watchlist?.q || ""
-    setTicker("")
-    setProvider(nextProvider)
-    setSearchQuery(nextQuery)
-    setSearchInput(nextQuery)
-  }
-
-  const {
-    activeWatchlist,
-    activeWatchlistId,
-    closeContextMenu,
-    contextMenu,
-    customWatchlists,
-    handleContextDelete,
-    handleCreateWatchlist,
-    handleFinishRename,
-    handleStartRename,
-    handleWatchlistContextMenu,
-    isCreatingWatchlist,
-    newWatchlistName,
-    renameValue,
-    renamingWatchlistId,
-    selectWatchlist,
-    selectedTickers,
-    setIsCreatingWatchlist,
-    setNewWatchlistName,
-    setRenameValue,
-    setRenamingWatchlistId,
-    toggleTickerSelection,
-  } = useWatchlists({
-    onSelectWatchlist: syncFiltersToWatchlist,
-  })
-
-  const {
-    error,
-    feedContainerRef,
-    globalTrackedIds,
-    items,
-    loadMore,
-    loadPendingArticles,
-    loading,
-    loadingMore,
-    nextCursor,
-    pendingNewItems,
-    tickers,
-    totalCount,
-    triggerRefresh,
-  } = useNewsFeed({
-    activeWatchlist,
-    activeWatchlistId,
-    provider,
-    searchQuery,
-    ticker,
-  })
-
-  const {
-    addReadIds,
-    expandedIds,
-    markAsReadAndOpen,
-    markReadByQuery,
-    mounted,
-    readIds,
-    setViewMode,
-    toggleRead,
-    toggleSummary,
-    trackedUnreadItems,
-    unreadCount,
-    viewMode,
-  } = useFeedPreferences({
-    globalTrackedIds,
-    items,
-    pendingNewItems,
-    totalCount,
-  })
-
-  const {
-    alertIncludeAllNews,
-    activePushScopeCount,
-    activePushScopeNames,
-    isPushScopeEnabled,
-    pushError,
-    pushSubscribed,
-    togglePushScope,
-    togglePushSubscription,
-  } = usePushSubscription({
-    customWatchlists,
-    mounted,
-  })
-
-  const handleTogglePushScope = (watchlistId: string, e?: MouseEvent) => {
-    e?.preventDefault()
-    e?.stopPropagation()
-    togglePushScope(watchlistId)
-  }
-
-  const onSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSearchQuery(searchInput.trim())
-  }
-
-  const handleMarkAllRead = (wlId: string) => {
-    closeContextMenu()
-
-    if (wlId === "all") {
-      // Fetch ALL article IDs from the backend so we mark everything read,
-      // including articles beyond the current Load More window.
-      markReadByQuery({ includeUnmappedFromProvider: "Business Wire" })
-        .catch(() => {
-          // Fallback: mark only tracked items if the fetch fails.
-          addReadIds(trackedUnreadItems.map((item) => item.id))
-        })
-      return
-    }
-
-    const wl = customWatchlists.find(w => w.id === wlId)
-    if (!wl) return
-    const params = {
-      tickers: wl.tickers.length > 0 ? wl.tickers : undefined,
-      provider: wl.provider,
-      q: wl.q,
-    }
-    if (!params.tickers && !params.provider && !params.q) return
-
-    markReadByQuery(params)
-      .catch(() => {
-        // Fallback: mark only tracked items matching this watchlist.
-        const matchingIds = trackedUnreadItems
-          .filter((item) => watchlistMatchesItem(item, wl))
-          .map((item) => item.id)
-        addReadIds(matchingIds)
-      })
-  }
+  const controller = usePageController()
+  const { filters, newsFeed, preferences, push, sidebar, triggerRefresh } = controller
 
   return (
     <div className="deck-root">
-      <WatchlistSidebar
-        activeWatchlistId={activeWatchlistId}
-        alertIncludeAllNews={alertIncludeAllNews}
-        closeContextMenu={closeContextMenu}
-        contextMenu={contextMenu}
-        customWatchlists={customWatchlists}
-        handleContextDelete={handleContextDelete}
-        handleCreateWatchlist={handleCreateWatchlist}
-        handleFinishRename={handleFinishRename}
-        handleMarkAllRead={handleMarkAllRead}
-        handleStartRename={handleStartRename}
-        handleTogglePushScope={handleTogglePushScope}
-        handleWatchlistContextMenu={handleWatchlistContextMenu}
-        isCreatingWatchlist={isCreatingWatchlist}
-        isPushScopeEnabled={isPushScopeEnabled}
-        newWatchlistName={newWatchlistName}
-        readIds={readIds}
-        renameValue={renameValue}
-        renamingWatchlistId={renamingWatchlistId}
-        selectWatchlist={selectWatchlist}
-        selectedTickers={selectedTickers}
-        setIsCreatingWatchlist={setIsCreatingWatchlist}
-        setNewWatchlistName={setNewWatchlistName}
-        setRenameValue={setRenameValue}
-        setRenamingWatchlistId={setRenamingWatchlistId}
-        tickers={tickers}
-        togglePushScope={togglePushScope}
-        toggleTickerSelection={toggleTickerSelection}
-        trackedUnreadItems={trackedUnreadItems}
-        unreadCount={unreadCount}
-      />
+      <WatchlistSidebar sidebar={sidebar} />
 
       {/* Main Content */}
       <main className="main-content">
         <section className="filter-rack">
-          <form onSubmit={onSearchSubmit} style={{ display: "flex", gap: "0.5rem", flex: 1 }}>
+          <form onSubmit={filters.onSearchSubmit} style={{ display: "flex", gap: "0.5rem", flex: 1 }}>
             <input
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
+              value={filters.searchInput}
+              onChange={(event) => filters.setSearchInput(event.target.value)}
               placeholder="Search news..."
               style={{ width: "300px" }}
             />
             <button className="primary" type="submit">Search</button>
           </form>
 
-          <select value={ticker} onChange={(event) => setTicker(event.target.value)}>
+          <select value={filters.ticker} onChange={(event) => filters.setTicker(event.target.value)}>
             <option value="">All symbols</option>
-            {tickers.map((item) => (
+            {newsFeed.tickers.map((item) => (
               <option key={item.symbol} value={item.symbol}>{item.symbol}</option>
             ))}
           </select>
 
-          <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+          <select value={filters.provider} onChange={(event) => filters.setProvider(event.target.value)}>
             <option value="">All sources</option>
-            {STATIC_PROVIDERS.map((item) => (
+            {filters.providerOptions.map((item) => (
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
@@ -220,15 +44,15 @@ export default function Page() {
         <section className="status-strip" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
             <span>
-              {loading
+              {newsFeed.loading
                 ? "Refreshing..."
-                : `${unreadCount} Unread / ${totalCount} Total`}
-              {items.length !== totalCount ? ` • ${items.length} shown` : ""}
+                : `${preferences.unreadCount} Unread / ${newsFeed.totalCount} Total`}
+              {newsFeed.items.length !== newsFeed.totalCount ? ` • ${newsFeed.items.length} shown` : ""}
             </span>
-            {error && <span style={{ color: "#F23645" }}>Error: {error}</span>}
+            {newsFeed.error && <span style={{ color: "#F23645" }}>Error: {newsFeed.error}</span>}
           </div>
           
-          {mounted && (
+          {preferences.mounted && (
             <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
               <button 
                 className="icon-button" 
@@ -243,26 +67,26 @@ export default function Page() {
               </button>
               <button
                 className="icon-button"
-                onClick={togglePushSubscription}
+                onClick={push.togglePushSubscription}
                 title={
-                  pushSubscribed
+                  push.pushSubscribed
                     ? "Disable push notifications"
                     : "Enable push notifications"
                 }
-                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: pushSubscribed ? "var(--accent-blue)" : pushError ? "rgba(242, 54, 69, 0.15)" : "transparent", color: pushSubscribed ? "var(--text-solid)" : pushError ? "#F23645" : "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.85rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: push.pushSubscribed ? "var(--accent-blue)" : push.pushError ? "rgba(242, 54, 69, 0.15)" : "transparent", color: push.pushSubscribed ? "var(--text-solid)" : push.pushError ? "#F23645" : "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem" }}
               >
-                <BellIcon active={pushSubscribed} />
-                {pushSubscribed ? "Push On" : pushError ? "Push Failed" : "Push"}
+                <BellIcon active={push.pushSubscribed} />
+                {push.pushSubscribed ? "Push On" : push.pushError ? "Push Failed" : "Push"}
               </button>
-              {pushError && !pushSubscribed && (
-                <span style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "200px" }} title={pushError}>
-                  {pushError}
+              {push.pushError && !push.pushSubscribed && (
+                <span style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "200px" }} title={push.pushError}>
+                  {push.pushError}
                 </span>
               )}
               <span
                 title={
-                  activePushScopeCount > 0
-                    ? `Enabled push scopes: ${activePushScopeNames.join(", ")}`
+                  push.activePushScopeCount > 0
+                    ? `Enabled push scopes: ${push.activePushScopeNames.join(", ")}`
                     : "No push scopes enabled"
                 }
                 style={{
@@ -270,27 +94,27 @@ export default function Page() {
                   fontSize: "0.8rem",
                   borderRadius: "999px",
                   border: "1px solid var(--border-color)",
-                  background: activePushScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
-                  color: activePushScopeCount > 0 ? "var(--accent-blue)" : "var(--text-secondary)",
+                  background: push.activePushScopeCount > 0 ? "rgba(41, 98, 255, 0.15)" : "transparent",
+                  color: push.activePushScopeCount > 0 ? "var(--accent-blue)" : "var(--text-secondary)",
                   whiteSpace: "nowrap",
                 }}
               >
-                Push scopes: {activePushScopeCount}
+                Push scopes: {push.activePushScopeCount}
               </span>
               <div className="view-mode-toggle" style={{ display: "flex", gap: "0.25rem", zIndex: 10 }}>
               <button 
-                className={`icon-button ${viewMode === "list" ? "active" : ""}`} 
-                onClick={() => setViewMode("list")}
+                className={`icon-button ${preferences.viewMode === "list" ? "active" : ""}`} 
+                onClick={() => preferences.setViewMode("list")}
                 title="List View"
-                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: viewMode === "list" ? "var(--accent-blue)" : "transparent", color: viewMode === "list" ? "var(--text-solid)" : "var(--text-secondary)" }}
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: preferences.viewMode === "list" ? "var(--accent-blue)" : "transparent", color: preferences.viewMode === "list" ? "var(--text-solid)" : "var(--text-secondary)" }}
               >
                 List
               </button>
               <button 
-                className={`icon-button ${viewMode === "full" ? "active" : ""}`} 
-                onClick={() => setViewMode("full")}
+                className={`icon-button ${preferences.viewMode === "full" ? "active" : ""}`} 
+                onClick={() => preferences.setViewMode("full")}
                 title="Full View"
-                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: viewMode === "full" ? "var(--accent-blue)" : "transparent", color: viewMode === "full" ? "var(--text-solid)" : "var(--text-secondary)" }}
+                style={{ cursor: "pointer", padding: "4px 12px", fontSize: "0.75rem", borderRadius: "4px", border: "1px solid var(--border-color)", background: preferences.viewMode === "full" ? "var(--accent-blue)" : "transparent", color: preferences.viewMode === "full" ? "var(--text-solid)" : "var(--text-secondary)" }}
               >
                 Full
               </button>
@@ -300,20 +124,20 @@ export default function Page() {
         </section>
 
         <NewsFeedSection
-          expandedIds={expandedIds}
-          feedContainerRef={feedContainerRef}
-          items={items}
-          loadMore={loadMore}
-          loadPendingArticles={loadPendingArticles}
-          loading={loading}
-          loadingMore={loadingMore}
-          markAsReadAndOpen={markAsReadAndOpen}
-          nextCursor={nextCursor}
-          pendingNewItems={pendingNewItems}
-          readIds={readIds}
-          toggleRead={toggleRead}
-          toggleSummary={toggleSummary}
-          viewMode={viewMode}
+          expandedIds={preferences.expandedIds}
+          feedContainerRef={newsFeed.feedContainerRef}
+          items={newsFeed.items}
+          loadMore={newsFeed.loadMore}
+          loadPendingArticles={newsFeed.loadPendingArticles}
+          loading={newsFeed.loading}
+          loadingMore={newsFeed.loadingMore}
+          markAsReadAndOpen={preferences.markAsReadAndOpen}
+          nextCursor={newsFeed.nextCursor}
+          pendingNewItems={newsFeed.pendingNewItems}
+          readIds={preferences.readIds}
+          toggleRead={preferences.toggleRead}
+          toggleSummary={preferences.toggleSummary}
+          viewMode={preferences.viewMode}
         />
       </main>
     </div>
