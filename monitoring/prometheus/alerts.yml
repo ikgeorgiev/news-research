@@ -1,0 +1,56 @@
+groups:
+  - name: backend-alerts
+    rules:
+      - alert: IngestionCycleStalled
+        expr: |
+          (
+            max by (instance) (ingestion_last_completed_cycle_unix_seconds{job="backend"}) > 0
+            and
+            time() - max by (instance) (ingestion_last_completed_cycle_unix_seconds{job="backend"}) > 600
+          )
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion has not completed a cycle recently"
+          description: "No ingestion cycle has finished for more than 10 minutes on {{ $labels.instance }}."
+
+      - alert: IngestionFailingWithoutRecovery
+        expr: |
+          sum by (instance) (increase(ingestion_cycle_total{job="backend",status="failed"}[15m])) > 0
+          unless on (instance)
+          sum by (instance) (increase(ingestion_cycle_total{job="backend",status="success"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ingestion cycles are failing without a successful recovery"
+          description: "The backend has recorded failed ingestion cycles for 15 minutes without any successful cycle on {{ $labels.instance }}."
+
+      - alert: NoArticlesInsertedRecently
+        expr: |
+          max by (instance) (max_over_time(ingestion_last_cycle_items_inserted{job="backend"}[6h])) == 0
+          and on (instance)
+          sum by (instance) (increase(ingestion_cycle_total{job="backend",status="success"}[6h])) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion is running but has inserted no articles recently"
+          description: "Successful ingestion cycles have completed in the last 6 hours but none inserted articles on {{ $labels.instance }}."
+
+      - alert: ApiHighErrorRate
+        expr: |
+          (
+            sum by (instance) (rate(http_requests_total{job="backend",status=~"5..",path!="/metrics",path!="/health"}[5m]))
+            /
+            sum by (instance) (rate(http_requests_total{job="backend",path!="/metrics",path!="/health"}[5m]))
+          ) > 0.05
+          and on (instance)
+          sum by (instance) (rate(http_requests_total{job="backend",path!="/metrics",path!="/health"}[5m])) >= 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx rate is elevated"
+          description: "The 5xx response rate has stayed above 5% for 10 minutes on {{ $labels.instance }}."

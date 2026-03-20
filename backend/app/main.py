@@ -5,7 +5,8 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -18,7 +19,7 @@ from app.routes.news import news_router
 from app.routes.push import push_router
 from app.routes.sse import sse_router
 from app.scheduler import IngestionScheduler, set_scheduler
-from app.sse import SSEBroadcaster
+from app.sse import SSEBroadcaster, SSEConnectionLimiter
 from app.ticker_loader import load_tickers_from_csv
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
     broadcaster = SSEBroadcaster(settings.database_url)
     broadcaster.start()
     app.state.sse_broadcaster = broadcaster
+    app.state.sse_connection_limiter = SSEConnectionLimiter(settings.sse_max_connections_per_ip)
 
     yield
 
@@ -89,10 +91,14 @@ def health():
     except Exception:
         logger.exception("Database health check failed")
         ok = False
-    return {
+    payload = {
         "status": "ok" if ok else "degraded",
         "time": datetime.now(timezone.utc).isoformat(),
     }
+    return JSONResponse(
+        content=payload,
+        status_code=status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 @app.get("/metrics", include_in_schema=False)

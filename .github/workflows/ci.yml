@@ -29,7 +29,10 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run backend tests
-        run: pytest -q --cov=app --cov-report=term-missing
+        # Ratchet this upward as backend coverage improves. The current
+        # measured baseline is ~21%, so keep the floor just below that to
+        # prevent regressions without breaking every build immediately.
+        run: pytest -q --cov=app --cov-report=term-missing --cov-fail-under=20
 
   frontend:
     name: Frontend Tests and Build

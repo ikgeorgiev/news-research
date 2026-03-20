@@ -80,7 +80,10 @@ def test_health_returns_degraded_when_db_check_raises(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("app.main.db_health_check", _raise)
     response = health()
-    assert response["status"] == "degraded"
+    import json
+    body = json.loads(response.body)
+    assert body["status"] == "degraded"
+    assert response.status_code == 503
 
 
 def test_list_news_keeps_empty_ticker_input_on_mapped_only_path(db_session: Session):

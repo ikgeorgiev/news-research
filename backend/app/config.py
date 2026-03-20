@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     source_enable_bw: bool = True
 
     request_timeout_seconds: int = Field(default=20, ge=5, le=120)
+    sse_max_connections_per_ip: int = Field(default=5, ge=1, le=100)
+    behind_proxy: bool = False
     push_send_timeout_seconds: int = Field(default=10, ge=1, le=120)
     push_max_per_cycle: int = Field(default=25, ge=1, le=500)
     push_max_consecutive_failures: int = Field(default=20, ge=1, le=1000)

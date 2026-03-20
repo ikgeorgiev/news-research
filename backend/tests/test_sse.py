@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 
-from app.routes.sse import _stream_news_events
-from app.sse import SSEBroadcaster
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.routes.sse import _stream_news_events, sse_router
+from app.sse import SSEBroadcaster, SSEConnectionLimiter
 
 
 def test_sse_broadcaster_fans_out_to_async_subscribers():
@@ -115,3 +118,42 @@ def test_sse_stream_sends_unavailable_when_broadcaster_goes_down():
         assert unavailable_message == "event: unavailable\ndata: {}\n\n"
 
     asyncio.run(run_check())
+
+
+def test_sse_connection_limiter_enforces_per_ip_cap():
+    limiter = SSEConnectionLimiter(max_connections_per_ip=2)
+
+    assert limiter.try_acquire("127.0.0.1") is True
+    assert limiter.try_acquire("127.0.0.1") is True
+    assert limiter.try_acquire("127.0.0.1") is False
+    assert limiter.active_connections_for("127.0.0.1") == 2
+
+
+def test_sse_connection_limiter_release_allows_new_connection():
+    limiter = SSEConnectionLimiter(max_connections_per_ip=1)
+
+    assert limiter.try_acquire("127.0.0.1") is True
+    assert limiter.try_acquire("127.0.0.1") is False
+
+    limiter.release("127.0.0.1")
+
+    assert limiter.try_acquire("127.0.0.1") is True
+
+
+def test_sse_route_rejects_connections_over_the_per_ip_cap():
+    class FakeBroadcaster:
+        is_available = False
+
+    app = FastAPI()
+    app.include_router(sse_router, prefix="/api/v1")
+    app.state.sse_broadcaster = FakeBroadcaster()
+    app.state.sse_connection_limiter = SSEConnectionLimiter(max_connections_per_ip=1)
+    app.state.sse_connection_limiter.try_acquire("testclient")
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/events/news")
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "detail": "Too many concurrent event streams for this IP. Limit: 1."
+    }

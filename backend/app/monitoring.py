@@ -30,7 +30,11 @@ INGESTION_CYCLE_DURATION_SECONDS = Histogram(
 )
 INGESTION_LAST_CYCLE_UNIX_SECONDS = Gauge(
     "ingestion_last_cycle_unix_seconds",
-    "UNIX timestamp of the most recent finished ingestion cycle",
+    "UNIX timestamp of the most recent finished ingestion cycle (including skips)",
+)
+INGESTION_LAST_COMPLETED_CYCLE_UNIX_SECONDS = Gauge(
+    "ingestion_last_completed_cycle_unix_seconds",
+    "UNIX timestamp of the most recent ingestion cycle that actually ran (success or failure, not skips)",
 )
 INGESTION_LAST_CYCLE_DURATION_SECONDS = Gauge(
     "ingestion_last_cycle_duration_seconds",
@@ -48,6 +52,11 @@ INGESTION_LAST_CYCLE_FAILED_FEEDS = Gauge(
     "ingestion_last_cycle_failed_feeds",
     "Failed feeds in the most recent successful ingestion cycle",
 )
+INGESTION_SCHEDULER_ENABLED = Gauge(
+    "ingestion_scheduler_enabled",
+    "1 if the ingestion scheduler is running, 0 otherwise",
+)
+
 PUSH_NOTIFICATIONS_TOTAL = Counter(
     "push_notifications_sent_total",
     "Number of push notification delivery attempts by status",
@@ -80,6 +89,7 @@ def record_ingestion_success(result: dict[str, Any], duration_seconds: float) ->
     INGESTION_CYCLE_TOTAL.labels(status="success").inc()
     INGESTION_CYCLE_DURATION_SECONDS.observe(duration_seconds)
     INGESTION_LAST_CYCLE_UNIX_SECONDS.set(time.time())
+    INGESTION_LAST_COMPLETED_CYCLE_UNIX_SECONDS.set(time.time())
     INGESTION_LAST_CYCLE_DURATION_SECONDS.set(duration_seconds)
     INGESTION_LAST_CYCLE_ITEMS_SEEN.set(float(int(result.get("total_items_seen", 0) or 0)))
     INGESTION_LAST_CYCLE_ITEMS_INSERTED.set(float(int(result.get("total_items_inserted", 0) or 0)))
@@ -90,6 +100,7 @@ def record_ingestion_failure(duration_seconds: float) -> None:
     INGESTION_CYCLE_TOTAL.labels(status="failed").inc()
     INGESTION_CYCLE_DURATION_SECONDS.observe(duration_seconds)
     INGESTION_LAST_CYCLE_UNIX_SECONDS.set(time.time())
+    INGESTION_LAST_COMPLETED_CYCLE_UNIX_SECONDS.set(time.time())
 
 
 def record_push_delivery(status: str) -> None:

@@ -134,3 +134,41 @@ def _put_listener_payload(
         listener_queue.put_nowait(payload)
     except asyncio.QueueFull:
         return
+
+
+class SSEConnectionLimiter:
+    def __init__(self, max_connections_per_ip: int):
+        self._max_connections_per_ip = max_connections_per_ip
+        self._active_connections: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def max_connections_per_ip(self) -> int:
+        return self._max_connections_per_ip
+
+    def try_acquire(self, client_ip: str) -> bool:
+        normalized_ip = self._normalize_client_ip(client_ip)
+        with self._lock:
+            active_count = self._active_connections.get(normalized_ip, 0)
+            if active_count >= self._max_connections_per_ip:
+                return False
+            self._active_connections[normalized_ip] = active_count + 1
+            return True
+
+    def release(self, client_ip: str) -> None:
+        normalized_ip = self._normalize_client_ip(client_ip)
+        with self._lock:
+            active_count = self._active_connections.get(normalized_ip, 0)
+            if active_count <= 1:
+                self._active_connections.pop(normalized_ip, None)
+                return
+            self._active_connections[normalized_ip] = active_count - 1
+
+    def active_connections_for(self, client_ip: str) -> int:
+        normalized_ip = self._normalize_client_ip(client_ip)
+        with self._lock:
+            return self._active_connections.get(normalized_ip, 0)
+
+    @staticmethod
+    def _normalize_client_ip(client_ip: str) -> str:
+        return client_ip.strip() or "unknown"

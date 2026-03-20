@@ -44,6 +44,8 @@ class IngestionScheduler:
             jitter=10,
         )
         self._scheduler.start()
+        from app.monitoring import INGESTION_SCHEDULER_ENABLED
+        INGESTION_SCHEDULER_ENABLED.set(1)
         logger.info("Ingestion scheduler started")
 
     def shutdown(self) -> None:

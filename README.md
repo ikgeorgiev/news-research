@@ -106,11 +106,12 @@ Default frontend host port is `3005` (`FRONTEND_PORT` in `.env`).
 
 ## Monitoring UI (Prometheus + Grafana)
 
-This repo now includes a lightweight monitoring stack (no alerting):
+This repo now includes a lightweight monitoring stack:
 
-- Prometheus: scrape + query metrics
+- Prometheus: scrape, query metrics, and evaluate local alert rules
 - Grafana: dashboard UI
 - Grafana alerting is disabled in `docker-compose.yml` (`GF_UNIFIED_ALERTING_ENABLED=false`)
+- Alert notifications are not routed anywhere yet because Alertmanager is not configured
 
 ### 1) Run backend with metrics exposed
 
@@ -147,12 +148,14 @@ Grafana auto-loads dashboard:
 - last cycle summary (duration, inserted, failed feeds, timestamp)
 - API route latency (`http_request_duration_seconds`)
 - latest individual feed runs table (`source`, `feed_url`, start/end, status, seen/inserted, error)
+- alert states in Prometheus for stalled ingestion, repeated ingestion failures, zero recent inserts, and high API 5xx rate
 
 ### Notes
 
 - Default `docker compose up --build` does not start monitoring services.
 - Default scrape targets are `host.docker.internal:8001` and `host.docker.internal:8000`.
 - If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
+- Prometheus alert rules are loaded from `monitoring/prometheus/alerts.yml` and can be inspected in the Prometheus UI under `Alerts`.
 - The table panel uses a provisioned Postgres datasource (`db:5432`, `cef/cef`, `cef_news`).
 
 ## Manual Local Dev (Without Helper Scripts)
