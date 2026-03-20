@@ -8,8 +8,9 @@ from functools import lru_cache
 from html import unescape
 from urllib.parse import parse_qs, urlparse, urlunparse
 
-import requests
+import httpx
 
+from app import http_client
 from app.constants import (
     CONFIDENCE_CONTEXT,
     CONFIDENCE_EXCHANGE,
@@ -378,14 +379,14 @@ def _fetch_source_page_html(
 
     html_text: str | None = None
     try:
-        response = requests.get(
+        response = http_client.get_http_client().get(
             fetch_url,
             timeout=timeout_seconds,
             headers=SOURCE_PAGE_HEADERS,
         )
-        if response.ok and response.text:
+        if response.is_success and response.text:
             html_text = response.text
-    except (requests.RequestException, AttributeError):
+    except (httpx.RequestError, httpx.HTTPStatusError):
         html_text = None
 
     _cache_source_page(fetch_url, time.time(), html_text)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TypedDict
@@ -9,6 +10,8 @@ import feedparser
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.article_maintenance import _upsert_article_tickers
 from app.constants import TITLE_DEDUP_WINDOW_HOURS
@@ -23,6 +26,7 @@ from app.feed_runtime import (
     _update_feed_http_cache,
 )
 from app.models import Article, IngestionRun, RawFeedItem, Source
+from app.sse import notify_new_articles
 from app.sources import PAGE_FETCH_CONFIGS
 from app.constants import MIN_PERSIST_CONFIDENCE
 from app.ticker_extraction import (
@@ -716,6 +720,11 @@ def ingest_feed(
 
                 db.commit()
                 committed_items_inserted = items_inserted
+                if committed_items_inserted > 0:
+                    try:
+                        notify_new_articles(db, committed_items_inserted)
+                    except Exception:
+                        logger.warning("pg_notify for new articles failed", exc_info=True)
                 if entry_errors > 0 and error_text is None:
                     error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}."
     except Exception as exc:

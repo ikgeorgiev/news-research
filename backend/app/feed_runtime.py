@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import logging
 import random
-import time
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-import requests
+import httpx
 from sqlalchemy import and_, delete, select, tuple_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app import http_client
 from app.models import FeedPollState, IngestionRun, RawFeedItem, Ticker
 from app.ticker_loader import load_tickers_from_csv
 
@@ -39,14 +40,18 @@ def _fetch_feed_with_retries(
     backoff_seconds: float,
     backoff_jitter_seconds: float,
     extra_headers: dict[str, str] | None = None,
-) -> requests.Response:
-    last_error: requests.RequestException | None = None
+    ) -> httpx.Response:
+    last_error: httpx.HTTPStatusError | httpx.RequestError | None = None
     headers = dict(REQUEST_HEADERS)
     if extra_headers:
         headers.update({str(k): str(v) for k, v in extra_headers.items() if v})
     for attempt in range(1, max_attempts + 1):
         try:
-            response = requests.get(feed_url, timeout=timeout_seconds, headers=headers)
+            response = http_client.get_http_client().get(
+                feed_url,
+                timeout=timeout_seconds,
+                headers=headers,
+            )
             status_code = int(getattr(response, "status_code", 200) or 200)
             if status_code == 429:
                 retry_after = _parse_retry_after_seconds(
@@ -75,7 +80,7 @@ def _fetch_feed_with_retries(
                 continue
             response.raise_for_status()
             return response
-        except requests.RequestException as exc:
+        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
             last_error = exc
             if attempt >= max_attempts:
                 raise
@@ -156,7 +161,7 @@ def _get_feed_conditional_headers(feed_state: FeedPollState | None) -> dict[str,
 
 
 def _update_feed_http_cache(
-    feed_state: FeedPollState, response: requests.Response
+    feed_state: FeedPollState, response: httpx.Response
 ) -> None:
     headers = getattr(response, "headers", None)
     if headers is None or not hasattr(headers, "get"):

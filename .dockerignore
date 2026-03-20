@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.env
+.env.example
+*.md
+*.ps1
+**/__pycache__
+**/.venv
+**/.pytest_cache
+**/node_modules
+**/coverage
+**/.next
+backend/tests
+backend/pytest-cache-files-*
+monitoring

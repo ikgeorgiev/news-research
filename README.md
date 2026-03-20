@@ -4,9 +4,10 @@ Local-first RSS aggregation platform for closed-end funds.
 
 ## Stack
 
-- Backend: FastAPI + SQLAlchemy + APScheduler
+- Backend: FastAPI + SQLAlchemy + APScheduler + Alembic
 - Frontend: Next.js (App Router)
 - DB: PostgreSQL
+- HTTP: httpx (HTTP/2, connection pooling)
 - Sources: Yahoo Finance, PRNewswire, GlobeNewswire, Business Wire
 
 ## Features
@@ -19,9 +20,13 @@ Local-first RSS aggregation platform for closed-end funds.
 - trafilatura-based article body extraction with regex fallback
 - Per-symbol validation keywords (auto-generated from sponsor brand + fund name, with CSV override)
 - Automated maintenance: deduplication, false-positive purge, source remap, stale mapping revalidation
+- Real-time SSE delivery via PostgreSQL LISTEN/NOTIFY (auto-fallback to polling for SQLite)
+- Adaptive polling: 30s without SSE, 120s when SSE connected
 - Push notifications (Web Push / VAPID)
 - Filterable API (`ticker`, `provider`, `source`, `q`, `from`, `to`) with cursor pagination
 - Feed UI with provider/ticker/search filters and load-more pagination
+- Docker: multi-stage builds, non-root containers, `.dockerignore`
+- Schema migrations via Alembic with legacy database bootstrapping
 
 ## Project Layout
 
@@ -70,7 +75,9 @@ cp .env.example .env
 Script notes:
 
 - `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
-- `dev-backend.ps1` uses `backend/.venv`, sets local env defaults (`localhost:5433` database, local ticker CSV), installs deps if needed, and creates the target DB if absent.
+- `dev-backend.ps1` uses `backend/.venv`, sets local env defaults (`localhost:5433` database, local ticker CSV), installs deps if key packages are missing (`uvicorn`, `alembic`, `httpx`), and creates the target DB if absent.
+- `dev-backend.ps1` runs `python migrate.py` before starting the API so local schema stays aligned with the app.
+- If a local database already has the pre-Alembic schema, the migration bootstrap stamps it at the baseline revision and then applies future migrations normally.
 - `dev-frontend.ps1` uses `frontend/node_modules` and sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
 - You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
 
@@ -157,6 +164,7 @@ cd backend
 python -m venv .venv
 . .venv/Scripts/activate  # Windows PowerShell
 pip install -r requirements.txt -r requirements-dev.txt
+python migrate.py
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
@@ -214,6 +222,7 @@ For frontend on `3000` instead:
 - `GET /api/v1/news` — list articles (filters: `ticker`, `provider`, `source`, `q`, `from`, `to`)
 - `GET /api/v1/news/ids` — cursor-paginated article IDs (`limit`, `cursor`)
 - `GET /api/v1/news/{id}` — single article detail
+- `GET /api/v1/events/news` — SSE stream for real-time article notifications
 
 ### Push Notifications
 
@@ -283,8 +292,12 @@ DNP,Duff & Phelps Utility and Corporate Bond Trust,Duff & Phelps,true,"duff,phel
 
 The `validation_keywords` column is optional. When set, it overrides auto-generated keywords for that symbol. Comma-separated values are treated as independent keywords (any match validates). Leave blank to use the default logic (sponsor brand + fund name words, with common fund-industry stopwords removed).
 
-## Notes
+## Architecture Notes
 
 - V1 includes the public Business Wire home RSS feed.
 - If a feed fails intermittently, status is tracked in `ingestion_runs`.
 - Default polling interval is 60 seconds.
+- SSE uses PostgreSQL `LISTEN/NOTIFY` — each per-feed commit fires `pg_notify('new_articles', count)`. The `SSEBroadcaster` runs a dedicated LISTEN thread and fans out to connected clients via `asyncio.Queue`. When the broadcaster is unavailable (SQLite or Postgres down), the frontend falls back to 30s polling.
+- The backend uses a shared `httpx.Client` for HTTP/2 and connection pooling across feed fetches and source page lookups.
+- Docker images use multi-stage builds (separate builder/runtime stages) and run as non-root `appuser`.
+- Schema migrations run via `python migrate.py` (or automatically during app startup). Legacy pre-Alembic databases are detected and stamped at the baseline revision so future migrations apply normally.

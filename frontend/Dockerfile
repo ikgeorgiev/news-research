@@ -13,6 +13,12 @@ RUN npm run build
 
 ENV NODE_ENV=production
 
+RUN addgroup -S -g 1001 appuser \
+    && adduser -S -u 1001 -G appuser appuser \
+    && chown -R appuser:appuser /app
+
 EXPOSE 3000
+
+USER appuser
 
 CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]

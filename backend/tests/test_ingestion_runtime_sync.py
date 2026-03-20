@@ -5,8 +5,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import requests
-from requests.structures import CaseInsensitiveDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

@@ -20,7 +20,7 @@ def db_session() -> Session:
 
 @pytest.fixture()
 def stub_feed_io(monkeypatch):
-    """Stub ``requests.get`` (feed-runtime + ticker-extraction) with
+    """Stub shared HTTP client GET calls (feed-runtime + ticker-extraction) with
     :class:`FakeRssResponse` and return a callable to set feed entries.
 
     Usage::
@@ -30,11 +30,12 @@ def stub_feed_io(monkeypatch):
             result = call_ingest(...)
     """
     fake = FakeRssResponse()
+    class FakeClient:
+        def get(self, *_args, **_kwargs):
+            return fake
+
     monkeypatch.setattr(
-        "app.ticker_extraction.requests.get", lambda *_a, **_kw: fake,
-    )
-    monkeypatch.setattr(
-        "app.feed_runtime.requests.get", lambda *_a, **_kw: fake,
+        "app.http_client.get_http_client", lambda: FakeClient(),
     )
 
     def set_entries(entries, feed_title="Business Wire"):

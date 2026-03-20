@@ -58,6 +58,13 @@ describe("Page refresh requests", () => {
       ids: [],
       next_cursor: null,
     })
+
+    class MockEventSource {
+      addEventListener = vi.fn()
+      close = vi.fn()
+    }
+
+    vi.stubGlobal("EventSource", MockEventSource)
   })
 
   it("uses only the main news request for initial load and manual refresh", async () => {

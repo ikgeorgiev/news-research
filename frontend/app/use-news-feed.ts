@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react"
 
 import { fetchNews, fetchTickers } from "@/lib/api"
+import { buildApiUrl } from "@/lib/api-base"
 import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
+import { useEventSource } from "@/hooks/useEventSource"
 
 import { buildFetchParams, dedupeById } from "./page-helpers"
 
-const AUTO_REFRESH_MS = 30_000
+const AUTO_REFRESH_POLL_MS = 30_000
+const AUTO_REFRESH_SSE_MS = 120_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
 
 export function useNewsFeed({
@@ -73,6 +76,7 @@ export function useNewsFeed({
     refreshReasonRef.current = reason
     setRefreshTick((previous) => previous + 1)
   }
+  const sseUrl = buildApiUrl("/api/v1/events/news")
 
   useEffect(() => {
     const controller = new AbortController()
@@ -88,6 +92,8 @@ export function useNewsFeed({
     const id = setTimeout(() => setRuntimeReady(true), 0)
     return () => clearTimeout(id)
   }, [])
+
+  const sseConnected = useEventSource(sseUrl, () => triggerRefresh("auto"), runtimeReady)
 
   useEffect(() => {
     if (!runtimeReady) return
@@ -105,7 +111,7 @@ export function useNewsFeed({
 
     const startTimer = () => {
       if (timer !== null) return
-      timer = setInterval(refreshNow, AUTO_REFRESH_MS)
+      timer = setInterval(refreshNow, sseConnected ? AUTO_REFRESH_SSE_MS : AUTO_REFRESH_POLL_MS)
     }
 
     const stopTimer = () => {
@@ -139,7 +145,7 @@ export function useNewsFeed({
       document.removeEventListener("visibilitychange", onVisibilityChange)
       window.removeEventListener("focus", onWindowFocus)
     }
-  }, [runtimeReady])
+  }, [runtimeReady, sseConnected])
 
   useEffect(() => {
     if (!runtimeReady) return

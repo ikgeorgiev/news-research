@@ -5,8 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import requests
-from requests.structures import CaseInsensitiveDict
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -54,10 +53,13 @@ def test_fetch_feed_with_retries_succeeds_after_transient_failures(monkeypatch):
     def fake_get(*_args, **_kwargs):
         attempts["count"] += 1
         if attempts["count"] < 3:
-            raise requests.Timeout("temporary timeout")
+            raise httpx.TimeoutException("temporary timeout")
         return FakeRssResponse()
 
-    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
     monkeypatch.setattr("app.feed_runtime.time.sleep", lambda _seconds: None)
 
     response = _fetch_feed_with_retries(
@@ -77,11 +79,16 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
 
     class RateLimitedResponse:
         status_code = 429
-        headers = {"Retry-After": "2"}
+        headers = httpx.Headers({"Retry-After": "2"})
         content = b""
+        request = httpx.Request("GET", "https://example.com/feed.xml")
 
         def raise_for_status(self) -> None:
-            raise requests.HTTPError("429", response=self)  # type: ignore[arg-type]
+            raise httpx.HTTPStatusError(
+                "429",
+                request=self.request,
+                response=httpx.Response(429, headers=self.headers, request=self.request),
+            )
 
     def fake_get(*_args, **_kwargs):
         attempts["count"] += 1
@@ -89,7 +96,10 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
             return RateLimitedResponse()
         return FakeRssResponse()
 
-    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
     monkeypatch.setattr(
         "app.feed_runtime.time.sleep", lambda seconds: slept.append(float(seconds))
     )
@@ -114,7 +124,7 @@ def test_update_feed_http_cache_reads_requests_case_insensitive_headers(db_sessi
     db.commit()
 
     class FakeResponse:
-        headers = CaseInsensitiveDict(
+        headers = httpx.Headers(
             {
                 "etag": '"abc123"',
                 "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
@@ -136,7 +146,7 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
 
     class FirstResponse:
         status_code = 200
-        headers = CaseInsensitiveDict(
+        headers = httpx.Headers(
             {
                 "etag": '"persisted-etag"',
                 "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
@@ -149,7 +159,7 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
 
     class NotModifiedResponse:
         status_code = 304
-        headers = CaseInsensitiveDict({})
+        headers = httpx.Headers({})
         content = b""
 
         def raise_for_status(self) -> None:
@@ -162,8 +172,10 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
             return FirstResponse()
         return NotModifiedResponse()
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
-    monkeypatch.setattr("app.feed_runtime.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
     monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
         lambda _content: SimpleNamespace(feed={"title": "Business Wire"}, entries=[]),
@@ -864,9 +876,12 @@ def test_ingest_feed_skips_when_feed_is_in_failure_backoff(db_session, monkeypat
 
     def failing_get(*_args, **_kwargs):
         calls["count"] += 1
-        raise requests.Timeout("upstream unavailable")
+        raise httpx.TimeoutException("upstream unavailable")
 
-    monkeypatch.setattr("app.feed_runtime.requests.get", failing_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=failing_get),
+    )
 
     first = call_ingest(
         db, source, "https://example.com/backoff.xml",

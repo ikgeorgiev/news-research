@@ -45,8 +45,8 @@ try {
         & $venvPython -m ensurepip --upgrade
     }
 
-    # Install backend requirements if uvicorn isn't available in the venv.
-    & $venvPython -c "import uvicorn" *> $null
+    # Install backend requirements if key packages aren't available in the venv.
+    & $venvPython -c "import uvicorn; import alembic; import httpx" *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Installing backend dependencies..."
         & $venvPython -m pip install -r requirements.txt -r requirements-dev.txt
@@ -96,6 +96,12 @@ except Exception as target_error:
     & $venvPython -c $ensureDbScript
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to ensure database exists. Check DATABASE_URL and Postgres credentials."
+    }
+
+    Write-Host "Running Alembic migrations..."
+    & $venvPython migrate.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to run Alembic migrations."
     }
 
     Write-Host "Starting backend on http://${BindHost}:$Port"

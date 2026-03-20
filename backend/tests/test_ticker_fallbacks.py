@@ -56,8 +56,8 @@ def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
 
 def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, clean_page_cache):
     class FakeResponse:
-        def __init__(self, ok: bool, text: str):
-            self.ok = ok
+        def __init__(self, is_success: bool, text: str):
+            self.is_success = is_success
             self.text = text
 
     calls = {"count": 0}
@@ -67,8 +67,8 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
     ) -> FakeResponse:  # noqa: ARG001
         calls["count"] += 1
         if calls["count"] == 1:
-            return FakeResponse(ok=False, text="")
-        return FakeResponse(ok=True, text="<html>ok</html>")
+            return FakeResponse(is_success=False, text="")
+        return FakeResponse(is_success=True, text="<html>ok</html>")
 
     timestamps = [1000.0, 1000.0, 1000.5, 1000.5]
 
@@ -77,7 +77,10 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
             return timestamps.pop(0)
         return 1000.5
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
     monkeypatch.setattr("app.ticker_extraction.time.time", fake_time)
     monkeypatch.setattr("app.ticker_extraction.SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS", 0)
 
@@ -100,7 +103,10 @@ def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page
         calls["count"] += 1
         raise AssertionError("non-businesswire URL should not be fetched")
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
 
     result = _fetch_source_page_html("https://evil.example.com/news/home/abc", 5, PAGE_FETCH_CONFIGS["businesswire"])
 
@@ -243,7 +249,10 @@ def test_source_page_fetch_skips_wrong_host(monkeypatch, clean_page_cache):
         calls["count"] += 1
         raise AssertionError("wrong host should not be fetched")
 
-    monkeypatch.setattr("app.ticker_extraction.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
 
     config = PAGE_FETCH_CONFIGS["prnewswire"]
     result = _fetch_source_page_html("https://evil.example.com/news/abc", 5, config)

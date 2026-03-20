@@ -11,9 +11,11 @@ from app.utils import sha256_str
 
 
 class FakeRssResponse:
-    """Minimal stand-in for ``requests.Response`` — returns valid RSS bytes."""
+    """Minimal stand-in for ``httpx.Response`` — returns valid RSS bytes."""
 
     content = b"<rss />"
+    is_success = True
+    text = ""
 
     def raise_for_status(self) -> None:
         return None
