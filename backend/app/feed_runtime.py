@@ -271,6 +271,7 @@ class PreparedFeedEntry:
     raw_link: str
     article_url: str
     is_exact_source_url: bool
+    raw_pub_date: datetime | None
     published_at: datetime
     raw_guid: str | None
 
@@ -280,12 +281,21 @@ def _prefetch_recorded_raw_keys(
     *,
     source_id: int,
     prepared_entries: list[PreparedFeedEntry],
-) -> tuple[set[str], set[tuple[str, datetime]]]:
+) -> tuple[set[str], set[tuple[str, datetime | None]]]:
     if not prepared_entries:
         return set(), set()
 
     guids = {item.raw_guid for item in prepared_entries if item.raw_guid}
-    pairs = {(item.raw_link, item.published_at) for item in prepared_entries}
+    pairs_with_pub = {
+        (item.raw_link, item.raw_pub_date)
+        for item in prepared_entries
+        if item.raw_pub_date is not None
+    }
+    links_without_pub = {
+        item.raw_link
+        for item in prepared_entries
+        if item.raw_pub_date is None and item.raw_guid is None
+    }
 
     existing_guids: set[str] = set()
     if guids:
@@ -303,15 +313,15 @@ def _prefetch_recorded_raw_keys(
             if guid
         }
 
-    existing_pairs: set[tuple[str, datetime]] = set()
-    if pairs:
+    existing_pairs: set[tuple[str, datetime | None]] = set()
+    if pairs_with_pub:
         rows = db.execute(
             select(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).where(
                 and_(
                     RawFeedItem.source_id == source_id,
                     RawFeedItem.article_id.is_not(None),
                     tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(
-                        list(pairs)
+                        list(pairs_with_pub)
                     ),
                 )
             )
@@ -319,6 +329,18 @@ def _prefetch_recorded_raw_keys(
         existing_pairs = {
             (str(link), pub_date) for link, pub_date in rows if link and pub_date
         }
+    if links_without_pub:
+        rows = db.execute(
+            select(RawFeedItem.raw_link).where(
+                and_(
+                    RawFeedItem.source_id == source_id,
+                    RawFeedItem.article_id.is_not(None),
+                    RawFeedItem.raw_guid.is_(None),
+                    RawFeedItem.raw_link.in_(list(links_without_pub)),
+                )
+            )
+        ).all()
+        existing_pairs.update((str(link), None) for (link,) in rows if link)
 
     return existing_guids, existing_pairs
 

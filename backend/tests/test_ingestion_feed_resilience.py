@@ -231,6 +231,131 @@ def test_ingest_feed_dedupes_raw_feed_rows(db_session, stub_feed_io):
     assert second["status"] == "success"
     assert len(raw_rows) == 1
 
+
+def test_ingest_feed_dedupes_undated_guidless_raw_rows(db_session, stub_feed_io):
+    db = db_session
+    source = seed_source(db)
+    feed_entry = {
+        "title": "Fund update without metadata",
+        "link": "https://example.com/undated-story",
+        "summary": "Summary text",
+    }
+    stub_feed_io([feed_entry])
+
+    first = call_ingest(db, source, "https://example.com/feed.xml")
+    second = call_ingest(db, source, "https://example.com/feed.xml")
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert len(raw_rows) == 1
+    assert raw_rows[0].raw_guid is None
+    assert raw_rows[0].raw_pub_date is None
+
+
+def test_ingest_feed_refreshes_undated_guidless_exact_url_rows(db_session, stub_feed_io):
+    db = db_session
+    source = seed_source(db)
+    ticker = seed_ticker(db, symbol="UTF")
+    first_entry = {
+        "title": "ACME distribution update NYSE: UTF",
+        "link": "https://example.com/undated-story",
+        "summary": "Original summary",
+    }
+    updated_entry = {
+        "title": "UPDATED headline NYSE: UTF",
+        "link": "https://example.com/undated-story",
+        "summary": "Updated summary",
+    }
+
+    stub_feed_io([first_entry])
+    first = call_ingest(
+        db,
+        source,
+        "https://example.com/feed.xml",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+    )
+
+    stub_feed_io([updated_entry])
+    second = call_ingest(
+        db,
+        source,
+        "https://example.com/feed.xml",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+    )
+
+    article = db.scalar(select(Article).where(Article.canonical_url == updated_entry["link"]))
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert article is not None
+    assert article.title == updated_entry["title"]
+    assert article.summary == updated_entry["summary"]
+    assert len(raw_rows) == 1
+    assert raw_rows[0].raw_pub_date is None
+
+
+def test_ingest_feed_matches_legacy_undated_guidless_rows(db_session, stub_feed_io):
+    db = db_session
+    source = seed_source(db)
+    ticker = seed_ticker(db, symbol="UTF")
+    legacy_article = seed_article(
+        db,
+        canonical_url="https://example.com/undated-story",
+        title="Legacy undated item NYSE: UTF",
+        summary="Legacy summary",
+    )
+    legacy_row = RawFeedItem(
+        source_id=source.id,
+        article_id=legacy_article.id,
+        feed_url="https://example.com/feed.xml",
+        raw_guid=None,
+        raw_title=legacy_article.title,
+        raw_link=legacy_article.canonical_url,
+        raw_pub_date=legacy_article.published_at,
+        raw_payload_json={"title": legacy_article.title, "link": legacy_article.canonical_url},
+    )
+    db.add(legacy_row)
+    db.commit()
+
+    updated_entry = {
+        "title": "Legacy undated item updated NYSE: UTF",
+        "link": legacy_article.canonical_url,
+        "summary": "Updated summary",
+    }
+    stub_feed_io([updated_entry])
+
+    result = call_ingest(
+        db,
+        source,
+        "https://example.com/feed.xml",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+    )
+
+    article = db.scalar(select(Article).where(Article.id == legacy_article.id))
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert result["status"] == "success"
+    assert article is not None
+    assert article.title == updated_entry["title"]
+    assert len(raw_rows) == 1
+    assert raw_rows[0].id == legacy_row.id
+    assert raw_rows[0].raw_pub_date is None
+
 def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(
     db_session, stub_feed_io
 ):

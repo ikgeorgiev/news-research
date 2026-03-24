@@ -48,7 +48,11 @@ def build_article_query(
     to: datetime | None = None,
 ):
     query = select(Article)
-    publish_sort_key = func.coalesce(Article.published_at, Article.created_at)
+    publish_sort_key = func.coalesce(
+        Article.published_at,
+        Article.created_at,
+        Article.first_seen_at,
+    )
     ticker_symbols = _normalized_ticker_symbols(ticker=ticker, tickers=tickers)
     ticker_filter_supplied = ticker is not None or tickers is not None
 

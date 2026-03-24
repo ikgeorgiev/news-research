@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
+from app.article_filters import build_article_query
 from app.config import get_settings
 from app.deps import require_admin_api_key
 from app.main import app, health
@@ -569,6 +570,31 @@ def test_list_news_cursor_paginates_consistently(db_session: Session):
         db=db,
     )
     assert [item.id for item in page_two.items] == [middle.id, oldest.id]
+
+
+def test_get_news_item_returns_unmapped_article_by_id(db_session: Session):
+    article = seed_article(
+        db_session,
+        slug="unmapped-detail",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+    )
+
+    result = get_news_item(article.id, db=db_session)
+
+    assert result.id == article.id
+    assert result.tickers == []
+
+
+def test_build_article_query_uses_first_seen_fallback_for_date_filters(db_session: Session):
+    query = build_article_query(
+        db_session,
+        from_=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert (
+        "coalesce(articles.published_at, articles.created_at, articles.first_seen_at)"
+        in str(query)
+    )
 
 
 def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():

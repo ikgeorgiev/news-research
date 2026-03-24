@@ -424,7 +424,11 @@ def list_news(
 
 @news_router.get("/news/{article_id}", response_model=NewsItem)
 def get_news_item(article_id: int, db: Session = Depends(get_db)):
-    news_page = _build_news_page_subquery(db, article_id=article_id)
+    news_page = _build_news_page_subquery(
+        db,
+        article_id=article_id,
+        include_unmapped=True,
+    )
     row = db.execute(_build_enriched_news_select(db, news_page)).first()
     if row is None:
         raise HTTPException(status_code=404, detail="Article not found")

@@ -83,14 +83,16 @@ def _acquire_raw_item_locks(
     source_id: int,
     raw_guid: str | None,
     raw_link: str,
-    published_at: datetime,
+    published_at: datetime | None,
 ) -> None:
     bind = db.get_bind()
     if bind is None or bind.dialect.name != "postgresql":
         return
 
     lock_hashes = {
-        sha256_str(f"raw-pair:{source_id}:{raw_link}:{published_at.isoformat()}")
+        sha256_str(
+            f"raw-pair:{source_id}:{raw_link}:{published_at.isoformat() if published_at is not None else '<none>'}"
+        )
     }
     if raw_guid:
         lock_hashes.add(sha256_str(f"raw-guid:{source_id}:{raw_guid}"))
@@ -105,7 +107,7 @@ def _find_existing_raw_feed_item(
     source_id: int,
     raw_guid: str | None,
     raw_link: str,
-    published_at: datetime,
+    published_at: datetime | None,
     require_attached: bool,
 ) -> RawFeedItem | None:
     attachment_filter = (
@@ -128,15 +130,36 @@ def _find_existing_raw_feed_item(
         if row is not None:
             return row
 
+    pair_filters = [
+        *base_filters,
+        RawFeedItem.raw_link == raw_link,
+    ]
+    if published_at is None:
+        row = db.scalar(
+            select(RawFeedItem)
+            .where(and_(*pair_filters, RawFeedItem.raw_pub_date.is_(None)))
+            .order_by(RawFeedItem.id.desc())
+            .limit(1)
+        )
+        if row is not None:
+            return row
+
+        if raw_guid is None:
+            return db.scalar(
+                select(RawFeedItem)
+                .where(
+                    and_(
+                        *pair_filters,
+                        RawFeedItem.raw_guid.is_(None),
+                    )
+                )
+                .order_by(RawFeedItem.id.desc())
+                .limit(1)
+            )
+
     return db.scalar(
         select(RawFeedItem)
-        .where(
-            and_(
-                *base_filters,
-                RawFeedItem.raw_link == raw_link,
-                RawFeedItem.raw_pub_date == published_at,
-            )
-        )
+        .where(and_(*pair_filters, RawFeedItem.raw_pub_date == published_at))
         .order_by(RawFeedItem.id.desc())
         .limit(1)
     )
@@ -345,7 +368,7 @@ class EntryResult:
     persisted_raw: bool = False
     has_article: bool = False
     raw_guid: str | None = None
-    raw_pair: tuple[str, datetime] | None = None
+    raw_pair: tuple[str, datetime | None] | None = None
 
 
 def _prepare_feed_entries(
@@ -374,10 +397,8 @@ def _prepare_feed_entries(
         else:
             is_exact_source_url = raw_link == article_url
 
-        published_at = (
-            parse_datetime(entry.get("published") or entry.get("updated"))
-            or now_utc
-        )
+        raw_pub_date = parse_datetime(entry.get("published") or entry.get("updated"))
+        published_at = raw_pub_date or now_utc
         raw_guid = (
             str(entry.get("id") or entry.get("guid") or "").strip() or None
         )
@@ -389,6 +410,7 @@ def _prepare_feed_entries(
                 raw_link=raw_link,
                 article_url=article_url,
                 is_exact_source_url=is_exact_source_url,
+                raw_pub_date=raw_pub_date,
                 published_at=published_at,
                 raw_guid=raw_guid,
             )
@@ -405,6 +427,7 @@ def _persist_raw_feed_item(
     feed_url: str,
     raw_summary: str | None,
     entry_source_name: str,
+    existing_row: RawFeedItem | None = None,
 ) -> None:
     payload = {
         "title": prepared.raw_title,
@@ -414,15 +437,15 @@ def _persist_raw_feed_item(
         "summary": raw_summary,
         "source": entry_source_name,
     }
-    detached_row = _find_existing_raw_feed_item(
+    row = existing_row or _find_existing_raw_feed_item(
         db,
         source_id=source_id,
         raw_guid=prepared.raw_guid,
         raw_link=prepared.raw_link,
-        published_at=prepared.published_at,
+        published_at=prepared.raw_pub_date,
         require_attached=False,
     )
-    if detached_row is None:
+    if row is None:
         db.add(
             RawFeedItem(
                 source_id=source_id,
@@ -431,21 +454,20 @@ def _persist_raw_feed_item(
                 raw_guid=prepared.raw_guid,
                 raw_title=prepared.raw_title,
                 raw_link=prepared.raw_link,
-                raw_pub_date=prepared.published_at,
+                raw_pub_date=prepared.raw_pub_date,
                 raw_payload_json=to_json_safe(payload),
             )
         )
     else:
-        detached_row.article_id = (
-            article.id if article is not None else None
-        )
-        detached_row.feed_url = feed_url
-        detached_row.raw_guid = prepared.raw_guid
-        detached_row.raw_title = prepared.raw_title
-        detached_row.raw_link = prepared.raw_link
-        detached_row.raw_pub_date = prepared.published_at
-        detached_row.raw_payload_json = to_json_safe(payload)
-        detached_row.fetched_at = datetime.now(timezone.utc)
+        if article is not None or row.article_id is None:
+            row.article_id = article.id if article is not None else None
+        row.feed_url = feed_url
+        row.raw_guid = prepared.raw_guid
+        row.raw_title = prepared.raw_title
+        row.raw_link = prepared.raw_link
+        row.raw_pub_date = prepared.raw_pub_date
+        row.raw_payload_json = to_json_safe(payload)
+        row.fetched_at = datetime.now(timezone.utc)
 
 
 def _process_single_entry(
@@ -461,15 +483,23 @@ def _process_single_entry(
     timeout_seconds: int,
     page_config,
     recorded_guids: set[str],
-    recorded_pairs: set[tuple[str, datetime]],
+    recorded_pairs: set[tuple[str, datetime | None]],
     symbol_keywords: dict[str, frozenset[str]] | None = None,
 ) -> EntryResult:
     result = EntryResult()
     article: Article | None = None
+    allow_exact_url_refresh = (
+        prepared.raw_guid is None
+        and prepared.raw_pub_date is None
+        and prepared.is_exact_source_url
+    )
 
     if prepared.raw_guid and prepared.raw_guid in recorded_guids:
         return result
-    if (prepared.raw_link, prepared.published_at) in recorded_pairs:
+    if (
+        (prepared.raw_link, prepared.raw_pub_date) in recorded_pairs
+        and not allow_exact_url_refresh
+    ):
         return result
 
     with db.begin_nested():
@@ -478,17 +508,17 @@ def _process_single_entry(
             source_id=source.id,
             raw_guid=prepared.raw_guid,
             raw_link=prepared.raw_link,
-            published_at=prepared.published_at,
+            published_at=prepared.raw_pub_date,
         )
         existing_raw = _find_existing_raw_feed_item(
             db,
             source_id=source.id,
             raw_guid=prepared.raw_guid,
             raw_link=prepared.raw_link,
-            published_at=prepared.published_at,
+            published_at=prepared.raw_pub_date,
             require_attached=True,
         )
-        if existing_raw is not None:
+        if existing_raw is not None and not allow_exact_url_refresh:
             return result
 
         raw_summary = (
@@ -591,11 +621,12 @@ def _process_single_entry(
             feed_url=feed_url,
             raw_summary=raw_summary,
             entry_source_name=entry_source_name,
+            existing_row=existing_raw if allow_exact_url_refresh else None,
         )
         result.persisted_raw = True
         result.has_article = article is not None
         result.raw_guid = prepared.raw_guid
-        result.raw_pair = (prepared.raw_link, prepared.published_at)
+        result.raw_pair = (prepared.raw_link, prepared.raw_pub_date)
 
     return result
 
