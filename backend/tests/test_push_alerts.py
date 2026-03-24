@@ -8,10 +8,15 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ingestion import run_ingestion_cycle
+from app.ingestion import _run_push_alerts, run_ingestion_cycle
 from app.routes.push import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
-from app.push_alerts import check_and_send_alerts
+from app.push_alerts import (
+    PushAlertDispatcher,
+    check_and_send_alerts,
+    check_and_send_alerts_locked,
+    push_dispatcher_is_active,
+)
 from app.schemas import (
     PushAlertScopes,
     PushDeleteRequest,
@@ -225,7 +230,7 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session
     monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest_feed)
     monkeypatch.setattr("app.ingestion._should_run_raw_feed_prune", lambda _interval: False)
     monkeypatch.setattr(
-        "app.ingestion.check_and_send_alerts",
+        "app.ingestion.check_and_send_alerts_locked",
         lambda _db, _settings: (_ for _ in ()).throw(RuntimeError("push failure")),
     )
 
@@ -239,6 +244,228 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session
         "failed": 0,
         "deactivated": 0,
     }
+
+
+def test_check_and_send_alerts_locked_skips_when_lock_is_held(monkeypatch: pytest.MonkeyPatch):
+    class FakeResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, _statement):
+            return FakeResult(False)
+
+        def commit(self):
+            return None
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+    fake_bind = SimpleNamespace(
+        dialect=SimpleNamespace(name="postgresql"),
+        engine=FakeEngine(),
+    )
+    fake_db = SimpleNamespace(get_bind=lambda: fake_bind)
+    settings_obj = SimpleNamespace(push_dispatch_advisory_lock_key=123)
+
+    monkeypatch.setattr(
+        "app.push_alerts.check_and_send_alerts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected push run")),
+    )
+
+    assert check_and_send_alerts_locked(fake_db, settings_obj) is None
+
+
+def test_run_push_alerts_skips_cycle_scan_when_dispatcher_is_active(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("app.ingestion.push_dispatcher_is_active", lambda: True)
+    monkeypatch.setattr(
+        "app.ingestion.check_and_send_alerts_locked",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected cycle scan")),
+    )
+
+    stats = _run_push_alerts(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        total_inserted=1,
+        notify_failed=False,
+    )
+
+    assert stats == {
+        "scanned": 0,
+        "sent": 0,
+        "failed": 0,
+        "deactivated": 0,
+    }
+
+
+def test_run_push_alerts_preserves_cycle_scan_when_notify_failed(monkeypatch: pytest.MonkeyPatch):
+    expected = {
+        "scanned": 1,
+        "sent": 1,
+        "failed": 0,
+        "deactivated": 0,
+    }
+    monkeypatch.setattr("app.ingestion.push_dispatcher_is_active", lambda: True)
+    monkeypatch.setattr(
+        "app.ingestion.check_and_send_alerts_locked",
+        lambda *_args, **_kwargs: expected,
+    )
+
+    stats = _run_push_alerts(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        total_inserted=1,
+        notify_failed=True,
+    )
+
+    assert stats == expected
+
+
+def test_push_alert_dispatcher_becomes_active_only_when_listening():
+    dispatcher = PushAlertDispatcher(
+        "postgresql://cef:cef@localhost/test",
+        SimpleNamespace(),
+        lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert dispatcher._is_listening is False
+    assert dispatcher._enabled is True
+    assert push_dispatcher_is_active() is False
+
+    dispatcher._set_listening(True)
+    assert dispatcher._is_listening is True
+    assert dispatcher._enabled is True
+    assert push_dispatcher_is_active() is True
+
+    dispatcher._set_listening(False)
+    assert dispatcher._is_listening is False
+    assert push_dispatcher_is_active() is False
+
+
+def test_push_alert_dispatcher_retries_after_lock_contention(monkeypatch: pytest.MonkeyPatch):
+    class FakeSessionContext:
+        def __enter__(self):
+            return SimpleNamespace()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    settings_obj = SimpleNamespace()
+    dispatcher = PushAlertDispatcher(
+        "postgresql://cef:cef@localhost/test",
+        settings_obj,
+        lambda: FakeSessionContext(),
+    )
+    attempts: list[int] = []
+
+    monkeypatch.setattr(dispatcher._shutdown, "wait", lambda timeout: False)
+
+    def fake_locked(_db, _settings):
+        attempts.append(1)
+        if len(attempts) == 1:
+            return None
+        return {
+            "scanned": 0,
+            "sent": 0,
+            "failed": 0,
+            "deactivated": 0,
+        }
+
+    monkeypatch.setattr("app.push_alerts.check_and_send_alerts_locked", fake_locked)
+
+    dispatcher._request_dispatch()
+    dispatcher._run_pending_dispatches()
+
+    assert len(attempts) == 2
+
+
+def test_push_alert_dispatcher_requests_catchup_after_listen_established(monkeypatch: pytest.MonkeyPatch):
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, statement):
+            assert statement == "LISTEN new_articles"
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def notifies(self, timeout):
+            dispatcher._shutdown.set()
+            return []
+
+    settings_obj = SimpleNamespace()
+    dispatcher = PushAlertDispatcher(
+        "postgresql://cef:cef@localhost/test",
+        settings_obj,
+        lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+    requested = {"count": 0}
+
+    monkeypatch.setattr("app.push_alerts.psycopg.connect", lambda *_args, **_kwargs: FakeConnection())
+    monkeypatch.setattr(dispatcher, "_request_dispatch", lambda: requested.__setitem__("count", requested["count"] + 1))
+
+    dispatcher._listen_loop()
+
+    assert requested["count"] == 1
+    assert dispatcher._is_listening is False
+
+
+def test_push_alert_dispatcher_requeues_after_dispatch_failure(monkeypatch: pytest.MonkeyPatch):
+    class FakeSessionContext:
+        def __enter__(self):
+            return SimpleNamespace()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    settings_obj = SimpleNamespace()
+    dispatcher = PushAlertDispatcher(
+        "postgresql://cef:cef@localhost/test",
+        settings_obj,
+        lambda: FakeSessionContext(),
+    )
+    attempts: list[int] = []
+
+    monkeypatch.setattr(dispatcher._shutdown, "wait", lambda timeout: False)
+
+    def fake_locked(_db, _settings):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("transient failure")
+        return {
+            "scanned": 0,
+            "sent": 0,
+            "failed": 0,
+            "deactivated": 0,
+        }
+
+    monkeypatch.setattr("app.push_alerts.check_and_send_alerts_locked", fake_locked)
+
+    dispatcher._request_dispatch()
+    dispatcher._run_pending_dispatches()
+
+    assert len(attempts) == 2
 
 
 def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(db_session: Session, monkeypatch: pytest.MonkeyPatch):

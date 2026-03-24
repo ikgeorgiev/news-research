@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import psycopg
 from sqlalchemy import func, select, update
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.article_filters import build_article_query
@@ -18,6 +22,8 @@ from app.query_utils import iter_chunks
 from app.utils import sha256_str
 
 logger = logging.getLogger(__name__)
+_active_dispatcher_lock = threading.Lock()
+_active_dispatcher_count = 0
 
 ALL_SCOPE_KEY = "all"
 GENERAL_UNMAPPED_PROVIDER = "Business Wire"
@@ -30,6 +36,18 @@ except ImportError:  # pragma: no cover - guarded at runtime
     webpush = None
 
 
+def _is_postgresql_url(database_url: str) -> bool:
+    normalized = database_url.strip().lower()
+    return normalized.startswith("postgresql://") or normalized.startswith("postgresql+psycopg://")
+
+
+def _to_psycopg_conninfo(database_url: str) -> str:
+    prefix = "postgresql+psycopg://"
+    if database_url.startswith(prefix):
+        return "postgresql://" + database_url[len(prefix) :]
+    return database_url
+
+
 def push_runtime_enabled(settings: Settings) -> bool:
     if webpush is None:
         return False
@@ -38,6 +56,11 @@ def push_runtime_enabled(settings: Settings) -> bool:
         and (settings.vapid_private_key or "").strip()
         and (settings.vapid_contact_email or "").strip()
     )
+
+
+def push_dispatcher_is_active() -> bool:
+    with _active_dispatcher_lock:
+        return _active_dispatcher_count > 0
 
 
 def hash_manage_token(token: str) -> str:
@@ -433,6 +456,42 @@ def _process_subscription_alerts(
     return outcome
 
 
+def check_and_send_alerts_locked(
+    db: Session,
+    settings: Settings,
+) -> dict[str, int] | None:
+    bind = db.get_bind()
+    if bind is None:
+        return check_and_send_alerts(db, settings)
+
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if dialect_name != "postgresql":
+        return check_and_send_alerts(db, settings)
+
+    engine: Engine
+    if isinstance(bind, Engine):
+        engine = bind
+    else:
+        engine = bind.engine
+
+    lock_key = int(settings.push_dispatch_advisory_lock_key)
+    with engine.connect() as lock_conn:
+        acquired = lock_conn.execute(select(func.pg_try_advisory_lock(lock_key))).scalar()
+        lock_conn.commit()
+        if not acquired:
+            return None
+        try:
+            return check_and_send_alerts(db, settings)
+        finally:
+            try:
+                unlocked = lock_conn.execute(select(func.pg_advisory_unlock(lock_key))).scalar()
+                lock_conn.commit()
+                if not unlocked:
+                    logger.warning("Push advisory unlock returned false (key=%s)", lock_key)
+            except Exception:
+                logger.exception("Failed to release push advisory lock")
+
+
 def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
     active_before = db.scalar(
         select(func.count()).select_from(select(PushSubscription.id).where(PushSubscription.active.is_(True)).subquery())
@@ -479,3 +538,125 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
         "failed": failed,
         "deactivated": deactivated,
     }
+
+
+class PushAlertDispatcher:
+    def __init__(
+        self,
+        database_url: str,
+        settings: Settings,
+        session_factory: Callable[[], Session],
+    ):
+        self._enabled = _is_postgresql_url(database_url)
+        self._conninfo = _to_psycopg_conninfo(database_url)
+        self._settings = settings
+        self._session_factory = session_factory
+        self._shutdown = threading.Event()
+        self._wake = threading.Event()
+        self._state_lock = threading.Lock()
+        self._dispatch_pending = False
+        self._listener_thread: threading.Thread | None = None
+        self._worker_thread: threading.Thread | None = None
+        self._is_listening = False
+
+    def start(self) -> None:
+        if not self._enabled:
+            logger.info("Push alert dispatcher disabled: database is not PostgreSQL")
+            return
+        if self._listener_thread is not None and self._listener_thread.is_alive():
+            return
+
+        self._shutdown.clear()
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            daemon=True,
+            name="push-alert-worker",
+        )
+        self._listener_thread = threading.Thread(
+            target=self._listen_loop,
+            daemon=True,
+            name="push-alert-listener",
+        )
+        self._worker_thread.start()
+        self._listener_thread.start()
+
+    def stop(self) -> None:
+        self._shutdown.set()
+        self._wake.set()
+        if self._listener_thread is not None:
+            self._listener_thread.join(timeout=5)
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=5)
+        self._set_listening(False)
+        self._listener_thread = None
+        self._worker_thread = None
+
+    def _request_dispatch(self) -> None:
+        with self._state_lock:
+            self._dispatch_pending = True
+        self._wake.set()
+
+    def _listen_loop(self) -> None:
+        while not self._shutdown.is_set():
+            try:
+                with psycopg.connect(self._conninfo, autocommit=True) as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute("LISTEN new_articles")
+                    self._set_listening(True)
+                    # Catch up on articles that arrived while the listener was
+                    # disconnected or before LISTEN completed.
+                    self._request_dispatch()
+                    logger.info("Push alert dispatcher listening on channel new_articles")
+                    while not self._shutdown.is_set():
+                        for _notify in conn.notifies(timeout=1.0):
+                            self._request_dispatch()
+                    self._set_listening(False)
+            except Exception:
+                self._set_listening(False)
+                if self._shutdown.is_set():
+                    break
+                logger.exception("Push alert listener failed; retrying in 5 seconds")
+                time.sleep(5)
+
+    def _set_listening(self, listening: bool) -> None:
+        if not self._enabled:
+            return
+        with _active_dispatcher_lock:
+            global _active_dispatcher_count
+            if listening and not self._is_listening:
+                _active_dispatcher_count += 1
+                self._is_listening = True
+            elif not listening and self._is_listening:
+                _active_dispatcher_count = max(0, _active_dispatcher_count - 1)
+                self._is_listening = False
+
+    def _worker_loop(self) -> None:
+        while not self._shutdown.is_set():
+            self._wake.wait(timeout=1.0)
+            self._wake.clear()
+            self._run_pending_dispatches()
+
+    def _run_pending_dispatches(self) -> None:
+        while not self._shutdown.is_set():
+            with self._state_lock:
+                if not self._dispatch_pending:
+                    return
+                self._dispatch_pending = False
+
+            try:
+                with self._session_factory() as db:
+                    stats = check_and_send_alerts_locked(db, self._settings)
+            except Exception:
+                logger.exception("Push alert dispatch failed")
+                if self._shutdown.wait(timeout=1.0):
+                    return
+                self._request_dispatch()
+                continue
+
+            if stats is None:
+                # Another process (or the ingestion-cycle fallback) is already
+                # handling delivery. Retry once shortly after the lock is free
+                # in case more articles arrived during that run.
+                if self._shutdown.wait(timeout=1.0):
+                    return
+                self._request_dispatch()

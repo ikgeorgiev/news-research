@@ -48,6 +48,7 @@ class IngestFeedResult(TypedDict):
     status: str
     items_seen: int
     items_inserted: int
+    notify_failed: bool
     error: str | None
 
 
@@ -628,6 +629,7 @@ def ingest_feed(
     items_seen = 0
     items_inserted = 0
     committed_items_inserted = 0
+    notify_failed = False
     status = "success"
     error_text: str | None = None
     entry_errors = 0
@@ -724,6 +726,7 @@ def ingest_feed(
                     try:
                         notify_new_articles(db, committed_items_inserted)
                     except Exception:
+                        notify_failed = True
                         logger.warning("pg_notify for new articles failed", exc_info=True)
                 if entry_errors > 0 and error_text is None:
                     error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}."
@@ -754,5 +757,6 @@ def ingest_feed(
         "status": status,
         "items_seen": items_seen,
         "items_inserted": committed_items_inserted,
+        "notify_failed": notify_failed,
         "error": error_text,
     }

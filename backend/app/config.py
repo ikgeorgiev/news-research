@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     push_send_timeout_seconds: int = Field(default=10, ge=1, le=120)
     push_max_per_cycle: int = Field(default=25, ge=1, le=500)
     push_max_consecutive_failures: int = Field(default=20, ge=1, le=1000)
+    push_dispatch_advisory_lock_key: int = 1_715_171_518
     vapid_public_key: str | None = None
     vapid_private_key: str | None = None
     vapid_contact_email: str | None = None

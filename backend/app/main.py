@@ -14,6 +14,7 @@ from app.database import db_health_check, get_session_factory
 from app.ingestion import sync_runtime_state
 from migrate import run_migrations
 from app.monitoring import observe_http_request, render_metrics
+from app.push_alerts import PushAlertDispatcher
 from app.routes.admin import admin_router
 from app.routes.news import news_router
 from app.routes.push import push_router
@@ -42,16 +43,25 @@ async def lifespan(app: FastAPI):
         if stale_runs_fixed:
             logger.warning("Marked %s stale ingestion runs as failed at startup", stale_runs_fixed)
 
-    scheduler = IngestionScheduler(settings, get_session_factory())
+    session_factory = get_session_factory()
+    scheduler = IngestionScheduler(settings, session_factory)
     set_scheduler(scheduler)
     scheduler.start()
     broadcaster = SSEBroadcaster(settings.database_url)
     broadcaster.start()
+    push_dispatcher = PushAlertDispatcher(
+        settings.database_url,
+        settings,
+        session_factory,
+    )
+    push_dispatcher.start()
     app.state.sse_broadcaster = broadcaster
     app.state.sse_connection_limiter = SSEConnectionLimiter(settings.sse_max_connections_per_ip)
+    app.state.push_alert_dispatcher = push_dispatcher
 
     yield
 
+    push_dispatcher.stop()
     broadcaster.stop()
     scheduler.shutdown()
     set_scheduler(None)

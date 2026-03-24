@@ -29,7 +29,7 @@ from app.ticker_context import load_ticker_context
 from app.models import (
     Source,
 )
-from app.push_alerts import check_and_send_alerts
+from app.push_alerts import check_and_send_alerts_locked, push_dispatcher_is_active
 from app.sources import (
     PAGE_FETCH_CONFIGS,
     SourceFeed,
@@ -85,6 +85,7 @@ def _failed_feed_result(
         "status": "failed",
         "items_seen": 0,
         "items_inserted": 0,
+        "notify_failed": False,
         "error": error,
     }
 
@@ -116,7 +117,7 @@ def _run_feed_ingestion(
     settings: Settings,
     *,
     source_feeds: list[SourceFeed],
-) -> tuple[list[IngestFeedResult], int, int, int]:
+) -> tuple[list[IngestFeedResult], int, int, int, bool]:
     source_map = {
         source.code: source
         for source in db.scalars(
@@ -235,13 +236,15 @@ def _run_feed_ingestion(
     total_seen = 0
     total_inserted = 0
     failed = 0
+    notify_failed = False
     for result in per_feed:
         total_seen += int(result["items_seen"])
         total_inserted += int(result["items_inserted"])
+        notify_failed = notify_failed or bool(result.get("notify_failed", False))
         if result["status"] == "failed":
             failed += 1
 
-    return per_feed, total_seen, total_inserted, failed
+    return per_feed, total_seen, total_inserted, failed, notify_failed
 
 
 def _run_post_ingestion_remaps(
@@ -305,6 +308,7 @@ def _run_push_alerts(
     settings: Settings,
     *,
     total_inserted: int,
+    notify_failed: bool,
 ) -> dict[str, int]:
     push_alerts = {
         "scanned": 0,
@@ -313,8 +317,12 @@ def _run_push_alerts(
         "deactivated": 0,
     }
     if total_inserted > 0:
+        if push_dispatcher_is_active() and not notify_failed:
+            return push_alerts
         try:
-            return check_and_send_alerts(db, settings)
+            locked_stats = check_and_send_alerts_locked(db, settings)
+            if locked_stats is not None:
+                return locked_stats
         except Exception:  # Broad catch: push failures must not abort ingestion
             logger.exception("Push alert processing failed after ingestion cycle")
     return push_alerts
@@ -332,7 +340,7 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
 
     ticker_sync = runtime_sync["ticker_sync"]
     source_feeds = runtime_sync["source_feeds"]
-    per_feed, total_seen, total_inserted, failed = _run_feed_ingestion(
+    per_feed, total_seen, total_inserted, failed, notify_failed = _run_feed_ingestion(
         db,
         settings,
         source_feeds=source_feeds,
@@ -348,6 +356,7 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
         db,
         settings,
         total_inserted=total_inserted,
+        notify_failed=notify_failed,
     )
 
     return {
