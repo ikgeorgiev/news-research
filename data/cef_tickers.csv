@@ -99,7 +99,7 @@ EXG,Eaton Vance Tax-Mgd Glb Divrs Equity Inc,Eaton Vance Management,TRUE
 FCO,"abrdn Global Income Fund, Inc.",abrdn Inc.,TRUE
 FCT,First Trust Senior FR Inc II,First Trust Advisors L.P.,TRUE
 FFA,First Trust Enhanced Equity Income,First Trust Advisors L.P.,TRUE,"first trust"
-FFC,Flah&Crum Preferred Securities,Flaherty & Crumrine Inc,TRUE
+FFC,Flah&Crum Preferred Securities,Flaherty & Crumrine Inc,TRUE,"flaherty crumrine,flaherty crumrine preferred securities"
 FINS,Angel Oak Financial Strats Income Term,"Angel Oak Capital Advisors, LLC",TRUE
 FLC,Flah&Crum Total Return Fund,Flaherty & Crumrine Inc,TRUE
 FMN,Federated Premier Municipal Income,Federated Advisers,TRUE
@@ -110,7 +110,7 @@ FT,Franklin Universal Trust,"Franklin Advisers, Inc.",TRUE
 FTF,Franklin Limited Duration Income Trust,"Franklin Advisers, Inc.",TRUE
 FUND,Sprott Focus Trust,Sprott Asset Management USA Inc.,TRUE
 GAB,Gabelli Equity,Gabelli,TRUE
-GAM,General American Investors,General American Investors Co Inc,TRUE
+GAM,General American Investors,General American Investors Co Inc,TRUE,"general american investors"
 GBAB,Guggenheim Tax Muni & Inv Grade Debt Tr,Guggenheim Funds Investment Advisors LLC,TRUE
 GCV,Gabelli Conv Inc Secs,Gabelli,TRUE
 GDO,Western Asset Global Corp Opp,"Franklin Templeton Fund Adviser, LLC",TRUE
@@ -179,7 +179,7 @@ MMT,MFS Multimarket Income,MFS,TRUE
 MMU,Western Asset Managed Municipals,Franklin Templeton Investments,TRUE
 MPA,BlackRock MuniYield PA Quality,BlackRock,TRUE
 MQY,BlackRock Muniyield Quality,"BlackRock Advisors, LLC",TRUE
-MSD,Morgan Stanley Emerging Markets Debt,"Morgan Stanley Investment Management, Inc.",TRUE
+MSD,Morgan Stanley Emerging Markets Debt,"Morgan Stanley Investment Management, Inc.",TRUE,"morgan stanley,morgan stanley emerging markets debt,emerging markets debt"
 MUA,BlackRock Muniassets,BlackRock,TRUE
 MUC,BlackRock MuniHoldings CA Qty,BlackRock,TRUE
 MUJ,BlackRock MuniHoldings NJ Qty,BlackRock,TRUE
@@ -217,7 +217,7 @@ OIA,Invesco Municipal Inc Opp I,"Invesco Advisers, Inc",TRUE
 OPP,RiverNorth/DoubleLine Strategic Opp Fund,"RiverNorth Capital Management, LLC",TRUE
 PAXS,PIMCO Access Income,PIMCO,TRUE
 PCF,High Income Securities,Bulldog Investors LLP,TRUE
-PCM,PCM Fund,"Pacific Investment Management Company, LLC",TRUE
+PCM,PCM Fund,"Pacific Investment Management Company, LLC",TRUE,"pimco,pacific investment management,pacific investment management company"
 PCN,PIMCO Corporate & Income Strgy,"Pacific Investment Management Company, LLC",TRUE
 PCQ,PIMCO CA Municipal Income,"Pacific Investment Management Company, LLC",TRUE
 PDI,PIMCO Dynamic Income Fund,"Pacific Investment Management Company, LLC",TRUE
@@ -270,7 +270,7 @@ TSI,TCW Strategic Income,TCW Investment Management Co LLC,TRUE
 TWN,Taiwan Fund,Nomura Asset Management USA Inc,TRUE
 TY,Tri-Continental,"Columbia Mgmt Investment Advisers, LLC",TRUE
 TYG,Tortoise Energy Infrastructure Corp.,"Tortoise Capital Advisors, LLC",TRUE
-USA,Liberty All-Star Equity,ALPS Advisors Inc,TRUE
+USA,Liberty All-Star Equity,ALPS Advisors Inc,TRUE,"liberty all-star,liberty all-star equity"
 UTG,Reaves Utility Income,Reaves Asset Management,TRUE
 VBF,Invesco Bond,"Invesco Advisers, Inc",TRUE
 VCV,Invesco CA Value,"Invesco Advisers, Inc",TRUE
@@ -315,7 +315,7 @@ EOT,Eaton Vance National Municipal Opprs Tr,Eaton Vance Management,TRUE
 ETX,EV Municipal Income 2028 Term Trust,Eaton Vance Management,TRUE
 FAX,abrdn Asia-Pacific Income Fund Inc,abrdn Asia Limited,TRUE
 FMY,First Trust Mortgage Income,First Trust Advisors L.P.,TRUE
-FSCO,FS Credit Opportunities Corp.,FS Global Advisor LLC,TRUE
+FSCO,FS Credit Opportunities Corp.,FS Global Advisor LLC,TRUE,"fs credit,fs credit opportunities,fs global advisor"
 FSSL,FS Specialty Lending Fund,FS Specialty Lending Advisor LLC,TRUE
 FTHY,FIRST TRUST HY OPPORTUNITIES 2027 Term,First Trust Advisors L.P.,TRUE
 GDL,GDL Fund,Gabelli Funds LLC,TRUE
@@ -355,7 +355,7 @@ RMI,RiverNorth Opp Muni Income Fund Inc,"RiverNorth Capital Management, LLC",TRU
 RMM,RiverNorth Managed Duration Muni Inc Fd,"RiverNorth Capital Management, LLC",TRUE
 RMMZ,RiverNorth Manage Dur Muni Inc Fd II Inc,"RiverNorth Capital Management, LLC",TRUE
 RSF,RiverNorth Capital and Inc Fund,"RiverNorth Capital Management, LLC",TRUE
-SABA,Saba Capital Income & Ops Fund II,"Saba Capital Management, LP",TRUE
+SABA,Saba Capital Income & Ops Fund II,"Saba Capital Management, LP",TRUE,"saba capital,saba capital income"
 SCD,LMP Capital and Income,"Franklin Templeton Fund Adviser, LLC",TRUE
 SOR,Source Capital,"First Pacific Advisors, LP",TRUE
 SPMC,Sound Point Meridian Capital Inc,Sound Point Meridian Management Company LLC,TRUE
