@@ -8,6 +8,18 @@ groups:
             and
             time() - max by (instance) (ingestion_last_completed_cycle_unix_seconds{job="backend"}) > 600
           )
+          or
+          (
+            ingestion_scheduler_enabled{job="backend"} == 1
+            and on (instance)
+            ingestion_last_completed_cycle_unix_seconds{job="backend"} == 0
+            and on (instance)
+            ingestion_last_cycle_unix_seconds{job="backend"} == 0
+            and on (instance)
+            ingestion_scheduler_started_at_unix_seconds{job="backend"} > 0
+            and on (instance)
+            time() - ingestion_scheduler_started_at_unix_seconds{job="backend"} > 600
+          )
         for: 5m
         labels:
           severity: warning

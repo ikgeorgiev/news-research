@@ -53,6 +53,12 @@ def _fetch_feed_with_retries(
                 headers=headers,
             )
             status_code = int(getattr(response, "status_code", 200) or 200)
+            if status_code == 304:
+                # httpx treats 304 as a redirect-class status and raises on
+                # raise_for_status(). For conditional GET polling this is a
+                # successful "no new content" response and must be returned to
+                # the caller unchanged.
+                return response
             if status_code == 429:
                 retry_after = _parse_retry_after_seconds(
                     getattr(getattr(response, "headers", None), "get", lambda _k: None)(

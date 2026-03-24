@@ -116,6 +116,27 @@ def test_fetch_feed_with_retries_honors_retry_after_for_429(monkeypatch):
     assert slept == [2.0]
     assert response.content == b"<rss />"
 
+def test_fetch_feed_with_retries_returns_real_httpx_304_response(monkeypatch):
+    request = httpx.Request("GET", "https://example.com/feed.xml")
+
+    def fake_get(*_args, **_kwargs):
+        return httpx.Response(304, request=request, headers=httpx.Headers({}))
+
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
+
+    response = _fetch_feed_with_retries(
+        feed_url="https://example.com/feed.xml",
+        timeout_seconds=5,
+        max_attempts=1,
+        backoff_seconds=0.01,
+        backoff_jitter_seconds=0.0,
+    )
+
+    assert response.status_code == 304
+
 def test_update_feed_http_cache_reads_requests_case_insensitive_headers(db_session):
     db = db_session
     feed_url = "https://example.com/feed-with-conditional-cache.xml"
@@ -143,34 +164,24 @@ def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkey
     source = seed_source(db)
     sent_headers: list[dict[str, str]] = []
     attempts = {"count": 0}
-
-    class FirstResponse:
-        status_code = 200
-        headers = httpx.Headers(
-            {
-                "etag": '"persisted-etag"',
-                "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
-            }
-        )
-        content = b"<rss />"
-
-        def raise_for_status(self) -> None:
-            return None
-
-    class NotModifiedResponse:
-        status_code = 304
-        headers = httpx.Headers({})
-        content = b""
-
-        def raise_for_status(self) -> None:
-            return None
+    request = httpx.Request("GET", "https://example.com/conditional.xml")
 
     def fake_get(*_args, **kwargs):
         attempts["count"] += 1
         sent_headers.append(dict(kwargs.get("headers") or {}))
         if attempts["count"] == 1:
-            return FirstResponse()
-        return NotModifiedResponse()
+            return httpx.Response(
+                200,
+                request=request,
+                headers=httpx.Headers(
+                    {
+                        "etag": '"persisted-etag"',
+                        "last-modified": "Tue, 03 Mar 2026 10:00:00 GMT",
+                    }
+                ),
+                content=b"<rss />",
+            )
+        return httpx.Response(304, request=request, headers=httpx.Headers({}))
 
     monkeypatch.setattr(
         "app.http_client.get_http_client",

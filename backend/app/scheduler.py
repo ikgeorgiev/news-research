@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -42,10 +43,12 @@ class IngestionScheduler:
             coalesce=True,
             max_instances=1,
             jitter=10,
+            next_run_time=datetime.now(timezone.utc),
         )
         self._scheduler.start()
-        from app.monitoring import INGESTION_SCHEDULER_ENABLED
+        from app.monitoring import INGESTION_SCHEDULER_ENABLED, INGESTION_SCHEDULER_STARTED_AT
         INGESTION_SCHEDULER_ENABLED.set(1)
+        INGESTION_SCHEDULER_STARTED_AT.set(time.time())
         logger.info("Ingestion scheduler started")
 
     def shutdown(self) -> None:

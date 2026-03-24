@@ -56,6 +56,10 @@ INGESTION_SCHEDULER_ENABLED = Gauge(
     "ingestion_scheduler_enabled",
     "1 if the ingestion scheduler is running, 0 otherwise",
 )
+INGESTION_SCHEDULER_STARTED_AT = Gauge(
+    "ingestion_scheduler_started_at_unix_seconds",
+    "UNIX timestamp when the ingestion scheduler was started",
+)
 
 PUSH_NOTIFICATIONS_TOTAL = Counter(
     "push_notifications_sent_total",
