@@ -29,9 +29,9 @@ PRNEWSWIRE_FEEDS: list[str] = [
 ]
 
 GLOBENEWSWIRE_FEEDS: list[str] = [
-    "https://rss.globenewswire.com/en/RssFeed/subjectcode/12-Dividend%20Reports%20And%20Estimates/feedTitle/Dividend%20Reports%20And%20Estimates",
-    "https://rss.globenewswire.com/en/RssFeed/subjectcode/13-Earnings%20Releases%20And%20Operating%20Results/feedTitle/Earnings%20Releases%20And%20Operating%20Results",
-    "https://rss.globenewswire.com/en/RssFeed/subjectcode/27-Mergers%20And%20Acquisitions/feedTitle/Mergers%20And%20Acquisitions",
+    # Trial configuration: use the single broad GlobeNewswire public-company feed
+    # instead of the three narrower specialty-business subject feeds.
+    "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
 ]
 
 BUSINESSWIRE_FEEDS: list[str] = [
