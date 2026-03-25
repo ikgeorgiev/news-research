@@ -1,6 +1,6 @@
 "use client"
 
-import { KeyboardEvent } from "react"
+import { KeyboardEvent, useMemo } from "react"
 
 import { BellIcon } from "./page-icons"
 import { watchlistMatchesItem } from "./page-helpers"
@@ -46,6 +46,9 @@ export function WatchlistSidebar({
     isCreatingWatchlist,
     isPushScopeEnabled,
     newWatchlistName,
+    newWatchlistProvider,
+    newWatchlistQuery,
+    providerOptions,
     readIds,
     renameValue,
     renamingWatchlistId,
@@ -53,6 +56,8 @@ export function WatchlistSidebar({
     selectedTickers,
     setIsCreatingWatchlist,
     setNewWatchlistName,
+    setNewWatchlistProvider,
+    setNewWatchlistQuery,
     setRenameValue,
     setRenamingWatchlistId,
     tickers,
@@ -69,6 +74,26 @@ export function WatchlistSidebar({
       setRenameValue("")
     }
   }
+
+  const unreadCountByWatchlist = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const watchlist of customWatchlists) {
+      counts.set(watchlist.id, 0)
+    }
+
+    for (const item of trackedUnreadItems) {
+      if (readIds.has(item.id)) {
+        continue
+      }
+      for (const watchlist of customWatchlists) {
+        if (watchlistMatchesItem(item, watchlist)) {
+          counts.set(watchlist.id, (counts.get(watchlist.id) || 0) + 1)
+        }
+      }
+    }
+
+    return counts
+  }, [customWatchlists, readIds, trackedUnreadItems])
 
   return (
     <aside className="sidebar">
@@ -127,9 +152,7 @@ export function WatchlistSidebar({
 
       <div>
         {customWatchlists.map((watchlist) => {
-          const watchlistUnreadCount = trackedUnreadItems.filter(
-            (item) => !readIds.has(item.id) && watchlistMatchesItem(item, watchlist)
-          ).length
+          const watchlistUnreadCount = unreadCountByWatchlist.get(watchlist.id) || 0
 
           return (
             <div
@@ -208,6 +231,26 @@ export function WatchlistSidebar({
             onChange={(event) => setNewWatchlistName(event.target.value)}
             style={{ width: "100%", marginBottom: "0.5rem" }}
           />
+          <select
+            aria-label="Watchlist Provider"
+            value={newWatchlistProvider}
+            onChange={(event) => setNewWatchlistProvider(event.target.value)}
+            style={{ width: "100%", marginBottom: "0.5rem" }}
+          >
+            <option value="">Any provider</option>
+            {providerOptions.map((provider) => (
+              <option key={provider} value={provider}>
+                {provider}
+              </option>
+            ))}
+          </select>
+          <input
+            aria-label="Watchlist Query"
+            placeholder="Optional search query"
+            value={newWatchlistQuery}
+            onChange={(event) => setNewWatchlistQuery(event.target.value)}
+            style={{ width: "100%", marginBottom: "0.5rem" }}
+          />
           <div
             className="ticker-selector"
             style={{
@@ -239,7 +282,14 @@ export function WatchlistSidebar({
               type="submit"
               className="primary"
               style={{ flex: 1, padding: "4px" }}
-              disabled={!newWatchlistName.trim() || selectedTickers.size === 0}
+              disabled={
+                !newWatchlistName.trim()
+                || (
+                  selectedTickers.size === 0
+                  && !newWatchlistProvider.trim()
+                  && !newWatchlistQuery.trim()
+                )
+              }
             >
               Save
             </button>

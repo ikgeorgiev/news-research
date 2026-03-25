@@ -19,12 +19,12 @@ datasources:
     type: postgres
     access: proxy
     url: db:5432
-    user: cef
+    user: $POSTGRES_USER
     jsonData:
-      database: cef_news
+      database: $POSTGRES_DB
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false
     secureJsonData:
-      password: cef
+      password: $POSTGRES_PASSWORD
     editable: true

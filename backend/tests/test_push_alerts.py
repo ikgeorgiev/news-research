@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
+import tempfile
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
+from app.database import Base
 from app.ingestion import _run_push_alerts, run_ingestion_cycle
 from app.routes.push import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
@@ -138,6 +143,92 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
     )
     assert response.deleted is True
     assert db.scalar(select(PushSubscription).where(PushSubscription.id == created.id)) is None
+
+
+def test_delete_push_subscription_works_when_push_runtime_is_disabled(db_session: Session, monkeypatch: pytest.MonkeyPatch):
+    db = db_session
+    sub = PushSubscription(
+        endpoint="https://push.example/sub-disabled-delete",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={"include_all_news": True, "watchlists": []},
+        last_notified_json={},
+        manage_token_hash=sha256_str("disabled-token"),
+        active=True,
+    )
+    db.add(sub)
+    db.commit()
+
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: False)
+
+    response = delete_push_subscription(
+        PushDeleteRequest(
+            endpoint="https://push.example/sub-disabled-delete",
+            manage_token="disabled-token",
+        ),
+        db=db,
+    )
+
+    assert response.deleted is True
+    assert db.scalar(select(PushSubscription).where(PushSubscription.id == sub.id)) is None
+
+
+def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        engine = create_engine(f"sqlite:///{(Path(tmp_dir) / 'push-subscriptions.db').as_posix()}")
+        Base.metadata.create_all(bind=engine)
+        session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
+        db = session_factory()
+        try:
+            monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
+
+            original_commit = db.commit
+            conflict_inserted = {"done": False}
+
+            def commit_with_conflict():
+                if not conflict_inserted["done"]:
+                    conflict_inserted["done"] = True
+                    conflict_db = session_factory()
+                    conflict_db.add(
+                        PushSubscription(
+                            endpoint="https://push.example/sub-race",
+                            key_p256dh="existing-p256dh",
+                            key_auth="existing-auth",
+                            expiration_time=None,
+                            alert_scopes_json={"include_all_news": False, "watchlists": []},
+                            last_notified_json={},
+                            manage_token_hash=sha256_str("existing-token"),
+                            active=True,
+                        )
+                    )
+                    conflict_db.commit()
+                    conflict_db.close()
+                    raise IntegrityError("INSERT", {}, Exception("unique endpoint conflict"))
+                return original_commit()
+
+            monkeypatch.setattr(db, "commit", commit_with_conflict)
+
+            response = upsert_push_subscription(
+                _push_payload(endpoint="https://push.example/sub-race"),
+                db=db,
+            )
+
+            subscription = db.scalar(
+                select(PushSubscription).where(PushSubscription.endpoint == "https://push.example/sub-race")
+            )
+
+            assert response.created is False
+            assert response.manage_token is None
+            assert subscription is not None
+            assert subscription.active is True
+            assert subscription.key_p256dh == "existing-p256dh"
+            assert subscription.key_auth == "existing-auth"
+        finally:
+            db.close()
+            engine.dispose()
 
 
 def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session, monkeypatch: pytest.MonkeyPatch):

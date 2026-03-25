@@ -135,14 +135,23 @@ def _iter_scope_queries(scopes: dict[str, Any]) -> list[tuple[str, dict[str, Any
         watchlist_id = str(watchlist.get("id", "")).strip()
         if not watchlist_id:
             continue
+        tickers = watchlist.get("tickers") or None
+        provider = watchlist.get("provider") or None
+        provider_is_bw = (
+            isinstance(provider, str)
+            and provider.strip().lower() == GENERAL_UNMAPPED_PROVIDER.lower()
+        )
+        include_unmapped = (
+            GENERAL_UNMAPPED_PROVIDER if not tickers and provider_is_bw else None
+        )
         items.append(
             (
                 f"watchlist:{watchlist_id}",
                 {
-                    "tickers": watchlist.get("tickers") or None,
-                    "provider": watchlist.get("provider") or None,
+                    "tickers": tickers,
+                    "provider": provider,
                     "q": watchlist.get("q") or None,
-                    "include_unmapped_from_provider": None,
+                    "include_unmapped_from_provider": include_unmapped,
                 },
             )
         )

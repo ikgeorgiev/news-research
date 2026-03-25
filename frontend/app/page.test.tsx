@@ -37,8 +37,12 @@ describe("Page refresh requests", () => {
     vi.clearAllMocks()
 
     mockedApi.fetchTickers.mockResolvedValue({
-      items: [],
-      total: 0,
+      items: [
+        { symbol: "UTF", fund_name: null, sponsor: null, active: true },
+        { symbol: "BME", fund_name: null, sponsor: null, active: true },
+        { symbol: "GOF", fund_name: null, sponsor: null, active: true },
+      ],
+      total: 3,
     })
     mockedApi.fetchNews.mockResolvedValue({
       items: [],
@@ -107,6 +111,7 @@ describe("Page refresh requests", () => {
         expect.objectContaining({
           provider: "Business Wire",
           q: "rights offering",
+          includeUnmappedFromProvider: "Business Wire",
           includeGlobalSummary: true,
           limit: 40,
         })
@@ -138,6 +143,7 @@ describe("Page refresh requests", () => {
         expect.objectContaining({
           provider: "Business Wire",
           q: "rights offering",
+          includeUnmappedFromProvider: "Business Wire",
           includeGlobalSummary: true,
           limit: 40,
         })
@@ -152,6 +158,7 @@ describe("Page refresh requests", () => {
       expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
         expect.objectContaining({
           q: "rights offering",
+          includeUnmappedFromProvider: "Business Wire",
           includeGlobalSummary: true,
           limit: 40,
         })
@@ -184,6 +191,7 @@ describe("Page refresh requests", () => {
         expect.objectContaining({
           provider: "Business Wire",
           q: "rights offering",
+          includeUnmappedFromProvider: "Business Wire",
           includeGlobalSummary: true,
           limit: 40,
         })
@@ -199,11 +207,92 @@ describe("Page refresh requests", () => {
       expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
         expect.objectContaining({
           provider: "Business Wire",
+          includeUnmappedFromProvider: "Business Wire",
           includeGlobalSummary: true,
           limit: 40,
         })
       )
     )
     expect(mockedApi.fetchNews.mock.lastCall?.[0].q).toBeUndefined()
+  })
+
+  it("lets an explicit ticker narrow a watchlist instead of broadening it", async () => {
+    localStorage.setItem(
+      "customWatchlists",
+      JSON.stringify([
+        {
+          id: "ticker-watchlist",
+          name: "Ticker Watchlist",
+          provider: "Business Wire",
+          q: "rights offering",
+          tickers: ["UTF", "BME"],
+        },
+      ])
+    )
+
+    render(<Page />)
+
+    await waitFor(() => expect(screen.getByText("Ticker Watchlist")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("Ticker Watchlist"))
+
+    await waitFor(() =>
+      expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tickers: ["UTF", "BME"],
+          provider: "Business Wire",
+          q: "rights offering",
+          includeUnmappedFromProvider: undefined,
+          includeGlobalSummary: true,
+          limit: 40,
+        })
+      )
+    )
+
+    const tickerSelect = screen.getAllByRole("combobox")[0]
+    fireEvent.change(tickerSelect, { target: { value: "GOF" } })
+
+    await waitFor(() =>
+      expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          tickers: ["GOF"],
+          provider: "Business Wire",
+          q: "rights offering",
+          includeUnmappedFromProvider: undefined,
+          includeGlobalSummary: true,
+          limit: 40,
+        })
+      )
+    )
+  })
+
+  it("can create a provider/query-only watchlist from the sidebar form", async () => {
+    render(<Page />)
+
+    await waitFor(() => expect(screen.getByTitle("New Watchlist")).toBeInTheDocument())
+    fireEvent.click(screen.getByTitle("New Watchlist"))
+
+    fireEvent.change(screen.getByPlaceholderText("Watchlist Name"), {
+      target: { value: "BW Specials" },
+    })
+    fireEvent.change(screen.getByLabelText("Watchlist Provider"), {
+      target: { value: "Business Wire" },
+    })
+    fireEvent.change(screen.getByLabelText("Watchlist Query"), {
+      target: { value: "rights offering" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(screen.getByText("BW Specials")).toBeInTheDocument())
+    await waitFor(() =>
+      expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provider: "Business Wire",
+          q: "rights offering",
+          includeUnmappedFromProvider: "Business Wire",
+          includeGlobalSummary: true,
+          limit: 40,
+        })
+      )
+    )
   })
 })

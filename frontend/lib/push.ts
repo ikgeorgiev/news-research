@@ -126,7 +126,7 @@ async function upsertBackendSubscription({
     throw new Error(`Push subscription upsert failed: ${response.status}`)
   }
   const payload: PushUpsertResponse = await response.json()
-  setStoredManageToken(payload.manage_token ?? body.manage_token ?? null)
+  setStoredManageToken(payload.manage_token ?? getStoredManageToken() ?? null)
   return payload
 }
 

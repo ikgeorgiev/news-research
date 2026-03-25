@@ -98,7 +98,24 @@ def build_article_query(
                 .correlate(Article)
                 .exists()
             )
-            query = query.where(or_(mapped_exists, and_(~mapped_exists, include_provider_exists)))
+            has_any_raw = (
+                select(1)
+                .select_from(RawFeedItem)
+                .where(RawFeedItem.article_id == Article.id)
+                .correlate(Article)
+                .exists()
+            )
+            rawless_provider_match = Article.provider_name.ilike(
+                contains_literal_pattern(include_name),
+                escape="\\",
+            )
+            query = query.where(
+                or_(
+                    mapped_exists,
+                    and_(~mapped_exists, include_provider_exists),
+                    and_(~mapped_exists, ~has_any_raw, rawless_provider_match),
+                )
+            )
     else:
         query = query.where(mapped_exists)
 
@@ -119,6 +136,13 @@ def build_article_query(
                 select(Source).where(func.lower(Source.name) == provider_text.lower())
             )
             if source_row is not None:
+                has_raw_provenance = (
+                    select(1)
+                    .select_from(RawFeedItem)
+                    .where(RawFeedItem.article_id == Article.id)
+                    .correlate(Article)
+                    .exists()
+                )
                 canonical_source_id = (
                     select(RawFeedItem.source_id)
                     .where(
@@ -140,8 +164,16 @@ def build_article_query(
                     .correlate(Article)
                     .scalar_subquery()
                 )
+                provider_name_match = Article.provider_name.ilike(
+                    contains_literal_pattern(provider_text),
+                    escape="\\",
+                )
                 query = query.where(
-                    func.coalesce(canonical_source_id, latest_source_id) == source_row.id
+                    or_(
+                        func.coalesce(canonical_source_id, latest_source_id)
+                        == source_row.id,
+                        and_(~has_raw_provenance, provider_name_match),
+                    )
                 )
             else:
                 query = query.where(

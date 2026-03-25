@@ -66,6 +66,8 @@ export function useWatchlists({
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>("all")
   const [isCreatingWatchlist, setIsCreatingWatchlist] = useState(false)
   const [newWatchlistName, setNewWatchlistName] = useState("")
+  const [newWatchlistProvider, setNewWatchlistProvider] = useState("")
+  const [newWatchlistQuery, setNewWatchlistQuery] = useState("")
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [renamingWatchlistId, setRenamingWatchlistId] = useState<string | null>(null)
@@ -112,16 +114,24 @@ export function useWatchlists({
 
   const handleCreateWatchlist = (event: FormEvent) => {
     event.preventDefault()
-    if (!newWatchlistName.trim() || selectedTickers.size === 0) return
+    const name = newWatchlistName.trim()
+    const provider = newWatchlistProvider.trim() || undefined
+    const q = newWatchlistQuery.trim() || undefined
+    const tickers = Array.from(selectedTickers)
+    if (!name || (tickers.length === 0 && !provider && !q)) return
 
     const watchlist: Watchlist = {
       id: createWatchlistId(),
-      name: newWatchlistName.trim(),
-      tickers: Array.from(selectedTickers),
+      name,
+      provider,
+      q,
+      tickers,
     }
 
     setCustomWatchlists((previous) => [...previous, watchlist])
     setNewWatchlistName("")
+    setNewWatchlistProvider("")
+    setNewWatchlistQuery("")
     setSelectedTickers(new Set())
     setIsCreatingWatchlist(false)
     selectWatchlist(watchlist.id, watchlist)
@@ -192,12 +202,16 @@ export function useWatchlists({
     handleWatchlistContextMenu,
     isCreatingWatchlist,
     newWatchlistName,
+    newWatchlistProvider,
+    newWatchlistQuery,
     renameValue,
     renamingWatchlistId,
     selectWatchlist,
     selectedTickers,
     setIsCreatingWatchlist,
     setNewWatchlistName,
+    setNewWatchlistProvider,
+    setNewWatchlistQuery,
     setRenameValue,
     setRenamingWatchlistId,
     toggleTickerSelection,

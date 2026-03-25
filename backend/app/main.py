@@ -24,6 +24,9 @@ from app.sse import SSEBroadcaster, SSEConnectionLimiter
 from app.ticker_loader import load_tickers_from_csv
 
 logging.basicConfig(level=logging.INFO)
+# Keep third-party transport chatter out of normal app logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

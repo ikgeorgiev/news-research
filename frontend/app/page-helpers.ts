@@ -80,18 +80,16 @@ export function buildFetchParams(
   includeGeneralFromProvider: string | undefined
 } {
   let fetchTickers: string[] | undefined = undefined
-  if (activeWatchlist && activeWatchlist.tickers.length > 0) {
+  if (ticker) {
+    fetchTickers = [ticker]
+  } else if (activeWatchlist && activeWatchlist.tickers.length > 0) {
     fetchTickers = [...activeWatchlist.tickers]
   }
-  if (ticker) {
-    if (fetchTickers) {
-      if (!fetchTickers.includes(ticker)) fetchTickers.push(ticker)
-    } else {
-      fetchTickers = [ticker]
-    }
-  }
+
+  const hasBusinessWireProvider =
+    (activeWatchlist?.provider || "").trim().toLowerCase() === "business wire"
   const includeGeneralFromProvider =
-    activeWatchlistId === "all" && (!fetchTickers || fetchTickers.length === 0)
+    !fetchTickers && (activeWatchlistId === "all" || hasBusinessWireProvider)
       ? "Business Wire"
       : undefined
   return {

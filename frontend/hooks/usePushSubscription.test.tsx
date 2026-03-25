@@ -82,6 +82,32 @@ describe("usePushSubscription", () => {
     expect(result.current.pushError).toBe("Browser notification permission denied")
   })
 
+  it("clears local push state even when backend delete fails", async () => {
+    mockedPushApi.isPushSupported.mockReturnValue(true)
+    mockedPushApi.getPushStatus.mockResolvedValue({
+      supported: true,
+      subscribed: true,
+    })
+    mockedPushApi.disablePushNotifications.mockRejectedValue(new Error("unsubscribe failed"))
+
+    const { result } = renderHook(() =>
+      usePushSubscription({
+        customWatchlists: [],
+        mounted: true,
+      })
+    )
+
+    await waitFor(() => expect(result.current.pushSubscribed).toBe(true))
+
+    await act(async () => {
+      await result.current.togglePushSubscription()
+    })
+
+    expect(mockedPushApi.disablePushNotifications).toHaveBeenCalledTimes(1)
+    expect(result.current.pushSubscribed).toBe(false)
+    expect(result.current.pushError).toBe("Failed to disable push notifications")
+  })
+
   it("preserves legacy provider/query scope filters when watchlists hydrate", async () => {
     type HookProps = {
       customWatchlists: Watchlist[]

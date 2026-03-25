@@ -166,13 +166,13 @@ export function usePushSubscription({
 
   const togglePushSubscription = async () => {
     if (pushSubscribed) {
-      setPushSubscribed(false)
       setPushError(null)
       try {
         await disablePushNotifications()
       } catch {
-        // Ignore unsubscribe failures.
+        setPushError("Failed to disable push notifications")
       }
+      setPushSubscribed(false)
       return
     }
 

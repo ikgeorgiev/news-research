@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.routes.sse import _stream_news_events, sse_router
+from app.routes.sse import _client_ip, _stream_news_events, sse_router
 from app.sse import SSEBroadcaster, SSEConnectionLimiter
 
 
@@ -138,6 +139,41 @@ def test_sse_connection_limiter_release_allows_new_connection():
     limiter.release("127.0.0.1")
 
     assert limiter.try_acquire("127.0.0.1") is True
+
+
+def test_client_ip_ignores_forwarded_headers_when_trust_proxy_is_false():
+    request = SimpleNamespace(
+        headers={
+            "x-forwarded-for": "203.0.113.10, 198.51.100.1",
+            "x-real-ip": "203.0.113.20",
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    assert _client_ip(request, trust_proxy=False) == "127.0.0.1"
+
+
+def test_client_ip_uses_forwarded_for_when_trust_proxy_is_true():
+    request = SimpleNamespace(
+        headers={
+            "x-forwarded-for": "203.0.113.10, 198.51.100.1",
+            "x-real-ip": "203.0.113.20",
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    assert _client_ip(request, trust_proxy=True) == "203.0.113.10"
+
+
+def test_client_ip_falls_back_to_real_ip_when_no_forwarded_for():
+    request = SimpleNamespace(
+        headers={
+            "x-real-ip": "203.0.113.20",
+        },
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+
+    assert _client_ip(request, trust_proxy=True) == "203.0.113.20"
 
 
 def test_sse_route_rejects_connections_over_the_per_ip_cap():

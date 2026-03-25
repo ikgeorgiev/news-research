@@ -10,7 +10,7 @@ from app.article_filters import build_article_query
 from app.database import get_db
 from app.deps import require_admin_api_key
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.query_utils import active_ticker_mapped_exists, iter_chunks, prefix_literal_pattern
+from app.query_utils import active_ticker_mapped_exists, contains_literal_pattern, iter_chunks, prefix_literal_pattern
 from app.schemas import (
     MarkAlertsSentRequest,
     MarkAlertsSentResponse,
@@ -241,40 +241,33 @@ def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
         .correlate(Article)
         .exists()
     )
+    has_any_raw = (
+        select(1)
+        .select_from(RawFeedItem)
+        .where(RawFeedItem.article_id == Article.id)
+        .correlate(Article)
+        .exists()
+    )
+    rawless_bw_match = Article.provider_name.ilike(
+        contains_literal_pattern("Business Wire"), escape="\\"
+    )
     base_query = select(Article).where(
         or_(
             mapped_exists,
             and_(~mapped_exists, include_provider_exists),
+            and_(~mapped_exists, ~has_any_raw, rawless_bw_match),
         )
     )
-    summary_page = (
+    rows = db.execute(
         base_query.with_only_columns(
             Article.id.label("id"),
             func.count().over().label("total"),
         )
         .order_by(sort_key.desc(), Article.id.desc())
         .limit(GLOBAL_NEWS_TRACKED_LIMIT)
-        .subquery("global_summary_page")
-    )
-    dialect_name = db.get_bind().dialect.name if db.get_bind() is not None else ""
-    if dialect_name == "postgresql":
-        tracked_ids_agg = func.array_agg(summary_page.c.id).label("tracked_ids")
-    else:
-        tracked_ids_agg = func.group_concat(summary_page.c.id, ",").label("tracked_ids")
-    row = db.execute(
-        select(
-            func.max(summary_page.c.total).label("total"),
-            tracked_ids_agg,
-        ).select_from(summary_page)
-    ).one()
-    tracked_ids_value = row.tracked_ids
-    if tracked_ids_value is None:
-        tracked_ids: list[int] = []
-    elif isinstance(tracked_ids_value, str):
-        tracked_ids = [int(value) for value in tracked_ids_value.split(",") if value]
-    else:
-        tracked_ids = [int(value) for value in tracked_ids_value if value is not None]
-    total = int(row.total or 0)
+    ).all()
+    tracked_ids = [int(row.id) for row in rows]
+    total = int(rows[0].total or 0) if rows else 0
     return NewsGlobalSummary(
         total=total,
         tracked_ids=tracked_ids,

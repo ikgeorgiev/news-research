@@ -78,6 +78,9 @@ services:
     image: grafana/grafana:11.2.2
     profiles: ["monitoring"]
     environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cef}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cef}
+      POSTGRES_DB: ${POSTGRES_DB:-cef_news}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"

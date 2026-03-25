@@ -28,6 +28,9 @@ export type WatchlistSidebarModel = {
   isCreatingWatchlist: boolean
   isPushScopeEnabled: (watchlistId: string) => boolean
   newWatchlistName: string
+  newWatchlistProvider: string
+  newWatchlistQuery: string
+  providerOptions: string[]
   readIds: Set<number>
   renameValue: string
   renamingWatchlistId: string | null
@@ -35,6 +38,8 @@ export type WatchlistSidebarModel = {
   selectedTickers: Set<string>
   setIsCreatingWatchlist: (value: boolean) => void
   setNewWatchlistName: (value: string) => void
+  setNewWatchlistProvider: (value: string) => void
+  setNewWatchlistQuery: (value: string) => void
   setRenameValue: (value: string) => void
   setRenamingWatchlistId: (value: string | null) => void
   tickers: ReturnType<typeof useNewsFeed>["tickers"]
@@ -108,10 +113,15 @@ export function usePageController() {
     const watchlist = watchlists.customWatchlists.find((item) => item.id === watchlistId)
     if (!watchlist) return
 
+    const hasTickers = watchlist.tickers.length > 0
+    const hasBusinessWireProvider =
+      (watchlist.provider || "").trim().toLowerCase() === "business wire"
     const params = {
-      tickers: watchlist.tickers.length > 0 ? watchlist.tickers : undefined,
+      tickers: hasTickers ? watchlist.tickers : undefined,
       provider: watchlist.provider,
       q: watchlist.q,
+      includeUnmappedFromProvider:
+        !hasTickers && hasBusinessWireProvider ? "Business Wire" : undefined,
     }
     if (!params.tickers && !params.provider && !params.q) return
 
@@ -140,6 +150,9 @@ export function usePageController() {
     isCreatingWatchlist: watchlists.isCreatingWatchlist,
     isPushScopeEnabled: push.isPushScopeEnabled,
     newWatchlistName: watchlists.newWatchlistName,
+    newWatchlistProvider: watchlists.newWatchlistProvider,
+    newWatchlistQuery: watchlists.newWatchlistQuery,
+    providerOptions: STATIC_PROVIDERS,
     readIds: preferences.readIds,
     renameValue: watchlists.renameValue,
     renamingWatchlistId: watchlists.renamingWatchlistId,
@@ -147,6 +160,8 @@ export function usePageController() {
     selectedTickers: watchlists.selectedTickers,
     setIsCreatingWatchlist: watchlists.setIsCreatingWatchlist,
     setNewWatchlistName: watchlists.setNewWatchlistName,
+    setNewWatchlistProvider: watchlists.setNewWatchlistProvider,
+    setNewWatchlistQuery: watchlists.setNewWatchlistQuery,
     setRenameValue: watchlists.setRenameValue,
     setRenamingWatchlistId: watchlists.setRenamingWatchlistId,
     tickers: newsFeed.tickers,

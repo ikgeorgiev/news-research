@@ -241,6 +241,14 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw(db_s
         published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
         canonical_url=canonical_url,
     )
+    rawless_article = seed_article(
+        db,
+        slug="bw-provider-rawless",
+        published_at=datetime(2025, 1, 4, tzinfo=timezone.utc),
+        canonical_url="https://example.com/bw-provider-rawless",
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
 
     db.add(
         RawFeedItem(
@@ -282,7 +290,8 @@ def test_list_news_provider_filter_prefers_canonical_source_over_latest_raw(db_s
         cursor=None,
         db=db,
     )
-    assert [item.id for item in bw_response.items] == [article.id]
+    assert [item.id for item in bw_response.items] == [rawless_article.id, article.id]
+    assert rawless_article.id in {item.id for item in bw_response.items}
     assert bw_response.items[0].provider == "Business Wire"
     assert bw_response.items[0].first_seen_at is not None
     assert bw_response.items[0].alert_sent_at is None

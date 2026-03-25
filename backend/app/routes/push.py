@@ -4,6 +4,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -97,7 +98,31 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
     subscription.active = True
     subscription.last_error = None
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        subscription = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+        if subscription is None:
+            raise
+
+        created = False
+        if submitted_manage_token is not None:
+            provided_hash = hash_manage_token(submitted_manage_token)
+            if not secrets.compare_digest(provided_hash, subscription.manage_token_hash):
+                raise HTTPException(status_code=401, detail="Invalid manage token")
+            manage_token = submitted_manage_token
+            subscription.key_p256dh = p256dh
+            subscription.key_auth = auth
+            subscription.expiration_time = payload.subscription.expiration_time
+            subscription.alert_scopes_json = scopes
+            subscription.last_notified_json = next_watermarks
+            subscription.active = True
+            subscription.last_error = None
+            db.commit()
+        else:
+            manage_token = None
+
     db.refresh(subscription)
 
     return PushUpsertResponse(
@@ -111,8 +136,6 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
 
 @push_router.delete("/push/subscription", response_model=PushDeleteResponse)
 def delete_push_subscription(payload: PushDeleteRequest, db: Session = Depends(get_db)):
-    _require_push_runtime_enabled()
-
     endpoint = payload.endpoint.strip()
     manage_token = payload.manage_token.strip()
     if not endpoint:
