@@ -38,7 +38,7 @@ services:
       retries: 12
       start_period: 20s
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "${BACKEND_PORT:-8001}:8000"
 
   frontend:
     build:

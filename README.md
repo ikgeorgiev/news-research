@@ -95,12 +95,12 @@ cp .env.example .env
 docker compose up --build
 ```
 
-This starts only `db`, `backend`, and `frontend`. `NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8000`).
+This starts only `db`, `backend`, and `frontend`. `NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8001`).
 
 3. Open:
 
 - UI: http://localhost:3005
-- API docs: http://localhost:8000/docs
+- API docs: http://localhost:8001/docs
 
 Default frontend host port is `3005` (`FRONTEND_PORT` in `.env`).
 
@@ -153,7 +153,7 @@ Grafana auto-loads dashboard:
 ### Notes
 
 - Default `docker compose up --build` does not start monitoring services.
-- Default scrape targets are `host.docker.internal:8001` and `host.docker.internal:8000`.
+- Default scrape target is `host.docker.internal:8001`.
 - If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
 - Prometheus alert rules are loaded from `monitoring/prometheus/alerts.yml` and can be inspected in the Prometheus UI under `Alerts`.
 - The table panel uses a provisioned Postgres datasource (`db:5432`, `cef/cef`, `cef_news`).
@@ -269,7 +269,7 @@ python -m app.vapid_keygen
 After editing `data/cef_tickers.csv` while the backend is running, call:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/admin/tickers/reload" \
+curl -X POST "http://localhost:8001/api/v1/admin/tickers/reload" \
   -H "X-API-Key: ${ADMIN_API_KEY}"
 ```
 
