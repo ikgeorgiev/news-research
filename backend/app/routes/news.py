@@ -6,11 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.article_filters import build_article_query
+from app.article_filters import (
+    GENERAL_UNMAPPED_PROVIDER,
+    article_resolved_provider_name,
+    build_article_query,
+    mapped_or_provider_unmapped_condition,
+    source_id_by_name_subquery,
+)
 from app.database import get_db
 from app.deps import require_admin_api_key
-from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
-from app.query_utils import active_ticker_mapped_exists, contains_literal_pattern, iter_chunks, prefix_literal_pattern
+from app.models import Article, ArticleTicker, Ticker
+from app.query_utils import iter_chunks, prefix_literal_pattern
 from app.schemas import (
     MarkAlertsSentRequest,
     MarkAlertsSentResponse,
@@ -180,29 +186,6 @@ def _build_ticker_agg_subquery(db: Session, news_page):
 
 def _build_enriched_news_select(db: Session, news_page):
     ticker_agg = _build_ticker_agg_subquery(db, news_page)
-    canonical_provider = (
-        select(Source.name)
-        .select_from(RawFeedItem)
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(
-            and_(
-                RawFeedItem.article_id == news_page.c.id,
-                RawFeedItem.raw_link == news_page.c.url,
-            )
-        )
-        .order_by(RawFeedItem.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-    latest_provider = (
-        select(Source.name)
-        .select_from(RawFeedItem)
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(RawFeedItem.article_id == news_page.c.id)
-        .order_by(RawFeedItem.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
     return (
         select(
             news_page.c.id,
@@ -217,7 +200,11 @@ def _build_enriched_news_select(db: Session, news_page):
             news_page.c.alert_sent_at,
             news_page.c.dedupe_group,
             news_page.c.sort_ts,
-            func.coalesce(canonical_provider, latest_provider, news_page.c.provider_name).label("provider"),
+            article_resolved_provider_name(
+                article_id_col=news_page.c.id,
+                canonical_url_col=news_page.c.url,
+                fallback_provider_name_col=news_page.c.provider_name,
+            ).label("provider"),
             ticker_agg.c.tickers.label("tickers"),
         )
         .select_from(news_page.outerjoin(ticker_agg, ticker_agg.c.article_id == news_page.c.id))
@@ -227,37 +214,12 @@ def _build_enriched_news_select(db: Session, news_page):
 
 def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
     sort_key = _article_sort_key_expr()
-    mapped_exists = active_ticker_mapped_exists()
-    include_provider_exists = (
-        select(1)
-        .select_from(RawFeedItem)
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(
-            and_(
-                RawFeedItem.article_id == Article.id,
-                func.lower(Source.name) == "business wire",
-            )
-        )
-        .correlate(Article)
-        .exists()
+    provider_name = GENERAL_UNMAPPED_PROVIDER
+    base_condition = mapped_or_provider_unmapped_condition(
+        provider_name,
+        source_ids=source_id_by_name_subquery(provider_name),
     )
-    has_any_raw = (
-        select(1)
-        .select_from(RawFeedItem)
-        .where(RawFeedItem.article_id == Article.id)
-        .correlate(Article)
-        .exists()
-    )
-    rawless_bw_match = Article.provider_name.ilike(
-        contains_literal_pattern("Business Wire"), escape="\\"
-    )
-    base_query = select(Article).where(
-        or_(
-            mapped_exists,
-            and_(~mapped_exists, include_provider_exists),
-            and_(~mapped_exists, ~has_any_raw, rawless_bw_match),
-        )
-    )
+    base_query = select(Article).where(base_condition)
     rows = db.execute(
         base_query.with_only_columns(
             Article.id.label("id"),

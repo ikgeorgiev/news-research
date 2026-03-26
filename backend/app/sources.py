@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
+import threading
+import time
 from urllib.parse import quote_plus
+from urllib.parse import urlparse, urlunparse
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import http_client
 from app.config import Settings
 from app.models import Source, Ticker
 
@@ -61,6 +67,96 @@ PAGE_FETCH_CONFIGS: dict[str, SourcePageConfig] = {
         "globenewswire", "globenewswire.com", "gnw_table"
     ),
 }
+
+
+def _canonical_source_article_url(url: str) -> str:
+    parsed = urlparse(url)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+
+def _is_source_article_url(url: str, hostname_suffix: str) -> bool:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    if scheme not in {"http", "https"} or not hostname:
+        return False
+    return hostname == hostname_suffix or hostname.endswith("." + hostname_suffix)
+
+
+def _canonical_businesswire_article_url(url: str) -> str:
+    return _canonical_source_article_url(url)
+
+
+def _is_businesswire_article_url(url: str) -> bool:
+    return _is_source_article_url(url, "businesswire.com")
+
+
+def _cache_source_page(
+    cache: OrderedDict[str, tuple[float, str | None]],
+    cache_lock: threading.Lock,
+    *,
+    fetch_url: str,
+    fetched_at: float,
+    html_text: str | None,
+    max_items: int,
+) -> None:
+    with cache_lock:
+        cache[fetch_url] = (fetched_at, html_text)
+        cache.move_to_end(fetch_url)
+        while len(cache) > max_items:
+            cache.popitem(last=False)
+
+
+def _fetch_source_page_html(
+    url: str,
+    timeout_seconds: int,
+    config: SourcePageConfig,
+    *,
+    cache: OrderedDict[str, tuple[float, str | None]],
+    cache_lock: threading.Lock,
+    headers: dict[str, str],
+    cache_ttl_seconds: int,
+    failure_cache_ttl_seconds: int,
+    cache_max_items: int,
+    now_fn=time.time,
+) -> str | None:
+    fetch_url = _canonical_source_article_url(url)
+    if not _is_source_article_url(fetch_url, config.hostname_suffix):
+        return None
+
+    now = now_fn()
+    with cache_lock:
+        cached = cache.get(fetch_url)
+        if cached is not None:
+            fetched_at, cached_html = cached
+            ttl_seconds = (
+                cache_ttl_seconds if cached_html is not None else failure_cache_ttl_seconds
+            )
+            if now - fetched_at <= ttl_seconds:
+                cache.move_to_end(fetch_url)
+                return cached_html
+
+    html_text: str | None = None
+    try:
+        response = http_client.get_http_client().get(
+            fetch_url,
+            timeout=timeout_seconds,
+            headers=headers,
+        )
+        if response.is_success and response.text:
+            html_text = response.text
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        html_text = None
+
+    _cache_source_page(
+        cache,
+        cache_lock,
+        fetch_url=fetch_url,
+        fetched_at=now_fn(),
+        html_text=html_text,
+        max_items=cache_max_items,
+    )
+    return html_text
 
 
 def get_source_policy(source_code: str) -> str:

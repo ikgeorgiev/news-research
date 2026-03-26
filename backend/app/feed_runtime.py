@@ -4,13 +4,12 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import httpx
-from sqlalchemy import and_, delete, select, tuple_
+from sqlalchemy import and_, delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -261,88 +260,6 @@ def _load_tickers_from_csv_if_changed(db: Session, csv_path: str) -> dict[str, i
     with _tickers_csv_mtime_cache_lock:
         _tickers_csv_mtime_cache[csv_path] = mtime
     return stats
-
-
-@dataclass(slots=True)
-class PreparedFeedEntry:
-    entry: dict
-    raw_title: str
-    title: str
-    raw_link: str
-    article_url: str
-    is_exact_source_url: bool
-    raw_pub_date: datetime | None
-    published_at: datetime
-    raw_guid: str | None
-
-
-def _prefetch_recorded_raw_keys(
-    db: Session,
-    *,
-    source_id: int,
-    prepared_entries: list[PreparedFeedEntry],
-) -> tuple[set[str], set[tuple[str, datetime | None]]]:
-    if not prepared_entries:
-        return set(), set()
-
-    guids = {item.raw_guid for item in prepared_entries if item.raw_guid}
-    pairs_with_pub = {
-        (item.raw_link, item.raw_pub_date)
-        for item in prepared_entries
-        if item.raw_pub_date is not None
-    }
-    links_without_pub = {
-        item.raw_link
-        for item in prepared_entries
-        if item.raw_pub_date is None and item.raw_guid is None
-    }
-
-    existing_guids: set[str] = set()
-    if guids:
-        existing_guids = {
-            guid
-            for guid in db.scalars(
-                select(RawFeedItem.raw_guid).where(
-                    and_(
-                        RawFeedItem.source_id == source_id,
-                        RawFeedItem.article_id.is_not(None),
-                        RawFeedItem.raw_guid.in_(list(guids)),
-                    )
-                )
-            ).all()
-            if guid
-        }
-
-    existing_pairs: set[tuple[str, datetime | None]] = set()
-    if pairs_with_pub:
-        rows = db.execute(
-            select(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).where(
-                and_(
-                    RawFeedItem.source_id == source_id,
-                    RawFeedItem.article_id.is_not(None),
-                    tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(
-                        list(pairs_with_pub)
-                    ),
-                )
-            )
-        ).all()
-        existing_pairs = {
-            (str(link), pub_date) for link, pub_date in rows if link and pub_date
-        }
-    if links_without_pub:
-        rows = db.execute(
-            select(RawFeedItem.raw_link).where(
-                and_(
-                    RawFeedItem.source_id == source_id,
-                    RawFeedItem.article_id.is_not(None),
-                    RawFeedItem.raw_guid.is_(None),
-                    RawFeedItem.raw_link.in_(list(links_without_pub)),
-                )
-            )
-        ).all()
-        existing_pairs.update((str(link), None) for (link,) in rows if link)
-
-    return existing_guids, existing_pairs
 
 
 def reconcile_stale_ingestion_runs(

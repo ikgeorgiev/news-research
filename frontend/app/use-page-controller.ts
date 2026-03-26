@@ -5,12 +5,15 @@ import { FormEvent, MouseEvent, useState } from "react"
 import { usePushSubscription } from "@/hooks/usePushSubscription"
 import { Watchlist } from "@/lib/types"
 
-import { watchlistMatchesItem } from "./page-helpers"
+import {
+  buildWatchlistQueryParams,
+  GENERAL_NEWS_PROVIDER,
+  STATIC_PROVIDER_OPTIONS,
+  watchlistMatchesItem,
+} from "./page-helpers"
 import { useFeedPreferences } from "./use-feed-preferences"
 import { useNewsFeed } from "./use-news-feed"
 import { ContextMenuState, useWatchlists } from "./use-watchlists"
-
-const STATIC_PROVIDERS = ["Yahoo Finance", "PR Newswire", "GlobeNewswire", "Business Wire"]
 
 export type WatchlistSidebarModel = {
   activeWatchlistId: string
@@ -103,7 +106,7 @@ export function usePageController() {
     watchlists.closeContextMenu()
 
     if (watchlistId === "all") {
-      preferences.markReadByQuery({ includeUnmappedFromProvider: "Business Wire" })
+      preferences.markReadByQuery({ includeUnmappedFromProvider: GENERAL_NEWS_PROVIDER })
         .catch(() => {
           preferences.addReadIds(preferences.trackedUnreadItems.map((item) => item.id))
         })
@@ -113,16 +116,7 @@ export function usePageController() {
     const watchlist = watchlists.customWatchlists.find((item) => item.id === watchlistId)
     if (!watchlist) return
 
-    const hasTickers = watchlist.tickers.length > 0
-    const hasBusinessWireProvider =
-      (watchlist.provider || "").trim().toLowerCase() === "business wire"
-    const params = {
-      tickers: hasTickers ? watchlist.tickers : undefined,
-      provider: watchlist.provider,
-      q: watchlist.q,
-      includeUnmappedFromProvider:
-        !hasTickers && hasBusinessWireProvider ? "Business Wire" : undefined,
-    }
+    const params = buildWatchlistQueryParams(watchlist)
     if (!params.tickers && !params.provider && !params.q) return
 
     preferences.markReadByQuery(params)
@@ -152,7 +146,7 @@ export function usePageController() {
     newWatchlistName: watchlists.newWatchlistName,
     newWatchlistProvider: watchlists.newWatchlistProvider,
     newWatchlistQuery: watchlists.newWatchlistQuery,
-    providerOptions: STATIC_PROVIDERS,
+    providerOptions: STATIC_PROVIDER_OPTIONS,
     readIds: preferences.readIds,
     renameValue: watchlists.renameValue,
     renamingWatchlistId: watchlists.renamingWatchlistId,
@@ -175,7 +169,7 @@ export function usePageController() {
     filters: {
       onSearchSubmit,
       provider,
-      providerOptions: STATIC_PROVIDERS,
+      providerOptions: STATIC_PROVIDER_OPTIONS,
       searchInput,
       setProvider,
       setSearchInput,

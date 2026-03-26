@@ -10,7 +10,8 @@ from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
     _reextract_purge_article_tickers,
-    load_raw_contexts,
+    load_article_maintenance_context,
+    stamp_article_ticker_version,
 )
 from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.query_utils import any_ticker_mapped_exists
@@ -144,17 +145,9 @@ def purge_token_only_articles(
             break
 
         article_ids = [article.id for article in articles]
-        raw_contexts_by_article = load_raw_contexts(db, article_ids)
-
-        existing_rows_by_article: dict[int, dict[int, ArticleTicker]] = {}
-        if article_ids:
-            at_rows = db.scalars(
-                select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
-            ).all()
-            for at_row in at_rows:
-                existing_rows_by_article.setdefault(at_row.article_id, {})[
-                    at_row.ticker_id
-                ] = at_row
+        raw_contexts_by_article, existing_rows_by_article = (
+            load_article_maintenance_context(db, article_ids)
+        )
 
         for article in articles:
             if article.id in seen_ids:
@@ -251,9 +244,10 @@ def purge_token_only_articles(
                         if ticker_id in ticker_context.id_to_symbol
                         and ticker_context.id_to_symbol[ticker_id] in preserved_existing_hits
                     }
-                    for ticker_id, row in (existing_for_article or {}).items():
-                        if ticker_id in preserved_ticker_ids:
-                            row.extraction_version = EXTRACTION_VERSION
+                    stamp_article_ticker_version(
+                        existing_for_article,
+                        ticker_ids=preserved_ticker_ids,
+                    )
                 continue
 
             outcome = _apply_revalidation(

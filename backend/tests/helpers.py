@@ -111,6 +111,54 @@ def seed_ticker(db: Session, *, symbol: str, **kwargs: Any) -> Ticker:
     return ticker
 
 
+def build_article_ticker(
+    *,
+    article: Article | int,
+    ticker: Ticker | int,
+    match_type: str,
+    confidence: float,
+    extraction_version: int | None = None,
+) -> ArticleTicker:
+    row = ArticleTicker(
+        article_id=article.id if isinstance(article, Article) else article,
+        ticker_id=ticker.id if isinstance(ticker, Ticker) else ticker,
+        match_type=match_type,
+        confidence=confidence,
+    )
+    if extraction_version is not None:
+        row.extraction_version = extraction_version
+    return row
+
+
+def build_raw_feed_item(
+    *,
+    source: Source | int,
+    article: Article | int | None,
+    feed_url: str,
+    raw_guid: str | None,
+    raw_link: str,
+    raw_pub_date: datetime | None,
+    raw_payload_json: dict | None = None,
+    raw_title: str | None = None,
+) -> RawFeedItem:
+    row = RawFeedItem(
+        source_id=source.id if isinstance(source, Source) else source,
+        article_id=(
+            article.id
+            if isinstance(article, Article)
+            else article
+        ),
+        feed_url=feed_url,
+        raw_guid=raw_guid,
+        raw_link=raw_link,
+        raw_pub_date=raw_pub_date,
+        raw_payload_json=raw_payload_json if raw_payload_json is not None else {},
+    )
+    if raw_title is not None:
+        row.raw_title = raw_title
+    return row
+
+
 # ---------------------------------------------------------------------------
 # Ingest wrapper
 # ---------------------------------------------------------------------------
@@ -163,18 +211,9 @@ def seed_article_with_raw(
     ticker = seed_ticker(db, **ticker_kwargs)
     article = seed_article(db, **article_kwargs)
 
-    at_kwargs: dict[str, Any] = dict(
-        article_id=article.id,
-        ticker_id=ticker.id,
-        match_type=match_type,
-        confidence=confidence,
-    )
-    if extraction_version is not None:
-        at_kwargs["extraction_version"] = extraction_version
-
     raw_kwargs: dict[str, Any] = dict(
-        source_id=source.id,
-        article_id=article.id,
+        source=source,
+        article=article,
         feed_url=feed_url,
         raw_guid=raw_guid,
         raw_link=article.canonical_url,
@@ -184,7 +223,18 @@ def seed_article_with_raw(
     if raw_title is not None:
         raw_kwargs["raw_title"] = raw_title
 
-    db.add_all([ArticleTicker(**at_kwargs), RawFeedItem(**raw_kwargs)])
+    db.add_all(
+        [
+            build_article_ticker(
+                article=article,
+                ticker=ticker,
+                match_type=match_type,
+                confidence=confidence,
+                extraction_version=extraction_version,
+            ),
+            build_raw_feed_item(**raw_kwargs),
+        ]
+    )
     db.commit()
     db.refresh(article)
     return article, ticker

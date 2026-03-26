@@ -11,7 +11,6 @@ from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_policy
 from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.ticker_extraction import (
-    _build_symbol_keywords,
     _extract_entry_tickers,
     _extract_source_fallback_tickers,
     _merge_ticker_hits,
@@ -20,6 +19,7 @@ from app.ticker_extraction import (
 
 
 type RawContext = tuple[str, str | None, str | None]
+type ArticleTickerRowsByArticle = dict[int, dict[int, ArticleTicker]]
 
 
 def _has_general_allowed_raw_provenance(
@@ -68,6 +68,48 @@ def load_raw_contexts(
                 seen.add(alt_url)
                 contexts.append((raw_source_code, raw_link, alt_url))
     return raw_contexts_by_article
+
+
+def load_existing_article_ticker_rows(
+    db: Session,
+    article_ids: Sequence[int],
+) -> ArticleTickerRowsByArticle:
+    if not article_ids:
+        return {}
+
+    existing_rows_by_article: ArticleTickerRowsByArticle = {}
+    rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
+    ).all()
+    for row in rows:
+        existing_rows_by_article.setdefault(row.article_id, {})[row.ticker_id] = row
+    return existing_rows_by_article
+
+
+def load_article_maintenance_context(
+    db: Session,
+    article_ids: Sequence[int],
+    *,
+    source_code: str | None = None,
+) -> tuple[dict[int, list[RawContext]], ArticleTickerRowsByArticle]:
+    return (
+        load_raw_contexts(db, article_ids, source_code=source_code),
+        load_existing_article_ticker_rows(db, article_ids),
+    )
+
+
+def stamp_article_ticker_version(
+    existing_rows: dict[int, ArticleTicker] | None,
+    *,
+    ticker_ids: set[int] | None = None,
+) -> None:
+    if not existing_rows:
+        return
+
+    for ticker_id, row in existing_rows.items():
+        if ticker_ids is not None and ticker_id not in ticker_ids:
+            continue
+        row.extraction_version = EXTRACTION_VERSION
 
 
 def _upsert_article_tickers(
@@ -275,13 +317,15 @@ def _apply_revalidation(
                 force_update=force_update,
             )
             if stamp_retained_version:
-                for symbol in verified_hits:
-                    ticker_id = symbol_to_id.get(symbol)
-                    if ticker_id is None:
-                        continue
-                    retained_row = existing_rows.get(ticker_id)
-                    if retained_row is not None:
-                        retained_row.extraction_version = EXTRACTION_VERSION
+                retained_ticker_ids = {
+                    ticker_id
+                    for symbol in verified_hits
+                    if (ticker_id := symbol_to_id.get(symbol)) is not None
+                }
+                stamp_article_ticker_version(
+                    existing_rows,
+                    ticker_ids=retained_ticker_ids,
+                )
         return _RevalidationOutcome("kept", True, changed, removed_count, 0)
 
     at_count = len(existing_ids)

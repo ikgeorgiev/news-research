@@ -14,7 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.article_filters import build_article_query
+from app.article_filters import GENERAL_UNMAPPED_PROVIDER, build_article_query
 from app.config import Settings
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.monitoring import record_push_delivery, record_push_delivery_duration, set_push_active_subscriptions
@@ -27,7 +27,6 @@ _active_dispatcher_lock = threading.Lock()
 _active_dispatcher_count = 0
 
 ALL_SCOPE_KEY = "all"
-GENERAL_UNMAPPED_PROVIDER = "Business Wire"
 MAX_ERROR_TEXT_LEN = 500
 
 try:
@@ -56,105 +55,148 @@ def hash_manage_token(token: str) -> str:
     return sha256_str(token)
 
 
-def normalize_scopes(payload: dict[str, Any] | None) -> dict[str, Any]:
-    raw = payload or {}
+@dataclass(frozen=True, slots=True)
+class PushScopeQuery:
+    key: str
+    tickers: tuple[str, ...]
+    provider: str | None
+    q: str | None
+    include_unmapped_from_provider: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedPushWatchlist:
+    id: str
+    name: str | None
+    tickers: tuple[str, ...]
+    provider: str | None
+    q: str | None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "tickers": list(self.tickers),
+            "provider": self.provider,
+            "q": self.q,
+        }
+
+    def to_scope_query(self) -> PushScopeQuery:
+        provider_is_general = (
+            isinstance(self.provider, str)
+            and self.provider.strip().lower() == GENERAL_UNMAPPED_PROVIDER.lower()
+        )
+        return PushScopeQuery(
+            key=f"watchlist:{self.id}",
+            tickers=self.tickers,
+            provider=self.provider,
+            q=self.q,
+            include_unmapped_from_provider=(
+                GENERAL_UNMAPPED_PROVIDER
+                if not self.tickers and provider_is_general
+                else None
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedPushScopes:
+    include_all_news: bool
+    watchlists: tuple[NormalizedPushWatchlist, ...]
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "include_all_news": self.include_all_news,
+            "watchlists": [watchlist.to_payload() for watchlist in self.watchlists],
+        }
+
+    def scope_queries(self) -> list[PushScopeQuery]:
+        queries: list[PushScopeQuery] = []
+        if self.include_all_news:
+            queries.append(
+                PushScopeQuery(
+                    key=ALL_SCOPE_KEY,
+                    tickers=(),
+                    provider=None,
+                    q=None,
+                    include_unmapped_from_provider=GENERAL_UNMAPPED_PROVIDER,
+                )
+            )
+        queries.extend(watchlist.to_scope_query() for watchlist in self.watchlists)
+        return queries
+
+
+@dataclass(slots=True)
+class PreparedSubscriptionDispatch:
+    scopes_payload: dict[str, Any]
+    stable_watermarks: dict[str, int]
+    advanced_watermarks: dict[str, int]
+    fresh_ids_by_scope: dict[str, list[int]]
+    payload: dict[str, Any] | None
+
+
+def _normalize_watchlist_scope(item: dict[str, Any]) -> NormalizedPushWatchlist | None:
+    watchlist_id = str(item.get("id", "")).strip()
+    if not watchlist_id:
+        return None
+
+    tickers: list[str] = []
+    raw_tickers = item.get("tickers")
+    if isinstance(raw_tickers, list):
+        seen_tickers: set[str] = set()
+        for ticker in raw_tickers:
+            ticker_text = str(ticker).strip().upper()
+            if not ticker_text or ticker_text in seen_tickers:
+                continue
+            seen_tickers.add(ticker_text)
+            tickers.append(ticker_text)
+
+    raw_provider = item.get("provider")
+    provider = raw_provider.strip() if isinstance(raw_provider, str) and raw_provider.strip() else None
+    raw_q = item.get("q")
+    q = raw_q.strip() if isinstance(raw_q, str) and raw_q.strip() else None
+    raw_name = item.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+    return NormalizedPushWatchlist(
+        id=watchlist_id,
+        name=name,
+        tickers=tuple(tickers),
+        provider=provider,
+        q=q,
+    )
+
+
+def _coerce_normalized_scopes(
+    payload: dict[str, Any] | NormalizedPushScopes | None,
+) -> NormalizedPushScopes:
+    if isinstance(payload, NormalizedPushScopes):
+        return payload
+
+    raw = payload if isinstance(payload, dict) else {}
     include_all_news = bool(raw.get("include_all_news", True))
-    watchlists: list[dict[str, Any]] = []
+    watchlists: list[NormalizedPushWatchlist] = []
     raw_watchlists = raw.get("watchlists")
     if isinstance(raw_watchlists, list):
         seen_ids: set[str] = set()
         for item in raw_watchlists:
             if not isinstance(item, dict):
                 continue
-            watchlist_id = str(item.get("id", "")).strip()
-            if not watchlist_id or watchlist_id in seen_ids:
+            watchlist = _normalize_watchlist_scope(item)
+            if watchlist is None or watchlist.id in seen_ids:
                 continue
-            seen_ids.add(watchlist_id)
-
-            tickers: list[str] = []
-            raw_tickers = item.get("tickers")
-            if isinstance(raw_tickers, list):
-                seen_tickers: set[str] = set()
-                for ticker in raw_tickers:
-                    ticker_text = str(ticker).strip().upper()
-                    if not ticker_text or ticker_text in seen_tickers:
-                        continue
-                    seen_tickers.add(ticker_text)
-                    tickers.append(ticker_text)
-
-            raw_provider = item.get("provider")
-            provider = raw_provider.strip() if isinstance(raw_provider, str) and raw_provider.strip() else None
-            raw_q = item.get("q")
-            q = raw_q.strip() if isinstance(raw_q, str) and raw_q.strip() else None
-            raw_name = item.get("name")
-            name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
-            watchlists.append(
-                {
-                    "id": watchlist_id,
-                    "name": name,
-                    "tickers": tickers,
-                    "provider": provider,
-                    "q": q,
-                }
-            )
-    return {
-        "include_all_news": include_all_news,
-        "watchlists": watchlists,
-    }
-
-
-def _iter_scope_queries(scopes: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    items: list[tuple[str, dict[str, Any]]] = []
-    if scopes.get("include_all_news"):
-        items.append(
-            (
-                ALL_SCOPE_KEY,
-                {
-                    "tickers": None,
-                    "provider": None,
-                    "q": None,
-                    "include_unmapped_from_provider": GENERAL_UNMAPPED_PROVIDER,
-                },
-            )
-        )
-
-    for watchlist in scopes.get("watchlists", []):
-        if not isinstance(watchlist, dict):
-            continue
-        watchlist_id = str(watchlist.get("id", "")).strip()
-        if not watchlist_id:
-            continue
-        tickers = watchlist.get("tickers") or None
-        provider = watchlist.get("provider") or None
-        provider_is_bw = (
-            isinstance(provider, str)
-            and provider.strip().lower() == GENERAL_UNMAPPED_PROVIDER.lower()
-        )
-        include_unmapped = (
-            GENERAL_UNMAPPED_PROVIDER if not tickers and provider_is_bw else None
-        )
-        items.append(
-            (
-                f"watchlist:{watchlist_id}",
-                {
-                    "tickers": tickers,
-                    "provider": provider,
-                    "q": watchlist.get("q") or None,
-                    "include_unmapped_from_provider": include_unmapped,
-                },
-            )
-        )
-    return items
-
-
-def _scope_max_article_id(db: Session, scope_params: dict[str, Any]) -> int:
-    query = build_article_query(
-        db,
-        tickers=scope_params.get("tickers"),
-        provider=scope_params.get("provider"),
-        q=scope_params.get("q"),
-        include_unmapped_from_provider=scope_params.get("include_unmapped_from_provider"),
+            seen_ids.add(watchlist.id)
+            watchlists.append(watchlist)
+    return NormalizedPushScopes(
+        include_all_news=include_all_news,
+        watchlists=tuple(watchlists),
     )
+
+def normalize_scopes(payload: dict[str, Any] | None) -> dict[str, Any]:
+    return _coerce_normalized_scopes(payload).to_payload()
+
+
+def _scope_max_article_id(db: Session, scope_query: PushScopeQuery) -> int:
+    query = _build_scope_query(db, scope_query=scope_query)
     value = db.scalar(query.with_only_columns(func.max(Article.id)).order_by(None))
     return int(value or 0)
 
@@ -162,17 +204,11 @@ def _scope_max_article_id(db: Session, scope_params: dict[str, Any]) -> int:
 def _scope_new_article_ids(
     db: Session,
     *,
-    scope_params: dict[str, Any],
+    scope_query: PushScopeQuery,
     after_id: int,
     limit: int,
 ) -> list[int]:
-    query = build_article_query(
-        db,
-        tickers=scope_params.get("tickers"),
-        provider=scope_params.get("provider"),
-        q=scope_params.get("q"),
-        include_unmapped_from_provider=scope_params.get("include_unmapped_from_provider"),
-    )
+    query = _build_scope_query(db, scope_query=scope_query)
     rows = db.execute(
         query.with_only_columns(Article.id)
         .where(Article.id > after_id)
@@ -180,6 +216,16 @@ def _scope_new_article_ids(
         .limit(limit)
     ).all()
     return [int(article_id) for (article_id,) in rows]
+
+
+def _build_scope_query(db: Session, *, scope_query: PushScopeQuery):
+    return build_article_query(
+        db,
+        tickers=list(scope_query.tickers) or None,
+        provider=scope_query.provider,
+        q=scope_query.q,
+        include_unmapped_from_provider=scope_query.include_unmapped_from_provider,
+    )
 
 
 def _normalize_last_notified(payload: dict[str, Any] | None) -> dict[str, int]:
@@ -199,20 +245,21 @@ def _normalize_last_notified(payload: dict[str, Any] | None) -> dict[str, int]:
 def seed_last_notified_watermarks(
     db: Session,
     *,
-    scopes: dict[str, Any],
+    scopes: dict[str, Any] | NormalizedPushScopes,
     existing: dict[str, Any] | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
+    normalized_scopes = _coerce_normalized_scopes(scopes)
     previous = _normalize_last_notified(existing)
     seeded: dict[str, int] = {}
     next_state: dict[str, int] = {}
-    for scope_key, scope_params in _iter_scope_queries(scopes):
-        prev = previous.get(scope_key)
+    for scope_query in normalized_scopes.scope_queries():
+        prev = previous.get(scope_query.key)
         if isinstance(prev, int) and prev > 0:
-            next_state[scope_key] = prev
+            next_state[scope_query.key] = prev
             continue
-        max_id = _scope_max_article_id(db, scope_params)
-        next_state[scope_key] = max_id
-        seeded[scope_key] = max_id
+        max_id = _scope_max_article_id(db, scope_query)
+        next_state[scope_query.key] = max_id
+        seeded[scope_query.key] = max_id
     return next_state, seeded
 
 
@@ -267,6 +314,58 @@ def _build_payload(db: Session, *, article_ids: list[int], scope_keys: list[str]
         "dedupe_key": f"push:{max(row.id for row in rows)}",
         "tag": f"cef-news-{max(row.id for row in rows)}",
     }
+
+
+def _prepare_subscription_dispatch(
+    db: Session,
+    settings: Settings,
+    subscription: PushSubscription,
+) -> PreparedSubscriptionDispatch | None:
+    scopes = _coerce_normalized_scopes(subscription.alert_scopes_json)
+    scope_queries = scopes.scope_queries()
+    if not scope_queries:
+        subscription.alert_scopes_json = scopes.to_payload()
+        return None
+
+    stable_watermarks, _ = seed_last_notified_watermarks(
+        db,
+        scopes=scopes,
+        existing=subscription.last_notified_json,
+    )
+    advanced_watermarks = dict(stable_watermarks)
+    article_ids: set[int] = set()
+    fresh_ids_by_scope: dict[str, list[int]] = {}
+    touched_scope_keys: list[str] = []
+
+    for scope_query in scope_queries:
+        previous = int(stable_watermarks.get(scope_query.key, 0) or 0)
+        fresh_ids = _scope_new_article_ids(
+            db,
+            scope_query=scope_query,
+            after_id=previous,
+            limit=settings.push_max_per_cycle,
+        )
+        if not fresh_ids:
+            continue
+        article_ids.update(fresh_ids)
+        fresh_ids_by_scope[scope_query.key] = fresh_ids
+        touched_scope_keys.append(scope_query.key)
+
+    payload = None
+    if article_ids:
+        payload = _build_payload(
+            db,
+            article_ids=sorted(article_ids, reverse=True),
+            scope_keys=sorted(set(touched_scope_keys)),
+        )
+
+    return PreparedSubscriptionDispatch(
+        scopes_payload=scopes.to_payload(),
+        stable_watermarks=stable_watermarks,
+        advanced_watermarks=advanced_watermarks,
+        fresh_ids_by_scope=fresh_ids_by_scope,
+        payload=payload or None,
+    )
 
 
 def _build_vapid_sub_claim(raw: str) -> str:
@@ -360,48 +459,15 @@ def _process_subscription_alerts(
     outcome = SubscriptionOutcome()
 
     try:
-        scopes = normalize_scopes(subscription.alert_scopes_json)
-        scope_queries = _iter_scope_queries(scopes)
-        if not scope_queries:
+        dispatch = _prepare_subscription_dispatch(db, settings, subscription)
+        if dispatch is None:
             return outcome
 
-        stable_watermarks, _seeded = seed_last_notified_watermarks(
-            db,
-            scopes=scopes,
-            existing=subscription.last_notified_json,
-        )
-        advanced_watermarks = dict(stable_watermarks)
-        article_ids: set[int] = set()
-        fresh_ids_by_scope: dict[str, list[int]] = {}
-        touched_scope_keys: list[str] = []
-
-        for scope_key, scope_params in scope_queries:
-            previous = int(stable_watermarks.get(scope_key, 0) or 0)
-            fresh_ids = _scope_new_article_ids(
-                db,
-                scope_params=scope_params,
-                after_id=previous,
-                limit=settings.push_max_per_cycle,
-            )
-            if fresh_ids:
-                article_ids.update(fresh_ids)
-                fresh_ids_by_scope[scope_key] = fresh_ids
-                touched_scope_keys.append(scope_key)
-
-        subscription.alert_scopes_json = scopes
+        subscription.alert_scopes_json = dispatch.scopes_payload
         # Keep stable watermark by default; only advance after successful push.
-        subscription.last_notified_json = stable_watermarks
+        subscription.last_notified_json = dispatch.stable_watermarks
 
-        if not article_ids:
-            db.commit()
-            return outcome
-
-        payload = _build_payload(
-            db,
-            article_ids=sorted(article_ids, reverse=True),
-            scope_keys=sorted(set(touched_scope_keys)),
-        )
-        if not payload:
+        if not dispatch.payload:
             db.commit()
             return outcome
 
@@ -409,20 +475,21 @@ def _process_subscription_alerts(
         status, error_text = _send_push_notification(
             settings,
             subscription=subscription,
-            payload=payload,
+            payload=dispatch.payload,
         )
         record_push_delivery_duration(time.perf_counter() - started_at)
 
         now_utc = datetime.now(timezone.utc)
         if status == "success":
             outcome.sent += 1
-            for scope_key, fresh_ids in fresh_ids_by_scope.items():
-                advanced_watermarks[scope_key] = max(fresh_ids)
-            subscription.last_notified_json = advanced_watermarks
+            delivered_article_ids: list[int] = list(dispatch.payload.get("article_ids", []))
+            for scope_key, fresh_ids in dispatch.fresh_ids_by_scope.items():
+                dispatch.advanced_watermarks[scope_key] = max(fresh_ids)
+            subscription.last_notified_json = dispatch.advanced_watermarks
             subscription.failure_count = 0
             subscription.last_error = None
             subscription.last_success_at = now_utc
-            for chunk in iter_chunks(sorted(article_ids)):
+            for chunk in iter_chunks(sorted(delivered_article_ids)):
                 db.execute(
                     update(Article)
                     .where(

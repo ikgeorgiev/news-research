@@ -10,11 +10,10 @@ from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
     _reextract_purge_article_tickers,
-    load_raw_contexts,
+    load_article_maintenance_context,
 )
 from app.config import Settings
-from app.models import Article, ArticleTicker, RawFeedItem, Source
-from app.sources import PAGE_FETCH_CONFIGS
+from app.models import Article, RawFeedItem, Source
 from app.ticker_context import load_ticker_context
 
 
@@ -61,21 +60,9 @@ def remap_source_articles(
         ).limit(limit)
     ).all()
     article_ids = [row.id for row in rows]
-    ticker_rows_by_article: dict[int, dict[int, ArticleTicker]] = {
-        article_id: {} for article_id in article_ids
-    }
-    raw_contexts_by_article = {article_id: [] for article_id in article_ids}
-    if article_ids:
-        existing_rows = db.scalars(
-            select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
-        ).all()
-        for ticker_row in existing_rows:
-            ticker_rows_by_article.setdefault(ticker_row.article_id, {})[
-                ticker_row.ticker_id
-            ] = ticker_row
-        raw_contexts_by_article.update(
-            load_raw_contexts(db, article_ids, source_code=source_code)
-        )
+    raw_contexts_by_article, ticker_rows_by_article = (
+        load_article_maintenance_context(db, article_ids, source_code=source_code)
+    )
 
     processed = 0
     articles_with_hits = 0
@@ -94,7 +81,7 @@ def remap_source_articles(
         if not verified_hits:
             continue
         has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
-        existing_for_article = ticker_rows_by_article.setdefault(row.id, {})
+        existing_for_article = ticker_rows_by_article.get(row.id)
         outcome = _apply_revalidation(
             db,
             row,

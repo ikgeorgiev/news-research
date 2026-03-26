@@ -23,6 +23,22 @@ TRACKING_PARAM_EXACT = {
     "ocid",
 }
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+HTML_SCRIPT_STYLE_PATTERN = re.compile(
+    r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+HTML_NOISE_ELEMENT_PATTERN = re.compile(
+    r"<(?:nav|aside|footer)\b[^>]*>.*?</(?:nav|aside|footer)>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+HTML_SIDEBAR_DIV_OPEN_PATTERN = re.compile(
+    r"<div\b[^>]*\bclass=\"[^\"]*sidebar[^\"]*\"[^>]*>",
+    flags=re.IGNORECASE,
+)
+HTML_RELATED_NEWS_PATTERN = re.compile(
+    r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles)|Also\s+from\s+this\s+source)\b",
+    flags=re.IGNORECASE,
+)
 
 GENERAL_SOURCE_CODE = "businesswire"
 
@@ -54,6 +70,71 @@ def clean_summary_text(value: str | None) -> str | None:
     text = HTML_TAG_PATTERN.sub(" ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text or None
+
+
+def html_to_plain_text(html_text: str) -> str:
+    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
+    text = HTML_TAG_PATTERN.sub(" ", text)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def strip_sidebar_divs(html_text: str) -> str:
+    result: list[str] = []
+    i = 0
+    html_lower = html_text.lower()
+    for match in HTML_SIDEBAR_DIV_OPEN_PATTERN.finditer(html_text):
+        start = match.start()
+        if start < i:
+            continue
+        result.append(html_text[i:start])
+        depth = 1
+        j = match.end()
+        while j < len(html_text) and depth > 0:
+            div_open = html_lower.find("<div", j)
+            div_close = html_lower.find("</div>", j)
+            if div_close == -1:
+                j = len(html_text)
+                break
+            if div_open != -1 and div_open < div_close:
+                depth += 1
+                j = div_open + 4
+            else:
+                depth -= 1
+                j = div_close + 6
+        result.append(" ")
+        i = j
+    result.append(html_text[i:])
+    return "".join(result)
+
+
+def strip_noise_elements(html_text: str) -> str:
+    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
+    text = HTML_NOISE_ELEMENT_PATTERN.sub(" ", text)
+    text = strip_sidebar_divs(text)
+    related = HTML_RELATED_NEWS_PATTERN.search(text)
+    if related is not None:
+        text = text[: related.start() + 1]
+    return text
+
+
+def extract_article_body(html_text: str) -> str | None:
+    """Extract main article body with trafilatura when available."""
+    try:
+        import trafilatura
+
+        result = trafilatura.extract(
+            html_text,
+            include_tables=True,
+            include_comments=False,
+            include_links=False,
+            no_fallback=False,
+        )
+    except Exception:  # fault-isolation: broad catch intentional
+        return None
+    if result and len(result.strip()) > 50:
+        return result
+    return None
 
 
 def canonicalize_url(url: str) -> str:

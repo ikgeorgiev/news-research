@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.query_utils import active_ticker_mapped_exists, contains_literal_pattern
 
+GENERAL_UNMAPPED_PROVIDER = "Business Wire"
+
 
 def _normalized_ticker_symbols(
     *,
@@ -32,6 +34,184 @@ def _normalized_ticker_symbols(
         seen.add(symbol)
         normalized.append(symbol)
     return normalized
+
+
+def find_source_by_name(db: Session, source_name: str) -> Source | None:
+    normalized = source_name.strip()
+    if not normalized:
+        return None
+    return db.scalar(select(Source).where(func.lower(Source.name) == normalized.lower()))
+
+
+def source_id_by_name_subquery(source_name: str):
+    normalized = source_name.strip()
+    return select(Source.id).where(func.lower(Source.name) == normalized.lower())
+
+
+def article_has_any_raw_provenance(
+    *,
+    article_id_col=Article.id,
+):
+    return (
+        select(1)
+        .select_from(RawFeedItem)
+        .where(RawFeedItem.article_id == article_id_col)
+        .exists()
+    )
+
+
+def article_provider_name_matches(
+    provider_name: str,
+    *,
+    provider_name_col=Article.provider_name,
+):
+    return provider_name_col.ilike(
+        contains_literal_pattern(provider_name),
+        escape="\\",
+    )
+
+
+def article_source_exists(
+    *,
+    article_id_col=Article.id,
+    source_ids,
+):
+    return (
+        select(1)
+        .select_from(RawFeedItem)
+        .where(
+            and_(
+                RawFeedItem.article_id == article_id_col,
+                RawFeedItem.source_id.in_(source_ids),
+            )
+        )
+        .exists()
+    )
+
+
+def article_canonical_source_id(
+    *,
+    article_id_col=Article.id,
+    canonical_url_col=Article.canonical_url,
+):
+    return (
+        select(RawFeedItem.source_id)
+        .where(
+            and_(
+                RawFeedItem.article_id == article_id_col,
+                RawFeedItem.raw_link == canonical_url_col,
+            )
+        )
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def article_latest_source_id(
+    *,
+    article_id_col=Article.id,
+):
+    return (
+        select(RawFeedItem.source_id)
+        .where(RawFeedItem.article_id == article_id_col)
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def article_resolved_provider_name(
+    *,
+    article_id_col=Article.id,
+    canonical_url_col=Article.canonical_url,
+    fallback_provider_name_col=Article.provider_name,
+):
+    canonical_provider = (
+        select(Source.name)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(
+            and_(
+                RawFeedItem.article_id == article_id_col,
+                RawFeedItem.raw_link == canonical_url_col,
+            )
+        )
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    latest_provider = (
+        select(Source.name)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(RawFeedItem.article_id == article_id_col)
+        .order_by(RawFeedItem.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    return func.coalesce(
+        canonical_provider,
+        latest_provider,
+        fallback_provider_name_col,
+    )
+
+
+def mapped_or_provider_unmapped_condition(
+    provider_name: str,
+    *,
+    source_ids=None,
+    article_id_col=Article.id,
+    provider_name_col=Article.provider_name,
+):
+    mapped_exists = active_ticker_mapped_exists()
+    if source_ids is None:
+        return mapped_exists
+
+    has_any_raw = article_has_any_raw_provenance(article_id_col=article_id_col)
+    include_provider_exists = article_source_exists(
+        article_id_col=article_id_col,
+        source_ids=source_ids,
+    )
+    rawless_provider_match = article_provider_name_matches(
+        provider_name,
+        provider_name_col=provider_name_col,
+    )
+    return or_(
+        mapped_exists,
+        and_(~mapped_exists, include_provider_exists),
+        and_(~mapped_exists, ~has_any_raw, rawless_provider_match),
+    )
+
+
+def provider_filter_condition(
+    provider_name: str,
+    *,
+    source_ids=None,
+    article_id_col=Article.id,
+    canonical_url_col=Article.canonical_url,
+    provider_name_col=Article.provider_name,
+):
+    if source_ids is None:
+        return article_provider_name_matches(
+            provider_name,
+            provider_name_col=provider_name_col,
+        )
+
+    has_raw_provenance = article_has_any_raw_provenance(article_id_col=article_id_col)
+    canonical_source_id = article_canonical_source_id(
+        article_id_col=article_id_col,
+        canonical_url_col=canonical_url_col,
+    )
+    latest_source_id = article_latest_source_id(article_id_col=article_id_col)
+    provider_name_match = article_provider_name_matches(
+        provider_name,
+        provider_name_col=provider_name_col,
+    )
+    return or_(
+        func.coalesce(canonical_source_id, latest_source_id).in_(source_ids),
+        and_(~has_raw_provenance, provider_name_match),
+    )
 
 
 def build_article_query(
@@ -80,42 +260,15 @@ def build_article_query(
         pass  # Show all articles (including unmapped) — no filter needed
     elif include_unmapped_from_provider:
         include_name = include_unmapped_from_provider.strip()
-        include_source_row = db.scalar(
-            select(Source).where(func.lower(Source.name) == include_name.lower())
-        )
-        if include_source_row is None:
-            query = query.where(mapped_exists)
-        else:
-            include_provider_exists = (
-                select(1)
-                .select_from(RawFeedItem)
-                .where(
-                    and_(
-                        RawFeedItem.article_id == Article.id,
-                        RawFeedItem.source_id == include_source_row.id,
-                    )
-                )
-                .correlate(Article)
-                .exists()
-            )
-            has_any_raw = (
-                select(1)
-                .select_from(RawFeedItem)
-                .where(RawFeedItem.article_id == Article.id)
-                .correlate(Article)
-                .exists()
-            )
-            rawless_provider_match = Article.provider_name.ilike(
-                contains_literal_pattern(include_name),
-                escape="\\",
-            )
+        if include_name:
             query = query.where(
-                or_(
-                    mapped_exists,
-                    and_(~mapped_exists, include_provider_exists),
-                    and_(~mapped_exists, ~has_any_raw, rawless_provider_match),
+                mapped_or_provider_unmapped_condition(
+                    include_name,
+                    source_ids=source_id_by_name_subquery(include_name),
                 )
             )
+        else:
+            query = query.where(mapped_exists)
     else:
         query = query.where(mapped_exists)
 
@@ -132,56 +285,13 @@ def build_article_query(
     if provider:
         provider_text = provider.strip()
         if provider_text:
-            source_row = db.scalar(
-                select(Source).where(func.lower(Source.name) == provider_text.lower())
+            has_source = find_source_by_name(db, provider_text) is not None
+            query = query.where(
+                provider_filter_condition(
+                    provider_text,
+                    source_ids=source_id_by_name_subquery(provider_text) if has_source else None,
+                )
             )
-            if source_row is not None:
-                has_raw_provenance = (
-                    select(1)
-                    .select_from(RawFeedItem)
-                    .where(RawFeedItem.article_id == Article.id)
-                    .correlate(Article)
-                    .exists()
-                )
-                canonical_source_id = (
-                    select(RawFeedItem.source_id)
-                    .where(
-                        and_(
-                            RawFeedItem.article_id == Article.id,
-                            RawFeedItem.raw_link == Article.canonical_url,
-                        )
-                    )
-                    .order_by(RawFeedItem.id.desc())
-                    .limit(1)
-                    .correlate(Article)
-                    .scalar_subquery()
-                )
-                latest_source_id = (
-                    select(RawFeedItem.source_id)
-                    .where(RawFeedItem.article_id == Article.id)
-                    .order_by(RawFeedItem.id.desc())
-                    .limit(1)
-                    .correlate(Article)
-                    .scalar_subquery()
-                )
-                provider_name_match = Article.provider_name.ilike(
-                    contains_literal_pattern(provider_text),
-                    escape="\\",
-                )
-                query = query.where(
-                    or_(
-                        func.coalesce(canonical_source_id, latest_source_id)
-                        == source_row.id,
-                        and_(~has_raw_provenance, provider_name_match),
-                    )
-                )
-            else:
-                query = query.where(
-                    Article.provider_name.ilike(
-                        contains_literal_pattern(provider_text),
-                        escape="\\",
-                    )
-                )
 
     if q:
         q_text = q.strip()

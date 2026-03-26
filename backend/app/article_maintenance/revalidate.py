@@ -13,7 +13,8 @@ from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
     _reextract_purge_article_tickers,
-    load_raw_contexts,
+    load_article_maintenance_context,
+    stamp_article_ticker_version,
 )
 
 
@@ -49,14 +50,9 @@ def revalidate_stale_article_tickers(
     articles = db.scalars(select(Article).where(Article.id.in_(article_ids))).all()
     articles_by_id = {article.id: article for article in articles}
 
-    raw_contexts_by_article = load_raw_contexts(db, article_ids)
-
-    existing_rows_by_article: dict[int, dict[int, ArticleTicker]] = {}
-    at_rows = db.scalars(
-        select(ArticleTicker).where(ArticleTicker.article_id.in_(article_ids))
-    ).all()
-    for at_row in at_rows:
-        existing_rows_by_article.setdefault(at_row.article_id, {})[at_row.ticker_id] = at_row
+    raw_contexts_by_article, existing_rows_by_article = (
+        load_article_maintenance_context(db, article_ids)
+    )
 
     scanned = 0
     revalidated = 0
@@ -70,11 +66,11 @@ def revalidate_stale_article_tickers(
         scanned += 1
 
         raw_contexts = raw_contexts_by_article.get(article_id, [])
+        existing_for_article = existing_rows_by_article.get(article_id)
         if not raw_contexts:
             # No raw feed items (pruned by retention policy). Stamp version
             # so these rows don't stall the revalidation queue permanently.
-            for row in (existing_rows_by_article.get(article_id) or {}).values():
-                row.extraction_version = EXTRACTION_VERSION
+            stamp_article_ticker_version(existing_for_article)
             unchanged += 1
             continue
 
@@ -100,15 +96,14 @@ def revalidate_stale_article_tickers(
             verified_hits,
             _has_general_allowed_raw_provenance(raw_contexts),
             ticker_context.symbol_to_id,
-            existing_rows=existing_rows_by_article.get(article_id),
+            existing_rows=existing_for_article,
             prune_verified_hits=False,
             force_update=True,
         )
         # Stamp version on ALL rows for this article — including ones
         # not in verified_hits — so they stop being reselected while
         # keeping their mapping data intact (no prune).
-        for row in (existing_rows_by_article.get(article_id) or {}).values():
-            row.extraction_version = EXTRACTION_VERSION
+        stamp_article_ticker_version(existing_for_article)
         if outcome.action == "kept":
             if outcome.changed_mappings:
                 revalidated += 1

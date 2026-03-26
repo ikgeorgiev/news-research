@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
 
-from app.feed_runtime import PreparedFeedEntry
 from app.models import Article, RawFeedItem
 from app.pg_utils import hash_hex_to_signed_bigint
 from app.utils import sha256_str, to_json_safe
+
+if TYPE_CHECKING:
+    from app.article_ingest import PreparedFeedEntry
 
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -120,6 +123,75 @@ def _find_existing_raw_feed_item(
         .order_by(*order_by)
         .limit(1)
     )
+
+
+def _prefetch_recorded_raw_keys(
+    db: Session,
+    *,
+    source_id: int,
+    prepared_entries: list[PreparedFeedEntry],
+) -> tuple[set[str], set[tuple[str, datetime | None]]]:
+    if not prepared_entries:
+        return set(), set()
+
+    guids = {item.raw_guid for item in prepared_entries if item.raw_guid}
+    pairs_with_pub = {
+        (item.raw_link, item.raw_pub_date)
+        for item in prepared_entries
+        if item.raw_pub_date is not None
+    }
+    links_without_pub = {
+        item.raw_link
+        for item in prepared_entries
+        if item.raw_pub_date is None and item.raw_guid is None
+    }
+
+    existing_guids: set[str] = set()
+    if guids:
+        existing_guids = {
+            guid
+            for guid in db.scalars(
+                select(RawFeedItem.raw_guid).where(
+                    and_(
+                        RawFeedItem.source_id == source_id,
+                        RawFeedItem.article_id.is_not(None),
+                        RawFeedItem.raw_guid.in_(list(guids)),
+                    )
+                )
+            ).all()
+            if guid
+        }
+
+    existing_pairs: set[tuple[str, datetime | None]] = set()
+    if pairs_with_pub:
+        rows = db.execute(
+            select(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).where(
+                and_(
+                    RawFeedItem.source_id == source_id,
+                    RawFeedItem.article_id.is_not(None),
+                    tuple_(RawFeedItem.raw_link, RawFeedItem.raw_pub_date).in_(
+                        list(pairs_with_pub)
+                    ),
+                )
+            )
+        ).all()
+        existing_pairs = {
+            (str(link), pub_date) for link, pub_date in rows if link and pub_date
+        }
+    if links_without_pub:
+        rows = db.execute(
+            select(RawFeedItem.raw_link).where(
+                and_(
+                    RawFeedItem.source_id == source_id,
+                    RawFeedItem.article_id.is_not(None),
+                    RawFeedItem.raw_guid.is_(None),
+                    RawFeedItem.raw_link.in_(list(links_without_pub)),
+                )
+            )
+        ).all()
+        existing_pairs.update((str(link), None) for (link,) in rows if link)
+
+    return existing_guids, existing_pairs
 
 
 # ---------------------------------------------------------------------------
@@ -346,8 +418,9 @@ def _preserve_alt_feed_url(
     source_id: int,
     prepared: PreparedFeedEntry,
     feed_url: str,
+    existing_row: RawFeedItem | None = None,
 ) -> None:
-    row = _find_existing_raw_feed_item(
+    row = existing_row or _find_existing_raw_feed_item(
         db,
         source_id=source_id,
         raw_guid=prepared.raw_guid,
@@ -360,9 +433,8 @@ def _preserve_alt_feed_url(
 
     payload = dict(row.raw_payload_json or {})
     alt: list[str] = list(payload.get("_alt_feed_urls") or [])
-    if feed_url in alt:
-        return
-    alt.append(feed_url)
-    payload["_alt_feed_urls"] = sorted(set(alt))
-    row.raw_payload_json = payload
+    if feed_url not in alt:
+        alt.append(feed_url)
+        payload["_alt_feed_urls"] = sorted(set(alt))
+        row.raw_payload_json = payload
     row.fetched_at = datetime.now(timezone.utc)

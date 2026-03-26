@@ -32,6 +32,40 @@ def _require_push_runtime_enabled() -> str:
     return (settings.vapid_public_key or "").strip()
 
 
+def _validate_manage_token(
+    *,
+    subscription: PushSubscription,
+    submitted_manage_token: str | None,
+) -> str:
+    if not submitted_manage_token:
+        raise HTTPException(status_code=401, detail="Manage token is required for this subscription")
+
+    provided_hash = hash_manage_token(submitted_manage_token)
+    if not secrets.compare_digest(provided_hash, subscription.manage_token_hash):
+        raise HTTPException(status_code=401, detail="Invalid manage token")
+    return submitted_manage_token
+
+
+def _apply_subscription_update(
+    subscription: PushSubscription,
+    *,
+    endpoint: str,
+    p256dh: str,
+    auth: str,
+    expiration_time: int | None,
+    scopes: dict[str, object],
+    watermarks: dict[str, int],
+) -> None:
+    subscription.endpoint = endpoint
+    subscription.key_p256dh = p256dh
+    subscription.key_auth = auth
+    subscription.expiration_time = expiration_time
+    subscription.alert_scopes_json = scopes
+    subscription.last_notified_json = watermarks
+    subscription.active = True
+    subscription.last_error = None
+
+
 @push_router.get("/push/vapid-key", response_model=PushVapidKeyResponse)
 def get_push_vapid_key():
     settings = get_settings()
@@ -76,12 +110,10 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
         )
         db.add(subscription)
     else:
-        if not submitted_manage_token:
-            raise HTTPException(status_code=401, detail="Manage token is required for this subscription")
-        provided_hash = hash_manage_token(submitted_manage_token)
-        if not secrets.compare_digest(provided_hash, subscription.manage_token_hash):
-            raise HTTPException(status_code=401, detail="Invalid manage token")
-        manage_token = submitted_manage_token
+        manage_token = _validate_manage_token(
+            subscription=subscription,
+            submitted_manage_token=submitted_manage_token,
+        )
 
     next_watermarks, seeded = seed_last_notified_watermarks(
         db,
@@ -89,14 +121,15 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
         existing=subscription.last_notified_json if not created else None,
     )
 
-    subscription.endpoint = endpoint
-    subscription.key_p256dh = p256dh
-    subscription.key_auth = auth
-    subscription.expiration_time = payload.subscription.expiration_time
-    subscription.alert_scopes_json = scopes
-    subscription.last_notified_json = next_watermarks
-    subscription.active = True
-    subscription.last_error = None
+    _apply_subscription_update(
+        subscription,
+        endpoint=endpoint,
+        p256dh=p256dh,
+        auth=auth,
+        expiration_time=payload.subscription.expiration_time,
+        scopes=scopes,
+        watermarks=next_watermarks,
+    )
 
     try:
         db.commit()
@@ -108,17 +141,19 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
 
         created = False
         if submitted_manage_token is not None:
-            provided_hash = hash_manage_token(submitted_manage_token)
-            if not secrets.compare_digest(provided_hash, subscription.manage_token_hash):
-                raise HTTPException(status_code=401, detail="Invalid manage token")
-            manage_token = submitted_manage_token
-            subscription.key_p256dh = p256dh
-            subscription.key_auth = auth
-            subscription.expiration_time = payload.subscription.expiration_time
-            subscription.alert_scopes_json = scopes
-            subscription.last_notified_json = next_watermarks
-            subscription.active = True
-            subscription.last_error = None
+            manage_token = _validate_manage_token(
+                subscription=subscription,
+                submitted_manage_token=submitted_manage_token,
+            )
+            _apply_subscription_update(
+                subscription,
+                endpoint=endpoint,
+                p256dh=p256dh,
+                auth=auth,
+                expiration_time=payload.subscription.expiration_time,
+                scopes=scopes,
+                watermarks=next_watermarks,
+            )
             db.commit()
         else:
             manage_token = None

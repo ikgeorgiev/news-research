@@ -10,16 +10,7 @@ function renderUnreadBadge(active: boolean, count: number) {
   if (count <= 0) return null
 
   return (
-    <span
-      style={{
-        background: active ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.1)",
-        color: active ? "white" : "var(--text-secondary)",
-        fontSize: "0.75rem",
-        padding: "2px 8px",
-        borderRadius: "12px",
-        fontWeight: "normal",
-      }}
-    >
+    <span className={`unread-badge ${active ? "active" : ""}`}>
       {count}
     </span>
   )
@@ -106,29 +97,17 @@ export function WatchlistSidebar({
         className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
         onClick={() => selectWatchlist("all")}
         onContextMenu={(event) => handleWatchlistContextMenu(event, "all")}
-        style={{
-          fontWeight: "bold",
-          fontSize: "1.1rem",
-          marginBottom: "1rem",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
       >
         <span>All News</span>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <div className="watchlist-item-actions">
           <button
-            className="icon-button"
+            className={`icon-button icon-button-tight ${alertIncludeAllNews ? "icon-button-active" : ""}`}
             title={
               alertIncludeAllNews
                 ? "Disable push notifications for All News"
                 : "Enable push notifications for All News"
             }
             onClick={(event) => handleTogglePushScope("all", event)}
-            style={{
-              padding: "2px",
-              color: alertIncludeAllNews ? "var(--accent-blue)" : "var(--text-secondary)",
-            }}
           >
             <BellIcon active={alertIncludeAllNews} />
           </button>
@@ -136,14 +115,13 @@ export function WatchlistSidebar({
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="sidebar-section-header">
         <h2>Watchlists</h2>
         {!isCreatingWatchlist && (
           <button
-            className="icon-button"
+            className="icon-button icon-button-add"
             title="New Watchlist"
             onClick={() => setIsCreatingWatchlist(true)}
-            style={{ padding: "4px", fontSize: "1.2rem" }}
           >
             +
           </button>
@@ -160,38 +138,30 @@ export function WatchlistSidebar({
               className={`watchlist-item ${activeWatchlistId === watchlist.id ? "active" : ""}`}
               onClick={() => selectWatchlist(watchlist.id, watchlist)}
               onContextMenu={(event) => handleWatchlistContextMenu(event, watchlist.id)}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
             >
               {renamingWatchlistId === watchlist.id ? (
                 <input
                   autoFocus
-                  className="rename-input"
+                  className="rename-input rename-input-inline"
                   value={renameValue}
                   onChange={(event) => setRenameValue(event.target.value)}
                   onFocus={(event) => event.target.select()}
                   onBlur={handleFinishRename}
                   onKeyDown={handleRenameKeyDown}
                   onClick={(event) => event.stopPropagation()}
-                  style={{ flex: 1, fontSize: "0.9rem", padding: "2px 4px" }}
                 />
               ) : (
                 <span>{watchlist.name}</span>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div className="watchlist-item-actions">
                 <button
-                  className="icon-button"
+                  className={`icon-button icon-button-tight ${isPushScopeEnabled(watchlist.id) ? "icon-button-active" : ""}`}
                   title={
                     isPushScopeEnabled(watchlist.id)
                       ? `Disable push notifications for ${watchlist.name}`
                       : `Enable push notifications for ${watchlist.name}`
                   }
                   onClick={(event) => handleTogglePushScope(watchlist.id, event)}
-                  style={{
-                    padding: "2px",
-                    color: isPushScopeEnabled(watchlist.id)
-                      ? "var(--accent-blue)"
-                      : "var(--text-secondary)",
-                  }}
                 >
                   <BellIcon active={isPushScopeEnabled(watchlist.id)} />
                 </button>
@@ -201,13 +171,7 @@ export function WatchlistSidebar({
           )
         })}
         {customWatchlists.length === 0 && !isCreatingWatchlist && (
-          <p
-            style={{
-              fontSize: "0.85rem",
-              color: "var(--text-secondary)",
-              padding: "0 0.5rem",
-            }}
-          >
+          <p className="watchlist-empty-state">
             No custom watchlists yet.
           </p>
         )}
@@ -217,25 +181,19 @@ export function WatchlistSidebar({
         <form
           className="create-watchlist-form"
           onSubmit={handleCreateWatchlist}
-          style={{
-            marginTop: "1rem",
-            padding: "0.5rem",
-            background: "var(--bg-hover)",
-            borderRadius: "4px",
-          }}
         >
           <input
             autoFocus
+            className="watchlist-form-field"
             placeholder="Watchlist Name"
             value={newWatchlistName}
             onChange={(event) => setNewWatchlistName(event.target.value)}
-            style={{ width: "100%", marginBottom: "0.5rem" }}
           />
           <select
             aria-label="Watchlist Provider"
+            className="watchlist-form-field"
             value={newWatchlistProvider}
             onChange={(event) => setNewWatchlistProvider(event.target.value)}
-            style={{ width: "100%", marginBottom: "0.5rem" }}
           >
             <option value="">Any provider</option>
             {providerOptions.map((provider) => (
@@ -246,42 +204,31 @@ export function WatchlistSidebar({
           </select>
           <input
             aria-label="Watchlist Query"
+            className="watchlist-form-field"
             placeholder="Optional search query"
             value={newWatchlistQuery}
             onChange={(event) => setNewWatchlistQuery(event.target.value)}
-            style={{ width: "100%", marginBottom: "0.5rem" }}
           />
-          <div
-            className="ticker-selector"
-            style={{
-              maxHeight: "150px",
-              overflowY: "auto",
-              marginBottom: "0.5rem",
-              border: "1px solid var(--border-color)",
-              borderRadius: "4px",
-              padding: "4px",
-            }}
-          >
+          <div className="ticker-selector">
             {tickers.map((tickerItem) => (
               <label
                 key={tickerItem.symbol}
-                style={{ display: "block", fontSize: "0.85rem", cursor: "pointer", padding: "2px 0" }}
+                className="ticker-selector-option"
               >
                 <input
                   type="checkbox"
                   checked={selectedTickers.has(tickerItem.symbol)}
                   onChange={() => toggleTickerSelection(tickerItem.symbol)}
-                  style={{ marginRight: "6px" }}
+                  className="ticker-selector-checkbox"
                 />
                 {tickerItem.symbol}
               </label>
             ))}
           </div>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div className="watchlist-form-actions">
             <button
               type="submit"
-              className="primary"
-              style={{ flex: 1, padding: "4px" }}
+              className="primary watchlist-form-button"
               disabled={
                 !newWatchlistName.trim()
                 || (
@@ -295,8 +242,8 @@ export function WatchlistSidebar({
             </button>
             <button
               type="button"
+              className="watchlist-form-button"
               onClick={() => setIsCreatingWatchlist(false)}
-              style={{ flex: 1, padding: "4px" }}
             >
               Cancel
             </button>

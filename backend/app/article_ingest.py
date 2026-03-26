@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 from app.article_maintenance import _upsert_article_tickers
 from app.constants import MIN_PERSIST_CONFIDENCE, TITLE_DEDUP_WINDOW_HOURS
 from app.feed_runtime import (
-    PreparedFeedEntry,
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
     _get_or_create_feed_poll_state,
     _mark_feed_failure_backoff,
-    _prefetch_recorded_raw_keys,
     _reset_feed_failure_backoff,
     _update_feed_http_cache,
 )
@@ -30,6 +28,7 @@ from app.pg_utils import hash_hex_to_signed_bigint
 from app.raw_feed_items import (
     _acquire_raw_item_locks,
     _find_existing_raw_feed_item,
+    _prefetch_recorded_raw_keys,
     _persist_raw_feed_item,
     _preserve_alt_feed_url,
 )
@@ -282,6 +281,19 @@ class EntryResult:
     raw_pair: tuple[str, datetime | None] | None = None
 
 
+@dataclass(slots=True)
+class PreparedFeedEntry:
+    entry: dict
+    raw_title: str
+    title: str
+    raw_link: str
+    article_url: str
+    is_exact_source_url: bool
+    raw_pub_date: datetime | None
+    published_at: datetime
+    raw_guid: str | None
+
+
 def _prepare_feed_entries(
     entries: list,
     now_utc: datetime,
@@ -392,17 +404,13 @@ def _process_single_entry(
         if existing_raw is not None and not allow_exact_url_refresh:
             # Record this feed_url as an alternate so maintenance can
             # recover ticker context from all Yahoo ticker feeds.
-            if (
-                existing_raw.feed_url
-                and existing_raw.feed_url != feed_url
-            ):
-                payload = dict(existing_raw.raw_payload_json or {})
-                alt: list[str] = list(payload.get("_alt_feed_urls") or [])
-                if feed_url not in alt:
-                    alt.append(feed_url)
-                    payload["_alt_feed_urls"] = sorted(set(alt))
-                    existing_raw.raw_payload_json = payload
-                existing_raw.fetched_at = datetime.now(timezone.utc)
+            _preserve_alt_feed_url(
+                db,
+                source_id=source.id,
+                prepared=prepared,
+                feed_url=feed_url,
+                existing_row=existing_raw,
+            )
             return result
 
         raw_summary = (

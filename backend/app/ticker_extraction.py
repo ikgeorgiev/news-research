@@ -4,13 +4,8 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from functools import lru_cache
-from html import unescape
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qs, urlparse
 
-import httpx
-
-from app import http_client
 from app.constants import (
     CONFIDENCE_CONTEXT,
     CONFIDENCE_EXCHANGE,
@@ -22,13 +17,21 @@ from app.constants import (
     MIN_PERSIST_CONFIDENCE,
     NO_KEYWORDS_CONFIDENCE,
 )
-from app.utils import HTML_TAG_PATTERN
+from app.ticker_context import (
+    _build_symbol_keywords as _build_symbol_keywords_impl,
+    _text_matches_validation_keywords as _text_matches_validation_keywords_impl,
+)
 from app.sources import (
     POLICY_GENERAL_ALLOWED,
     POLICY_SCOPED_CONTEXT_REQUIRED,
     SourcePageConfig,
+    _canonical_businesswire_article_url as _canonical_businesswire_article_url_impl,
+    _fetch_source_page_html as _fetch_source_page_html_impl,
+    _is_businesswire_article_url as _is_businesswire_article_url_impl,
+    _is_source_article_url as _is_source_article_url_impl,
     get_source_policy,
 )
+from app.utils import extract_article_body, html_to_plain_text, strip_noise_elements
 
 
 SOURCE_PAGE_HEADERS = {
@@ -44,21 +47,6 @@ EXCHANGE_PATTERN = re.compile(
 )
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
-HTML_SCRIPT_STYLE_PATTERN = re.compile(
-    r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", flags=re.IGNORECASE | re.DOTALL
-)
-HTML_NOISE_ELEMENT_PATTERN = re.compile(
-    r"<(?:nav|aside|footer)\b[^>]*>.*?</(?:nav|aside|footer)>",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-HTML_SIDEBAR_DIV_OPEN_PATTERN = re.compile(
-    r"<div\b[^>]*\bclass=\"[^\"]*sidebar[^\"]*\"[^>]*>",
-    flags=re.IGNORECASE,
-)
-HTML_RELATED_NEWS_PATTERN = re.compile(
-    r">\s*(?:More\s+News\s+From|Related\s+(?:News|Press\s+Releases|Articles)|Also\s+from\s+this\s+source)\b",
-    flags=re.IGNORECASE,
-)
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
     r"<td[^>]*>(?:\s|<[^>]+>)*([A-Z][A-Z0-9\.\-]{0,9})(?:\s|<[^>]+>)*</td>",
     flags=re.IGNORECASE,
@@ -97,222 +85,20 @@ AMBIGUOUS_TOKEN_SYMBOLS = {
     "IDE",
 }
 
-_FUND_KEYWORD_STOPWORDS = frozenset(
-    {
-        "fund",
-        "trust",
-        "income",
-        "bond",
-        "municipal",
-        "muni",
-        "high",
-        "yield",
-        "total",
-        "return",
-        "global",
-        "equity",
-        "premium",
-        "credit",
-        "capital",
-        "investment",
-        "investments",
-        "management",
-        "advisors",
-        "advisers",
-        "asset",
-        "securities",
-        "opportunities",
-        "opportunity",
-        "strategic",
-        "strategy",
-        "strategies",
-        "select",
-        "quality",
-        "real",
-        "enhanced",
-        "diversified",
-        "dynamic",
-        "value",
-        "growth",
-        "limited",
-        "duration",
-        "term",
-        "assets",
-        "corp",
-        "corporation",
-        "company",
-        "inc",
-        "llc",
-        "llp",
-        "the",
-        "and",
-        "of",
-        "for",
-        "new",
-        "rate",
-        "floating",
-        "short",
-        "first",
-    }
-)
-_SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
-    {
-        "ag",
-        "co",
-        "ii",
-        "iii",
-        "inc",
-        "llc",
-        "llp",
-        "lp",
-        "ltd",
-        "plc",
-        "pte",
-        "sa",
-    }
-)
-_ALLOWED_TWO_CHAR_SPONSOR_KEYWORDS = frozenset({"c1"})
-
 _source_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
 _source_page_cache_lock = threading.Lock()
-
-
-def _is_short_sponsor_keyword(
-    raw_word: str, cleaned: str, *, is_leading_sponsor_word: bool
-) -> bool:
-    raw_clean = raw_word.strip(".,;()\"'")
-    if len(cleaned) < 2 or len(cleaned) > 3:
-        return False
-    if cleaned in _FUND_KEYWORD_STOPWORDS:
-        return False
-    if cleaned in _SHORT_SPONSOR_KEYWORD_STOPWORDS:
-        return False
-    if not raw_clean.isalnum():
-        return False
-    if not any(char.isalpha() for char in raw_clean):
-        return False
-    if raw_clean.upper() != raw_clean:
-        return False
-    if len(cleaned) == 2:
-        return cleaned in _ALLOWED_TWO_CHAR_SPONSOR_KEYWORDS
-    return is_leading_sponsor_word
-
-
-@lru_cache(maxsize=4096)
-def _validation_keyword_pattern(keyword: str) -> re.Pattern[str]:
-    return re.compile(
-        rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
-    )
 
 
 def _text_matches_validation_keywords(
     text_lower: str, keywords: frozenset[str]
 ) -> bool:
-    matched_keywords = [
-        keyword
-        for keyword in keywords
-        if _validation_keyword_pattern(keyword).search(text_lower) is not None
-    ]
-    if not matched_keywords:
-        return False
-    if any(" " in keyword for keyword in matched_keywords):
-        return True
-    if any(len(keyword) <= 3 for keyword in matched_keywords):
-        return True
-    return len(set(matched_keywords)) >= 2
-
-
-def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:
-    if not raw_value:
-        return frozenset()
-    return frozenset(
-        keyword
-        for keyword in (part.strip().lower() for part in raw_value.split(","))
-        if keyword
-    )
+    return _text_matches_validation_keywords_impl(text_lower, keywords)
 
 
 def _build_symbol_keywords(
     ticker_rows: list,
 ) -> dict[str, frozenset[str]]:
-    result: dict[str, frozenset[str]] = {}
-    for row in ticker_rows:
-        symbol = row[1]
-        symbol_lower = symbol.lower()
-        fund_name = row[2] if len(row) > 2 else None
-        sponsor = row[3] if len(row) > 3 else None
-        validation_kw_raw = row[4] if len(row) > 4 else None
-
-        override_keywords = _normalize_validation_keywords(validation_kw_raw)
-        if override_keywords:
-            result[symbol.upper()] = override_keywords
-            continue
-
-        keywords: set[str] = set()
-        cleaned_fund_words: list[str] = []
-        if fund_name:
-            word_supports_phrase: list[bool] = []
-            for idx, raw_word in enumerate(fund_name.split()):
-                cleaned = raw_word.strip(".,;()\"'").lower()
-                if cleaned == symbol_lower:
-                    continue
-                cleaned_fund_words.append(cleaned)
-                is_short_keyword = _is_short_sponsor_keyword(
-                    raw_word,
-                    cleaned,
-                    is_leading_sponsor_word=idx == 0,
-                )
-                is_distinctive_keyword = (
-                    len(cleaned) >= 4
-                    and cleaned not in _FUND_KEYWORD_STOPWORDS
-                )
-                if is_distinctive_keyword:
-                    keywords.add(cleaned)
-                elif is_short_keyword:
-                    keywords.add(cleaned)
-                word_supports_phrase.append(is_distinctive_keyword or is_short_keyword)
-            for idx in range(len(cleaned_fund_words) - 1):
-                if not (word_supports_phrase[idx] or word_supports_phrase[idx + 1]):
-                    continue
-                keywords.add(
-                    f"{cleaned_fund_words[idx]} {cleaned_fund_words[idx + 1]}"
-                )
-        if sponsor:
-            sponsor_distinctive_words: list[str] = []
-            for idx, raw_word in enumerate(sponsor.split()):
-                cleaned = raw_word.strip(".,;()\"'").lower()
-                if cleaned == symbol_lower:
-                    continue
-                if _is_short_sponsor_keyword(
-                    raw_word,
-                    cleaned,
-                    is_leading_sponsor_word=idx == 0,
-                ):
-                    keywords.add(cleaned)
-                elif (
-                    len(cleaned) >= 4
-                    and cleaned not in _FUND_KEYWORD_STOPWORDS
-                ):
-                    sponsor_distinctive_words.append(cleaned)
-
-            sponsor_words = [
-                word.strip(".,;()\"'").lower()
-                for word in sponsor.split()
-            ]
-            sponsor_words = [word for word in sponsor_words if word]
-            brand_words: list[str] = []
-            for idx, sponsor_word in enumerate(sponsor_words):
-                if idx < len(cleaned_fund_words) and cleaned_fund_words[idx] == sponsor_word:
-                    brand_words.append(sponsor_word)
-                else:
-                    break
-            if len(brand_words) >= 2:
-                keywords.add(" ".join(brand_words))
-            elif not keywords and len(sponsor_distinctive_words) == 2:
-                keywords.add(" ".join(sponsor_distinctive_words))
-
-        result[symbol.upper()] = frozenset(keywords)
-    return result
+    return _build_symbol_keywords_impl(ticker_rows)
 
 
 def _parse_context_symbols(feed_url: str) -> list[str]:
@@ -326,71 +112,33 @@ def _parse_context_symbols(feed_url: str) -> list[str]:
     return symbols
 
 
-def _canonical_article_url(url: str) -> str:
-    parsed = urlparse(url)
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
-
-
 def _is_source_article_url(url: str, hostname_suffix: str) -> bool:
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    hostname = (parsed.hostname or "").lower()
-    if scheme not in {"http", "https"} or not hostname:
-        return False
-    return hostname == hostname_suffix or hostname.endswith("." + hostname_suffix)
+    return _is_source_article_url_impl(url, hostname_suffix)
 
 
 def _canonical_businesswire_article_url(url: str) -> str:
-    return _canonical_article_url(url)
+    return _canonical_businesswire_article_url_impl(url)
 
 
 def _is_businesswire_article_url(url: str) -> bool:
-    return _is_source_article_url(url, "businesswire.com")
-
-
-def _cache_source_page(url: str, fetched_at: float, html_text: str | None) -> None:
-    with _source_page_cache_lock:
-        _source_page_cache[url] = (fetched_at, html_text)
-        _source_page_cache.move_to_end(url)
-        while len(_source_page_cache) > SOURCE_PAGE_CACHE_MAX_ITEMS:
-            _source_page_cache.popitem(last=False)
+    return _is_businesswire_article_url_impl(url)
 
 
 def _fetch_source_page_html(
     url: str, timeout_seconds: int, config: SourcePageConfig
 ) -> str | None:
-    fetch_url = _canonical_article_url(url)
-    if not _is_source_article_url(fetch_url, config.hostname_suffix):
-        return None
-
-    now = time.time()
-    with _source_page_cache_lock:
-        cached = _source_page_cache.get(fetch_url)
-        if cached is not None:
-            fetched_at, cached_html = cached
-            ttl_seconds = (
-                SOURCE_PAGE_CACHE_TTL_SECONDS
-                if cached_html is not None
-                else SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS
-            )
-            if now - fetched_at <= ttl_seconds:
-                _source_page_cache.move_to_end(fetch_url)
-                return cached_html
-
-    html_text: str | None = None
-    try:
-        response = http_client.get_http_client().get(
-            fetch_url,
-            timeout=timeout_seconds,
-            headers=SOURCE_PAGE_HEADERS,
-        )
-        if response.is_success and response.text:
-            html_text = response.text
-    except (httpx.RequestError, httpx.HTTPStatusError):
-        html_text = None
-
-    _cache_source_page(fetch_url, time.time(), html_text)
-    return html_text
+    return _fetch_source_page_html_impl(
+        url,
+        timeout_seconds,
+        config,
+        cache=_source_page_cache,
+        cache_lock=_source_page_cache_lock,
+        headers=SOURCE_PAGE_HEADERS,
+        cache_ttl_seconds=SOURCE_PAGE_CACHE_TTL_SECONDS,
+        failure_cache_ttl_seconds=SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS,
+        cache_max_items=SOURCE_PAGE_CACHE_MAX_ITEMS,
+        now_fn=time.time,
+    )
 
 
 def _extract_table_cell_symbols_from_html(
@@ -407,68 +155,15 @@ def _extract_table_cell_symbols_from_html(
 
 
 def _html_to_plain_text(html_text: str) -> str:
-    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
-    text = HTML_TAG_PATTERN.sub(" ", text)
-    text = unescape(text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _strip_sidebar_divs(html_text: str) -> str:
-    result: list[str] = []
-    i = 0
-    html_lower = html_text.lower()
-    for match in HTML_SIDEBAR_DIV_OPEN_PATTERN.finditer(html_text):
-        start = match.start()
-        if start < i:
-            continue
-        result.append(html_text[i:start])
-        depth = 1
-        j = match.end()
-        while j < len(html_text) and depth > 0:
-            div_open = html_lower.find("<div", j)
-            div_close = html_lower.find("</div>", j)
-            if div_close == -1:
-                j = len(html_text)
-                break
-            if div_open != -1 and div_open < div_close:
-                depth += 1
-                j = div_open + 4
-            else:
-                depth -= 1
-                j = div_close + 6
-        result.append(" ")
-        i = j
-    result.append(html_text[i:])
-    return "".join(result)
+    return html_to_plain_text(html_text)
 
 
 def _strip_noise_elements(html_text: str) -> str:
-    text = HTML_SCRIPT_STYLE_PATTERN.sub(" ", html_text)
-    text = HTML_NOISE_ELEMENT_PATTERN.sub(" ", text)
-    text = _strip_sidebar_divs(text)
-    related = HTML_RELATED_NEWS_PATTERN.search(text)
-    if related is not None:
-        text = text[: related.start() + 1]
-    return text
+    return strip_noise_elements(html_text)
 
 
 def _extract_article_body(html_text: str) -> str | None:
-    """Extract main article body with trafilatura when available."""
-    try:
-        import trafilatura
-
-        result = trafilatura.extract(
-            html_text,
-            include_tables=True,
-            include_comments=False,
-            include_links=False,
-            no_fallback=False,
-        )
-    except Exception:  # fault-isolation: broad catch intentional
-        return None
-    if result and len(result.strip()) > 50:
-        return result
-    return None
+    return extract_article_body(html_text)
 
 
 def _extract_source_fallback_tickers(

@@ -1,5 +1,14 @@
 import { NewsItem, Watchlist } from "@/lib/types"
 
+export const GENERAL_NEWS_PROVIDER = "Business Wire"
+
+export const STATIC_PROVIDER_OPTIONS = [
+  "Yahoo Finance",
+  "PR Newswire",
+  "GlobeNewswire",
+  GENERAL_NEWS_PROVIDER,
+]
+
 export function toSafeExternalUrl(url: string | null | undefined): string | null {
   if (!url) return null
   try {
@@ -86,15 +95,39 @@ export function buildFetchParams(
     fetchTickers = [...activeWatchlist.tickers]
   }
 
-  const hasBusinessWireProvider =
-    (activeWatchlist?.provider || "").trim().toLowerCase() === "business wire"
+  const watchlistParams = buildWatchlistQueryParams(activeWatchlist)
   const includeGeneralFromProvider =
-    !fetchTickers && (activeWatchlistId === "all" || hasBusinessWireProvider)
-      ? "Business Wire"
-      : undefined
+    !fetchTickers && activeWatchlistId === "all"
+      ? GENERAL_NEWS_PROVIDER
+      : !fetchTickers
+        ? watchlistParams.includeUnmappedFromProvider
+        : undefined
   return {
     fetchTickers,
     includeGeneralFromProvider,
+  }
+}
+
+export function isGeneralNewsProvider(provider: string | null | undefined): boolean {
+  return (provider || "").trim().toLowerCase() === GENERAL_NEWS_PROVIDER.toLowerCase()
+}
+
+export function buildWatchlistQueryParams(watchlist: Watchlist | undefined): {
+  tickers: string[] | undefined
+  provider: string | undefined
+  q: string | undefined
+  includeUnmappedFromProvider: string | undefined
+} {
+  const tickers = watchlist?.tickers.length ? [...watchlist.tickers] : undefined
+  const provider = watchlist?.provider?.trim() || undefined
+  const q = watchlist?.q?.trim() || undefined
+
+  return {
+    tickers,
+    provider,
+    q,
+    includeUnmappedFromProvider:
+      !tickers && isGeneralNewsProvider(provider) ? GENERAL_NEWS_PROVIDER : undefined,
   }
 }
 
