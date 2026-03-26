@@ -14,7 +14,8 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $repoRoot "backend"
 $tickersCsv = Join-Path $repoRoot "data\\cef_tickers.csv"
 
-# Local dev defaults so backend can run outside Docker without extra setup.
+# Root .env is the canonical app env file. This script only overrides the
+# values that need different local-dev behavior from Docker defaults.
 $env:DATABASE_URL = "postgresql+psycopg://cef:cef@${DbHost}:$DbPort/cef_news"
 $env:TICKERS_CSV_PATH = $tickersCsv
 $env:CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3005,http://127.0.0.1:3005"

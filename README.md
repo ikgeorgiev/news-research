@@ -49,6 +49,14 @@ This is the primary workflow for local development:
 cp .env.example .env
 ```
 
+The repo root `.env` is the single canonical env file for:
+
+- local backend settings
+- local frontend settings
+- Docker Compose
+
+There is no separate `backend/.env` runtime file anymore.
+
 ### 2) Start DB only
 
 ```powershell
@@ -75,10 +83,11 @@ cp .env.example .env
 Script notes:
 
 - `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
-- `dev-backend.ps1` uses `backend/.venv`, sets local env defaults (`localhost:5433` database, local ticker CSV), installs deps if key packages are missing (`uvicorn`, `alembic`, `httpx`), and creates the target DB if absent.
+- `dev-backend.ps1` uses `backend/.venv`, reads config from the repo root `.env`, overrides the DB/ticker/CORS values needed for local dev, installs deps if key packages are missing (`uvicorn`, `alembic`, `httpx`), and creates the target DB if absent.
 - `dev-backend.ps1` runs `python migrate.py` before starting the API so local schema stays aligned with the app.
 - If a local database already has the pre-Alembic schema, the migration bootstrap stamps it at the baseline revision and then applies future migrations normally.
 - `dev-frontend.ps1` uses `frontend/node_modules` and sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
+- If `ADMIN_API_KEY` is blank in `.env`, `dev-backend.ps1` generates one automatically for that local run.
 - You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
 
 ## Secondary Path: Full Docker App Startup
@@ -253,6 +262,8 @@ Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wi
 `GET /api/v1/tickers?q=` does case-insensitive prefix matching on the ticker symbol.
 
 Admin endpoints require the `X-API-Key` header and `ADMIN_API_KEY` to be configured.
+For local `.\dev-backend.ps1` runs, leaving `ADMIN_API_KEY` blank is fine because the script generates one automatically.
+For Docker/manual runs, set a stable value in `.env` if you need admin endpoints.
 
 Push endpoints require Web Push configuration in `.env`:
 
