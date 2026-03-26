@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import threading
 from typing import Any
 
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
 from app.article_ingest import ingest_feed
+from app.database import Base
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.utils import sha256_str
 
@@ -183,3 +188,55 @@ def seed_article_with_raw(
     db.commit()
     db.refresh(article)
     return article, ticker
+
+
+def build_sqlite_session_factory(db_path: Path) -> tuple[Any, sessionmaker[Session]]:
+    """Create a file-backed SQLite session factory suitable for multi-session tests."""
+    if db_path.exists():
+        db_path.unlink()
+    engine = create_engine(
+        f"sqlite:///{db_path.as_posix()}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    Base.metadata.create_all(bind=engine)
+    return engine, sessionmaker(autoflush=False, autocommit=False, bind=engine)
+
+
+def run_concurrent_ingests(
+    session_factory: sessionmaker[Session],
+    jobs: list[dict[str, Any]],
+) -> list[dict]:
+    """Run multiple ``call_ingest`` jobs in parallel using separate sessions."""
+    barrier = threading.Barrier(len(jobs))
+    results: list[dict | None] = [None] * len(jobs)
+    errors: list[BaseException | None] = [None] * len(jobs)
+
+    def worker(index: int, job: dict[str, Any]) -> None:
+        db = session_factory()
+        try:
+            source = db.get(Source, job["source_id"])
+            if source is None:
+                raise RuntimeError(f"Source id {job['source_id']} not found")
+            barrier.wait(timeout=5)
+            overrides = dict(job.get("overrides", {}))
+            results[index] = call_ingest(db, source, job["feed_url"], **overrides)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            errors[index] = exc
+        finally:
+            db.close()
+
+    threads = [
+        threading.Thread(target=worker, args=(idx, job), daemon=True)
+        for idx, job in enumerate(jobs)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    if any(thread.is_alive() for thread in threads):
+        raise RuntimeError("Concurrent ingest worker did not finish in time")
+    for error in errors:
+        if error is not None:
+            raise error
+    return [result for result in results if result is not None]

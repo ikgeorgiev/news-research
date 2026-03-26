@@ -26,6 +26,10 @@ class Settings(BaseSettings):
         le=32,
         description="Max parallel workers for feed ingestion (Postgres only).",
     )
+    ingestion_parallel_yahoo: bool = Field(
+        default=False,
+        description="Allow Yahoo feed chunks to run concurrently with each other.",
+    )
     ingestion_enable_conditional_get: bool = Field(
         default=True,
         description="Enable RSS conditional GET (ETag/Last-Modified) to speed up no-op cycles.",

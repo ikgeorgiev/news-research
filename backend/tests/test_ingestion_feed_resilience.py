@@ -9,7 +9,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.article_ingest import ingest_feed
+from app.article_ingest import _preserve_alt_feed_url, ingest_feed
 from app.article_maintenance import (
     _upsert_article_tickers,
     dedupe_articles_by_title,
@@ -37,10 +37,12 @@ from app.models import (
     Ticker,
 )
 from app.constants import EXTRACTION_VERSION
-from app.utils import sha256_str
+from app.utils import parse_datetime, sha256_str
 from tests.helpers import (
+    build_sqlite_session_factory,
     FakeRssResponse,
     call_ingest,
+    run_concurrent_ingests,
     seed_article,
     seed_article_with_raw,
     seed_source,
@@ -280,6 +282,12 @@ def test_ingest_feed_refreshes_undated_guidless_exact_url_rows(db_session, stub_
         known_symbols={"UTF"},
         symbol_to_id={"UTF": ticker.id},
     )
+    first_row = db.scalar(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+    )
 
     stub_feed_io([updated_entry])
     second = call_ingest(
@@ -303,6 +311,8 @@ def test_ingest_feed_refreshes_undated_guidless_exact_url_rows(db_session, stub_
     assert article.summary == updated_entry["summary"]
     assert len(raw_rows) == 1
     assert raw_rows[0].raw_pub_date is None
+    assert first_row is not None
+    assert raw_rows[0].id == first_row.id
 
 
 def test_ingest_feed_matches_legacy_undated_guidless_rows(db_session, stub_feed_io):
@@ -355,6 +365,593 @@ def test_ingest_feed_matches_legacy_undated_guidless_rows(db_session, stub_feed_
     assert len(raw_rows) == 1
     assert raw_rows[0].id == legacy_row.id
     assert raw_rows[0].raw_pub_date is None
+
+
+def test_ingest_feed_same_guid_different_feed_reuses_single_raw_row(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(db)
+    feed_entry = {
+        "id": "guid-shared",
+        "guid": "guid-shared",
+        "title": "Fund update",
+        "link": "https://example.com/shared-story",
+        "summary": "Summary text",
+        "published": "2026-01-01T00:00:00Z",
+    }
+    first_feed_url = "https://example.com/feed-a.xml"
+    second_feed_url = "https://example.com/feed-b.xml"
+
+    stub_feed_io([feed_entry])
+    first = call_ingest(db, source, first_feed_url)
+    first_row = db.scalar(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+    )
+
+    stub_feed_io([feed_entry])
+    second = call_ingest(db, source, second_feed_url)
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert first_row is not None
+    assert len(raw_rows) == 1
+    assert raw_rows[0].id == first_row.id
+    assert raw_rows[0].feed_url == first_feed_url
+    assert raw_rows[0].raw_guid == "guid-shared"
+    alt = (raw_rows[0].raw_payload_json or {}).get("_alt_feed_urls") or []
+    assert second_feed_url in alt
+
+
+def test_preserve_alt_feed_url_refreshes_fetched_at_for_prune(db_session):
+    db = db_session
+    source = seed_source(db)
+    article = seed_article(
+        db,
+        canonical_url="https://example.com/shared-story",
+        title="Fund update",
+        summary="Summary text",
+    )
+    stale_time = datetime.now(timezone.utc) - timedelta(days=120)
+    row = RawFeedItem(
+        source_id=source.id,
+        article_id=article.id,
+        feed_url="https://example.com/feed-a.xml",
+        raw_guid="guid-shared",
+        raw_title="Fund update",
+        raw_link="https://example.com/shared-story",
+        raw_pub_date=parse_datetime("2026-01-01T00:00:00Z"),
+        raw_payload_json={"title": "Fund update", "link": "https://example.com/shared-story"},
+        fetched_at=stale_time,
+    )
+    db.add(row)
+    db.commit()
+
+    prepared = SimpleNamespace(
+        raw_guid="guid-shared",
+        raw_link="https://example.com/shared-story",
+        raw_pub_date=parse_datetime("2026-01-01T00:00:00Z"),
+    )
+
+    _preserve_alt_feed_url(
+        db,
+        source_id=source.id,
+        prepared=prepared,
+        feed_url="https://example.com/feed-b.xml",
+    )
+    db.commit()
+
+    refreshed = db.scalar(select(RawFeedItem).where(RawFeedItem.id == row.id))
+    assert refreshed is not None
+    assert refreshed.fetched_at is not None
+    refreshed_at = refreshed.fetched_at
+    if refreshed_at.tzinfo is None:
+        refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
+    assert refreshed_at > stale_time
+
+    deleted = prune_raw_feed_items(
+        db,
+        retention_days=30,
+        batch_size=100,
+        max_batches=10,
+    )
+    remaining = db.scalar(select(RawFeedItem).where(RawFeedItem.id == row.id))
+    alt = (remaining.raw_payload_json or {}).get("_alt_feed_urls") if remaining else []
+
+    assert deleted == 0
+    assert remaining is not None
+    assert "https://example.com/feed-b.xml" in (alt or [])
+
+
+def test_ingest_feed_same_link_and_pubdate_different_guid_reuses_single_raw_row(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(db)
+    feed_url = "https://example.com/feed.xml"
+    first_entry = {
+        "id": "guid-a",
+        "guid": "guid-a",
+        "title": "Fund update",
+        "link": "https://example.com/shared-story",
+        "summary": "Summary text",
+        "published": "2026-01-01T00:00:00Z",
+    }
+    second_entry = {
+        "id": "guid-b",
+        "guid": "guid-b",
+        "title": "Fund update",
+        "link": "https://example.com/shared-story",
+        "summary": "Updated summary text",
+        "published": "2026-01-01T00:00:00Z",
+    }
+
+    stub_feed_io([first_entry])
+    first = call_ingest(db, source, feed_url)
+    first_row = db.scalar(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+    )
+
+    stub_feed_io([second_entry])
+    second = call_ingest(db, source, feed_url)
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert first_row is not None
+    assert len(raw_rows) == 1
+    assert raw_rows[0].id == first_row.id
+    assert raw_rows[0].raw_guid == "guid-a"
+    assert raw_rows[0].raw_payload_json["summary"] == "Summary text"
+
+
+def test_concurrent_yahoo_mirror_ingests_share_one_article_and_two_raw_rows(
+    monkeypatch,
+):
+    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_article_race.db"
+    engine, session_factory = build_sqlite_session_factory(db_path)
+    setup_db = session_factory()
+    try:
+        yahoo = seed_source(
+            setup_db,
+            code="yahoo",
+            name="Yahoo Finance",
+            base_url="https://feeds.finance.yahoo.com",
+        )
+        ticker = seed_ticker(setup_db, symbol="UTF")
+        canonical_url = "https://www.businesswire.com/news/home/20260301000001/en"
+        feed_entries = {
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A": [
+                {
+                    "id": "y-guid-a",
+                    "guid": "y-guid-a",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": canonical_url + "?feedref=a",
+                    "summary": "Yahoo mirror A",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B": [
+                {
+                    "id": "y-guid-b",
+                    "guid": "y-guid-b",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": canonical_url + "?feedref=b",
+                    "summary": "Yahoo mirror B",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+        }
+
+        class RoutedResponse:
+            is_success = True
+            text = ""
+
+            def __init__(self, url: str):
+                self.content = url.encode("utf-8")
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class RoutedClient:
+            def get(self, url, *_args, **_kwargs):
+                return RoutedResponse(str(url))
+
+        monkeypatch.setattr(
+            "app.http_client.get_http_client",
+            lambda: RoutedClient(),
+        )
+        monkeypatch.setattr(
+            "app.article_ingest.feedparser.parse",
+            lambda content: SimpleNamespace(
+                feed={"title": "Yahoo Finance"},
+                entries=feed_entries[content.decode("utf-8")],
+            ),
+        )
+        monkeypatch.setattr(
+            "app.ticker_extraction._fetch_source_page_html",
+            lambda *_args, **_kwargs: "",
+        )
+
+        results = run_concurrent_ingests(
+            session_factory,
+            [
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+            ],
+        )
+
+        check_db = session_factory()
+        try:
+            articles = check_db.scalars(select(Article).order_by(Article.id.asc())).all()
+            raw_rows = check_db.scalars(
+                select(RawFeedItem).order_by(RawFeedItem.id.asc())
+            ).all()
+        finally:
+            check_db.close()
+
+        assert [result["status"] for result in results] == ["success", "success"]
+        assert len(articles) == 1
+        assert articles[0].canonical_url == canonical_url
+        assert len(raw_rows) == 2
+        assert {row.raw_guid for row in raw_rows} == {"y-guid-a", "y-guid-b"}
+        assert {row.article_id for row in raw_rows} == {articles[0].id}
+    finally:
+        setup_db.close()
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_concurrent_yahoo_same_raw_identity_keeps_one_raw_row(monkeypatch):
+    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_raw_race.db"
+    engine, session_factory = build_sqlite_session_factory(db_path)
+    setup_db = session_factory()
+    try:
+        yahoo = seed_source(
+            setup_db,
+            code="yahoo",
+            name="Yahoo Finance",
+            base_url="https://feeds.finance.yahoo.com",
+        )
+        ticker = seed_ticker(setup_db, symbol="UTF")
+        feed_entry = {
+            "id": "y-guid-shared",
+            "guid": "y-guid-shared",
+            "title": "ACME distribution update NYSE: UTF",
+            "link": "https://example.com/shared-race-story",
+            "summary": "Shared Yahoo item",
+            "published": "2026-03-01T00:00:00Z",
+        }
+
+        class RoutedResponse:
+            is_success = True
+            text = ""
+            content = b"https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF"
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class SharedClient:
+            def get(self, *_args, **_kwargs):
+                return RoutedResponse()
+
+        monkeypatch.setattr(
+            "app.http_client.get_http_client",
+            lambda: SharedClient(),
+        )
+        monkeypatch.setattr(
+            "app.article_ingest.feedparser.parse",
+            lambda _content: SimpleNamespace(
+                feed={"title": "Yahoo Finance"},
+                entries=[feed_entry],
+            ),
+        )
+        monkeypatch.setattr(
+            "app.ticker_extraction._fetch_source_page_html",
+            lambda *_args, **_kwargs: "",
+        )
+
+        results = run_concurrent_ingests(
+            session_factory,
+            [
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+            ],
+        )
+
+        check_db = session_factory()
+        try:
+            articles = check_db.scalars(select(Article).order_by(Article.id.asc())).all()
+            raw_rows = check_db.scalars(
+                select(RawFeedItem).order_by(RawFeedItem.id.asc())
+            ).all()
+        finally:
+            check_db.close()
+
+        assert [result["status"] for result in results] == ["success", "success"]
+        assert len(articles) == 1
+        assert len(raw_rows) == 1
+        assert raw_rows[0].raw_guid == "y-guid-shared"
+        assert raw_rows[0].article_id == articles[0].id
+    finally:
+        setup_db.close()
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_concurrent_yahoo_same_raw_identity_preserves_alt_feed_urls(monkeypatch):
+    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_raw_alt_race.db"
+    engine, session_factory = build_sqlite_session_factory(db_path)
+    setup_db = session_factory()
+    try:
+        yahoo = seed_source(
+            setup_db,
+            code="yahoo",
+            name="Yahoo Finance",
+            base_url="https://feeds.finance.yahoo.com",
+        )
+        ticker = seed_ticker(setup_db, symbol="UTF")
+        feed_entries = {
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A": [
+                {
+                    "id": "y-guid-shared",
+                    "guid": "y-guid-shared",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": "https://example.com/shared-race-story",
+                    "summary": "Shared Yahoo item",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B": [
+                {
+                    "id": "y-guid-shared",
+                    "guid": "y-guid-shared",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": "https://example.com/shared-race-story",
+                    "summary": "Shared Yahoo item",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+        }
+
+        class RoutedResponse:
+            is_success = True
+            text = ""
+
+            def __init__(self, url: str):
+                self.content = url.encode("utf-8")
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class RoutedClient:
+            def get(self, url, *_args, **_kwargs):
+                return RoutedResponse(str(url))
+
+        monkeypatch.setattr(
+            "app.http_client.get_http_client",
+            lambda: RoutedClient(),
+        )
+        monkeypatch.setattr(
+            "app.article_ingest.feedparser.parse",
+            lambda content: SimpleNamespace(
+                feed={"title": "Yahoo Finance"},
+                entries=feed_entries[content.decode("utf-8")],
+            ),
+        )
+        monkeypatch.setattr(
+            "app.ticker_extraction._fetch_source_page_html",
+            lambda *_args, **_kwargs: "",
+        )
+
+        results = run_concurrent_ingests(
+            session_factory,
+            [
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+            ],
+        )
+
+        check_db = session_factory()
+        try:
+            raw_rows = check_db.scalars(
+                select(RawFeedItem).order_by(RawFeedItem.id.asc())
+            ).all()
+        finally:
+            check_db.close()
+
+        assert [result["status"] for result in results] == ["success", "success"]
+        assert len(raw_rows) == 1
+        alt = (raw_rows[0].raw_payload_json or {}).get("_alt_feed_urls") or []
+        all_feed_urls = {raw_rows[0].feed_url} | set(alt)
+        assert "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A" in all_feed_urls
+        assert "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B" in all_feed_urls
+    finally:
+        setup_db.close()
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+def test_concurrent_yahoo_different_guids_same_link_pubdate_merges(monkeypatch):
+    """P1 regression: two feeds with different GUIDs but same link+pub_date
+    should not crash.  The GUID-targeted ON CONFLICT misses, but the
+    pair index blocks the second insert.  After the fix the second worker
+    falls through to the refetch-and-update path and both feeds succeed
+    with a single merged raw row.  The loser's feed_url is preserved as
+    an alt (P2)."""
+    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_guid_pair_race.db"
+    engine, session_factory = build_sqlite_session_factory(db_path)
+    setup_db = session_factory()
+    try:
+        yahoo = seed_source(
+            setup_db,
+            code="yahoo",
+            name="Yahoo Finance",
+            base_url="https://feeds.finance.yahoo.com",
+        )
+        ticker = seed_ticker(setup_db, symbol="UTF")
+        shared_link = "https://www.businesswire.com/news/home/20260301000001/en"
+        feed_entries = {
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A": [
+                {
+                    "id": "guid-chunk-a",
+                    "guid": "guid-chunk-a",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": shared_link,
+                    "summary": "Yahoo mirror A",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+            "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B": [
+                {
+                    "id": "guid-chunk-b",
+                    "guid": "guid-chunk-b",
+                    "title": "ACME distribution update NYSE: UTF",
+                    "link": shared_link,
+                    "summary": "Yahoo mirror B",
+                    "published": "2026-03-01T00:00:00Z",
+                }
+            ],
+        }
+
+        class RoutedResponse:
+            is_success = True
+            text = ""
+
+            def __init__(self, url: str):
+                self.content = url.encode("utf-8")
+
+            def raise_for_status(self) -> None:
+                return None
+
+        class RoutedClient:
+            def get(self, url, *_args, **_kwargs):
+                return RoutedResponse(str(url))
+
+        monkeypatch.setattr(
+            "app.http_client.get_http_client",
+            lambda: RoutedClient(),
+        )
+        monkeypatch.setattr(
+            "app.article_ingest.feedparser.parse",
+            lambda content: SimpleNamespace(
+                feed={"title": "Yahoo Finance"},
+                entries=feed_entries[content.decode("utf-8")],
+            ),
+        )
+        monkeypatch.setattr(
+            "app.ticker_extraction._fetch_source_page_html",
+            lambda *_args, **_kwargs: "",
+        )
+
+        results = run_concurrent_ingests(
+            session_factory,
+            [
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+                {
+                    "source_id": yahoo.id,
+                    "feed_url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B",
+                    "overrides": {
+                        "known_symbols": {"UTF"},
+                        "symbol_to_id": {"UTF": ticker.id},
+                    },
+                },
+            ],
+        )
+
+        check_db = session_factory()
+        try:
+            articles = check_db.scalars(
+                select(Article).order_by(Article.id.asc())
+            ).all()
+            raw_rows = check_db.scalars(
+                select(RawFeedItem).order_by(RawFeedItem.id.asc())
+            ).all()
+        finally:
+            check_db.close()
+
+        assert [r["status"] for r in results] == ["success", "success"]
+        assert len(articles) == 1
+        # Same link+pub_date → pair index merges into a single raw row
+        assert len(raw_rows) == 1
+        assert raw_rows[0].article_id == articles[0].id
+        # The losing feed_url should be preserved as an alt
+        alt = (raw_rows[0].raw_payload_json or {}).get("_alt_feed_urls") or []
+        all_feed_urls = {raw_rows[0].feed_url} | set(alt)
+        assert "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-A" in all_feed_urls
+        assert "https://feeds.finance.yahoo.com/rss/2.0/headline?s=UTF-B" in all_feed_urls
+    finally:
+        setup_db.close()
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
 
 def test_ingest_feed_dedupes_businesswire_story_across_yahoo_and_bw(
     db_session, stub_feed_io

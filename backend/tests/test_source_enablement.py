@@ -34,6 +34,7 @@ def _settings(**overrides):
         "raw_feed_prune_interval_seconds": 3600,
         "ingestion_stale_run_timeout_seconds": 3600,
         "ingestion_max_workers": 1,
+        "ingestion_parallel_yahoo": False,
         "ingestion_enable_conditional_get": False,
     }
     defaults.update(overrides)
@@ -215,6 +216,95 @@ def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
         assert result["total_feeds"] == 4
         assert max_active_by_source.get("businesswire", 0) == 1
         assert max_global_active >= 2
+    finally:
+        db.close()
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_run_ingestion_cycle_parallel_mode_allows_yahoo_concurrency_when_enabled(
+    monkeypatch,
+):
+    db_path = Path(__file__).resolve().parent / ".tmp_ingestion_parallel_yahoo.db"
+    if db_path.exists():
+        db_path.unlink()
+
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
+    db = session_factory()
+
+    settings = _settings(
+        source_enable_yahoo=True,
+        source_enable_bw=True,
+        ingestion_max_workers=4,
+        ingestion_parallel_yahoo=True,
+    )
+
+    feed_plan = [
+        SourceFeed(
+            code="yahoo",
+            name="Yahoo Finance",
+            base_url="https://feeds.finance.yahoo.com",
+            feed_urls=["https://example.com/yahoo/1", "https://example.com/yahoo/2"],
+        ),
+        SourceFeed(
+            code="businesswire",
+            name="Business Wire",
+            base_url="https://feed.businesswire.com",
+            feed_urls=["https://example.com/bw/1", "https://example.com/bw/2"],
+        ),
+    ]
+
+    lock = threading.Lock()
+    active_by_source: dict[str, int] = {}
+    max_active_by_source: dict[str, int] = {}
+
+    def fake_build_source_feeds(_settings, _db):
+        return feed_plan
+
+    def fake_load_tickers(_db: Session, _path: str):
+        return {"loaded": 0, "created": 0, "updated": 0, "unchanged": 0}
+
+    def fake_ingest_feed(_db: Session, *, source: Source, feed_url: str, **_kwargs):
+        with lock:
+            source_active = active_by_source.get(source.code, 0) + 1
+            active_by_source[source.code] = source_active
+            max_active_by_source[source.code] = max(
+                max_active_by_source.get(source.code, 0),
+                source_active,
+            )
+        time.sleep(0.03)
+        with lock:
+            active_by_source[source.code] = max(
+                active_by_source.get(source.code, 1) - 1,
+                0,
+            )
+        return {
+            "source": source.code,
+            "feed_url": feed_url,
+            "status": "success",
+            "items_seen": 0,
+            "items_inserted": 0,
+            "error": None,
+        }
+
+    monkeypatch.setattr("app.ingestion.build_source_feeds", fake_build_source_feeds)
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest_feed)
+    monkeypatch.setattr("app.ingestion._should_run_raw_feed_prune", lambda _interval: False)
+
+    bind = db.get_bind()
+    assert bind is not None
+    monkeypatch.setattr(bind.dialect, "name", "postgresql", raising=False)
+
+    try:
+        result = run_ingestion_cycle(db, settings)
+
+        assert result["total_feeds"] == 4
+        assert max_active_by_source.get("yahoo", 0) >= 2
+        assert max_active_by_source.get("businesswire", 0) == 1
     finally:
         db.close()
         engine.dispose()

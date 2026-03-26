@@ -162,3 +162,40 @@ Index(
     RawFeedItem.raw_link,
     RawFeedItem.raw_pub_date,
 )
+Index(
+    "uq_raw_feed_items_source_guid_nn",
+    RawFeedItem.source_id,
+    RawFeedItem.raw_guid,
+    unique=True,
+    postgresql_where=RawFeedItem.raw_guid.is_not(None),
+    sqlite_where=RawFeedItem.raw_guid.is_not(None),
+)
+Index(
+    "uq_raw_feed_items_source_link_pub_date_nn",
+    RawFeedItem.source_id,
+    RawFeedItem.raw_link,
+    RawFeedItem.raw_pub_date,
+    unique=True,
+    postgresql_where=(
+        RawFeedItem.raw_link.is_not(None) & RawFeedItem.raw_pub_date.is_not(None)
+    ),
+    sqlite_where=(
+        RawFeedItem.raw_link.is_not(None) & RawFeedItem.raw_pub_date.is_not(None)
+    ),
+)
+Index(
+    "uq_raw_feed_items_source_link_guidless_undated",
+    RawFeedItem.source_id,
+    RawFeedItem.raw_link,
+    unique=True,
+    postgresql_where=(
+        RawFeedItem.raw_link.is_not(None)
+        & RawFeedItem.raw_guid.is_(None)
+        & RawFeedItem.raw_pub_date.is_(None)
+    ),
+    sqlite_where=(
+        RawFeedItem.raw_link.is_not(None)
+        & RawFeedItem.raw_guid.is_(None)
+        & RawFeedItem.raw_pub_date.is_(None)
+    ),
+)

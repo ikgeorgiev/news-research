@@ -6,7 +6,10 @@ import uuid
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
 
+from app.article_ingest import _upsert_raw_feed_item
+from app.models import RawFeedItem, Source
 from migrate import run_migrations
 
 
@@ -168,5 +171,62 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping():
         assert legacy_row["first_alert_sent_at"] is None
     finally:
         engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_alembic_sqlite_schema_supports_raw_feed_item_upsert():
+    temp_dir = Path("backend/tests/.tmp")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    db_path = temp_dir / f"alembic-upsert-{uuid.uuid4().hex}.db"
+    database_url = f"sqlite:///{db_path.as_posix()}"
+
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    config.set_main_option(
+        "script_location",
+        str(Path(__file__).resolve().parents[1] / "alembic"),
+    )
+    config.attributes["database_url"] = database_url
+
+    try:
+        command.upgrade(config, "head")
+
+        engine = create_engine(database_url)
+        SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        try:
+            db = SessionLocal()
+            try:
+                source = Source(
+                    code="test",
+                    name="Test Source",
+                    base_url="https://example.com",
+                )
+                db.add(source)
+                db.commit()
+                db.refresh(source)
+
+                _upsert_raw_feed_item(
+                    db,
+                    {
+                        "source_id": source.id,
+                        "article_id": None,
+                        "feed_url": "https://example.com/feed.xml",
+                        "raw_guid": "guid-1",
+                        "raw_title": "Title",
+                        "raw_link": "https://example.com/story",
+                        "raw_pub_date": None,
+                        "raw_payload_json": {"title": "Title"},
+                    },
+                )
+                db.commit()
+
+                raw_rows = db.query(RawFeedItem).all()
+                assert len(raw_rows) == 1
+                assert raw_rows[0].raw_guid == "guid-1"
+            finally:
+                db.close()
+        finally:
+            engine.dispose()
+    finally:
         if db_path.exists():
             db_path.unlink()

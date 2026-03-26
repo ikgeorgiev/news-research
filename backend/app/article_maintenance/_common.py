@@ -46,6 +46,7 @@ def load_raw_contexts(
             Source.code,
             RawFeedItem.raw_link,
             RawFeedItem.feed_url,
+            RawFeedItem.raw_payload_json,
         )
         .join(Source, Source.id == RawFeedItem.source_id)
         .where(RawFeedItem.article_id.in_(article_ids))
@@ -54,14 +55,18 @@ def load_raw_contexts(
         query = query.where(Source.code == source_code)
 
     raw_contexts_by_article: dict[int, list[RawContext]] = {}
-    for article_id, raw_source_code, raw_link, feed_url in db.execute(
+    for article_id, raw_source_code, raw_link, feed_url, payload in db.execute(
         query.order_by(RawFeedItem.article_id.asc(), RawFeedItem.id.desc())
     ).all():
         if article_id is None:
             continue
-        raw_contexts_by_article.setdefault(article_id, []).append(
-            (raw_source_code, raw_link, feed_url)
-        )
+        contexts = raw_contexts_by_article.setdefault(article_id, [])
+        contexts.append((raw_source_code, raw_link, feed_url))
+        seen = {feed_url}
+        for alt_url in (payload or {}).get("_alt_feed_urls") or []:
+            if alt_url not in seen:
+                seen.add(alt_url)
+                contexts.append((raw_source_code, raw_link, alt_url))
     return raw_contexts_by_article
 
 

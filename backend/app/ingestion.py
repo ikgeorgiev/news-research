@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -162,6 +163,12 @@ def _run_feed_ingestion(
             tasks.append((source_row.id, source_row.code, feed_url))
     source_task_locks = {source_id: threading.Lock() for source_id, _, _ in tasks}
 
+    def _serialize_source(source_code: str) -> bool:
+        return not (
+            source_code == "yahoo"
+            and bool(settings.ingestion_parallel_yahoo)
+        )
+
     def _ingest_with_source(
         task_db: Session,
         source_row: Source,
@@ -178,10 +185,14 @@ def _run_feed_ingestion(
         source_id: int, source_code: str, feed_url: str
     ) -> IngestFeedResult:
         source_task_lock = source_task_locks[source_id]
-        # Keep feeds from the same source serialized even in parallel mode.
-        # Raw dedupe keys are source-scoped and pre-fetched per feed, so running
-        # same-source feeds concurrently can race and insert duplicate raw rows.
-        with source_task_lock:
+        lock_context = (
+            source_task_lock
+            if _serialize_source(source_code)
+            else nullcontext()
+        )
+        # Same-source feeds remain serialized by default. Yahoo can opt out once
+        # the raw-item path is hardened by DB-backed uniqueness and upserts.
+        with lock_context:
             if max_workers <= 1:
                 source_row = source_map.get(source_code)
                 if source_row is None:
