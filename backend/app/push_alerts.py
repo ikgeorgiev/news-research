@@ -18,6 +18,7 @@ from app.article_filters import build_article_query
 from app.config import Settings
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.monitoring import record_push_delivery, record_push_delivery_duration, set_push_active_subscriptions
+from app.pg_utils import is_postgresql_url, to_psycopg_conninfo
 from app.query_utils import iter_chunks
 from app.utils import sha256_str
 
@@ -34,18 +35,6 @@ try:
 except ImportError:  # pragma: no cover - guarded at runtime
     WebPushException = Exception  # type: ignore[assignment]
     webpush = None
-
-
-def _is_postgresql_url(database_url: str) -> bool:
-    normalized = database_url.strip().lower()
-    return normalized.startswith("postgresql://") or normalized.startswith("postgresql+psycopg://")
-
-
-def _to_psycopg_conninfo(database_url: str) -> str:
-    prefix = "postgresql+psycopg://"
-    if database_url.startswith(prefix):
-        return "postgresql://" + database_url[len(prefix) :]
-    return database_url
 
 
 def push_runtime_enabled(settings: Settings) -> bool:
@@ -556,8 +545,8 @@ class PushAlertDispatcher:
         settings: Settings,
         session_factory: Callable[[], Session],
     ):
-        self._enabled = _is_postgresql_url(database_url)
-        self._conninfo = _to_psycopg_conninfo(database_url)
+        self._enabled = is_postgresql_url(database_url)
+        self._conninfo = to_psycopg_conninfo(database_url)
         self._settings = settings
         self._session_factory = session_factory
         self._shutdown = threading.Event()

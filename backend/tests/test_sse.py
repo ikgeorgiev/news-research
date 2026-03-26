@@ -11,6 +11,34 @@ from app.routes.sse import _client_ip, _stream_news_events, sse_router
 from app.sse import SSEBroadcaster, SSEConnectionLimiter
 
 
+class FakeRequest:
+    def __init__(self):
+        self.disconnected = False
+
+    async def is_disconnected(self) -> bool:
+        return self.disconnected
+
+
+class FakeBroadcaster:
+    def __init__(self, is_available: bool = False):
+        self.is_available = is_available
+        self._listeners: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, int]]]] = []
+
+    @contextmanager
+    def subscribe(self):
+        listener_queue: asyncio.Queue[dict[str, int]] = asyncio.Queue(maxsize=8)
+        event_loop = asyncio.get_running_loop()
+        self._listeners.append((event_loop, listener_queue))
+        try:
+            yield listener_queue
+        finally:
+            self._listeners.remove((event_loop, listener_queue))
+
+    def publish(self, payload: dict[str, int]) -> None:
+        for event_loop, listener_queue in self._listeners:
+            event_loop.call_soon_threadsafe(listener_queue.put_nowait, payload)
+
+
 def test_sse_broadcaster_fans_out_to_async_subscribers():
     async def run_check():
         broadcaster = SSEBroadcaster("postgresql://cef:cef@localhost/test")
@@ -25,32 +53,6 @@ def test_sse_broadcaster_fans_out_to_async_subscribers():
 
 
 def test_sse_stream_recovers_when_broadcaster_becomes_available():
-    class FakeRequest:
-        def __init__(self):
-            self.disconnected = False
-
-        async def is_disconnected(self) -> bool:
-            return self.disconnected
-
-    class FakeBroadcaster:
-        def __init__(self):
-            self.is_available = False
-            self._listeners: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, int]]]] = []
-
-        @contextmanager
-        def subscribe(self):
-            listener_queue: asyncio.Queue[dict[str, int]] = asyncio.Queue(maxsize=8)
-            event_loop = asyncio.get_running_loop()
-            self._listeners.append((event_loop, listener_queue))
-            try:
-                yield listener_queue
-            finally:
-                self._listeners.remove((event_loop, listener_queue))
-
-        def publish(self, payload: dict[str, int]) -> None:
-            for event_loop, listener_queue in list(self._listeners):
-                event_loop.call_soon_threadsafe(listener_queue.put_nowait, payload)
-
     async def run_check():
         request = FakeRequest()
         broadcaster = FakeBroadcaster()
@@ -78,31 +80,9 @@ def test_sse_stream_recovers_when_broadcaster_becomes_available():
 
 
 def test_sse_stream_sends_unavailable_when_broadcaster_goes_down():
-    class FakeRequest:
-        def __init__(self):
-            self.disconnected = False
-
-        async def is_disconnected(self) -> bool:
-            return self.disconnected
-
-    class FakeBroadcaster:
-        def __init__(self):
-            self.is_available = True
-            self._listeners: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, int]]]] = []
-
-        @contextmanager
-        def subscribe(self):
-            listener_queue: asyncio.Queue[dict[str, int]] = asyncio.Queue(maxsize=8)
-            event_loop = asyncio.get_running_loop()
-            self._listeners.append((event_loop, listener_queue))
-            try:
-                yield listener_queue
-            finally:
-                self._listeners.remove((event_loop, listener_queue))
-
     async def run_check():
         request = FakeRequest()
-        broadcaster = FakeBroadcaster()
+        broadcaster = FakeBroadcaster(is_available=True)
         stream = _stream_news_events(request, broadcaster)
 
         assert await asyncio.wait_for(anext(stream), timeout=1.0) == ": connected\n\n"
@@ -177,9 +157,6 @@ def test_client_ip_falls_back_to_real_ip_when_no_forwarded_for():
 
 
 def test_sse_route_rejects_connections_over_the_per_ip_cap():
-    class FakeBroadcaster:
-        is_available = False
-
     app = FastAPI()
     app.include_router(sse_router, prefix="/api/v1")
     app.state.sse_broadcaster = FakeBroadcaster()

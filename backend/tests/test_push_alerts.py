@@ -34,6 +34,14 @@ from app.utils import sha256_str
 from tests.helpers import seed_article
 
 
+class FakeSessionContext:
+    def __enter__(self):
+        return SimpleNamespace()
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def _seed_article_with_ticker(
     db: Session,
     *,
@@ -444,13 +452,6 @@ def test_push_alert_dispatcher_becomes_active_only_when_listening():
 
 
 def test_push_alert_dispatcher_retries_after_lock_contention(monkeypatch: pytest.MonkeyPatch):
-    class FakeSessionContext:
-        def __enter__(self):
-            return SimpleNamespace()
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
     settings_obj = SimpleNamespace()
     dispatcher = PushAlertDispatcher(
         "postgresql://cef:cef@localhost/test",
@@ -523,13 +524,6 @@ def test_push_alert_dispatcher_requests_catchup_after_listen_established(monkeyp
 
 
 def test_push_alert_dispatcher_requeues_after_dispatch_failure(monkeypatch: pytest.MonkeyPatch):
-    class FakeSessionContext:
-        def __enter__(self):
-            return SimpleNamespace()
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
     settings_obj = SimpleNamespace()
     dispatcher = PushAlertDispatcher(
         "postgresql://cef:cef@localhost/test",

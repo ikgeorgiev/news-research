@@ -14,25 +14,15 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from app.pg_utils import is_postgresql_url, to_psycopg_conninfo
+
 logger = logging.getLogger(__name__)
-
-
-def _is_postgresql_url(database_url: str) -> bool:
-    normalized = database_url.strip().lower()
-    return normalized.startswith("postgresql://") or normalized.startswith("postgresql+psycopg://")
-
-
-def _to_psycopg_conninfo(database_url: str) -> str:
-    prefix = "postgresql+psycopg://"
-    if database_url.startswith(prefix):
-        return "postgresql://" + database_url[len(prefix) :]
-    return database_url
 
 
 class SSEBroadcaster:
     def __init__(self, database_url: str):
-        self._conninfo = _to_psycopg_conninfo(database_url)
-        self._enabled = _is_postgresql_url(database_url)
+        self._conninfo = to_psycopg_conninfo(database_url)
+        self._enabled = is_postgresql_url(database_url)
         self._healthy = False
         self._listeners: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue[dict[str, Any]]]] = {}
         self._listener_ids = itertools.count(1)

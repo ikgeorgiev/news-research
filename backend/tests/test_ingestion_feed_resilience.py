@@ -9,7 +9,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.article_ingest import _preserve_alt_feed_url, ingest_feed
+from app.article_ingest import ingest_feed
+from app.raw_feed_items import _preserve_alt_feed_url
 from app.article_maintenance import (
     _upsert_article_tickers,
     dedupe_articles_by_title,

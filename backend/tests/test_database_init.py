@@ -8,7 +8,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
-from app.article_ingest import _upsert_raw_feed_item
+from app.raw_feed_items import _upsert_raw_feed_item
 from app.models import RawFeedItem, Source
 from migrate import run_migrations
 
