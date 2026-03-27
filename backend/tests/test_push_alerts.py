@@ -20,6 +20,7 @@ from app.push_alerts import (
     PushAlertDispatcher,
     check_and_send_alerts,
     check_and_send_alerts_locked,
+    seed_last_notified_watermarks,
     push_dispatcher_is_active,
 )
 from app.schemas import (
@@ -275,6 +276,254 @@ def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session
     assert sub.active is False
     assert sub.failure_count == 1
     assert second.id > first.id
+
+
+def test_check_and_send_alerts_processes_every_subscription_across_batches(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    first = _seed_article_with_ticker(db, slug="batch-seed-1")
+    second = _seed_article_with_ticker(db, slug="batch-seed-2")
+
+    subscriptions: list[PushSubscription] = []
+    for idx in range(3):
+        sub = PushSubscription(
+            endpoint=f"https://push.example/sub-batch-{idx}",
+            key_p256dh="p256dh-key",
+            key_auth="auth-key",
+            expiration_time=None,
+            alert_scopes_json={"include_all_news": True, "watchlists": []},
+            last_notified_json={"all": first.id},
+            manage_token_hash=sha256_str(f"token-batch-{idx}"),
+            active=True,
+        )
+        subscriptions.append(sub)
+    db.add_all(subscriptions)
+    db.commit()
+
+    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
+    send_order: list[int] = []
+
+    def _send(*_args, **kwargs):
+        send_order.append(int(kwargs["subscription"].id))
+        return ("success", None)
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
+    )
+
+    stats = check_and_send_alerts(db, settings_obj)
+
+    assert stats["scanned"] == 3
+    assert stats["sent"] == 3
+    assert send_order == [sub.id for sub in subscriptions]
+    for sub in subscriptions:
+        db.refresh(sub)
+        assert int(sub.last_notified_json.get("all", 0) or 0) == second.id
+
+
+def test_check_and_send_alerts_continues_after_mid_scan_deactivation(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    first = _seed_article_with_ticker(db, slug="midscan-seed-1")
+    second = _seed_article_with_ticker(db, slug="midscan-seed-2")
+
+    subscriptions: list[PushSubscription] = []
+    for idx in range(3):
+        sub = PushSubscription(
+            endpoint=f"https://push.example/sub-midscan-{idx}",
+            key_p256dh="p256dh-key",
+            key_auth="auth-key",
+            expiration_time=None,
+            alert_scopes_json={"include_all_news": True, "watchlists": []},
+            last_notified_json={"all": first.id},
+            manage_token_hash=sha256_str(f"token-midscan-{idx}"),
+            active=True,
+        )
+        subscriptions.append(sub)
+    db.add_all(subscriptions)
+    db.commit()
+
+    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
+    send_order: list[int] = []
+
+    def _send(*_args, **kwargs):
+        subscription = kwargs["subscription"]
+        send_order.append(int(subscription.id))
+        if subscription.id == subscriptions[0].id:
+            return ("gone", "410 Gone")
+        return ("success", None)
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
+    )
+
+    stats = check_and_send_alerts(db, settings_obj)
+
+    assert stats["scanned"] == 3
+    assert stats["sent"] == 2
+    assert stats["deactivated"] == 1
+    assert send_order == [sub.id for sub in subscriptions]
+
+    db.refresh(subscriptions[0])
+    assert subscriptions[0].active is False
+    for sub in subscriptions[1:]:
+        db.refresh(sub)
+        assert sub.active is True
+        assert int(sub.last_notified_json.get("all", 0) or 0) == second.id
+
+
+def test_check_and_send_alerts_defers_new_higher_id_subscriptions_until_next_run(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    bind = db.get_bind()
+    assert bind is not None
+    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=bind)
+
+    first = _seed_article_with_ticker(db, slug="snapshot-seed-1")
+    second = _seed_article_with_ticker(db, slug="snapshot-seed-2")
+
+    subscriptions: list[PushSubscription] = []
+    for idx in range(2):
+        sub = PushSubscription(
+            endpoint=f"https://push.example/sub-snapshot-{idx}",
+            key_p256dh="p256dh-key",
+            key_auth="auth-key",
+            expiration_time=None,
+            alert_scopes_json={"include_all_news": True, "watchlists": []},
+            last_notified_json={"all": first.id},
+            manage_token_hash=sha256_str(f"token-snapshot-{idx}"),
+            active=True,
+        )
+        subscriptions.append(sub)
+    db.add_all(subscriptions)
+    db.commit()
+
+    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
+    send_order: list[int] = []
+    inserted = {"done": False, "subscription_id": None}
+
+    def _send(*_args, **kwargs):
+        subscription = kwargs["subscription"]
+        send_order.append(int(subscription.id))
+        if not inserted["done"]:
+            inserted["done"] = True
+            with session_factory() as other_db:
+                new_sub = PushSubscription(
+                    endpoint="https://push.example/sub-snapshot-new",
+                    key_p256dh="p256dh-key",
+                    key_auth="auth-key",
+                    expiration_time=None,
+                    alert_scopes_json={"include_all_news": True, "watchlists": []},
+                    last_notified_json={"all": first.id},
+                    manage_token_hash=sha256_str("token-snapshot-new"),
+                    active=True,
+                )
+                other_db.add(new_sub)
+                other_db.commit()
+                inserted["subscription_id"] = int(new_sub.id)
+        return ("success", None)
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", _send)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
+    )
+
+    first_run = check_and_send_alerts(db, settings_obj)
+
+    assert first_run["scanned"] == 2
+    assert first_run["sent"] == 2
+    assert send_order == [sub.id for sub in subscriptions]
+    assert inserted["subscription_id"] is not None
+
+    inserted_sub = db.scalar(
+        select(PushSubscription).where(PushSubscription.id == inserted["subscription_id"])
+    )
+    assert inserted_sub is not None
+    assert int(inserted_sub.last_notified_json.get("all", 0) or 0) == first.id
+
+    second_run = check_and_send_alerts(db, settings_obj)
+    db.refresh(inserted_sub)
+
+    assert second_run["scanned"] == 3
+    assert second_run["sent"] == 1
+    assert int(inserted_sub.last_notified_json.get("all", 0) or 0) == second.id
+
+
+def test_seed_last_notified_watermarks_logs_and_reseeds_invalid_values(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    article = _seed_article_with_ticker(db, slug="reseed-invalid-watermark")
+    warning_messages: list[str] = []
+
+    def _capture_warning(message, *args):
+        warning_messages.append(message % args)
+
+    monkeypatch.setattr("app.push_alerts.logger.warning", _capture_warning)
+
+    next_watermarks, seeded = seed_last_notified_watermarks(
+        db,
+        scopes={"include_all_news": True, "watchlists": []},
+        existing={"all": "bad", "zero": 0, "negative": -1, "none": None, "obj": {"x": 1}},
+        subscription_context="subscription_id=123",
+    )
+
+    assert next_watermarks == {"all": article.id}
+    assert seeded == {"all": article.id}
+    assert len(warning_messages) == 5
+    assert all("subscription_id=123" in message for message in warning_messages)
+
+
+def test_seed_last_notified_watermarks_does_not_warn_for_valid_values(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    article = _seed_article_with_ticker(db, slug="valid-watermark")
+    warning_messages: list[str] = []
+
+    def _capture_warning(message, *args):
+        warning_messages.append(message % args)
+
+    monkeypatch.setattr("app.push_alerts.logger.warning", _capture_warning)
+
+    next_watermarks, seeded = seed_last_notified_watermarks(
+        db,
+        scopes={"include_all_news": True, "watchlists": []},
+        existing={"all": article.id},
+        subscription_context="subscription_id=456",
+    )
+
+    assert next_watermarks == {"all": article.id}
+    assert seeded == {}
+    assert not warning_messages
 
 
 def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session, monkeypatch: pytest.MonkeyPatch):

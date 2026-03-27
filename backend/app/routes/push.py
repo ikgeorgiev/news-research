@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -20,6 +21,16 @@ from app.schemas import (
 )
 
 push_router = APIRouter()
+
+
+def _subscription_log_context(*, endpoint: str, subscription_id: int | None = None) -> str:
+    try:
+        endpoint_host = (urlsplit(endpoint).hostname or "").strip()[:120] or "unknown"
+    except ValueError:
+        endpoint_host = "unknown"
+    if subscription_id is None:
+        return f"endpoint_host={endpoint_host}"
+    return f"subscription_id={subscription_id} endpoint_host={endpoint_host}"
 
 
 def _require_push_runtime_enabled() -> str:
@@ -119,6 +130,10 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
         db,
         scopes=scopes,
         existing=subscription.last_notified_json if not created else None,
+        subscription_context=_subscription_log_context(
+            endpoint=endpoint,
+            subscription_id=subscription.id,
+        ),
     )
 
     _apply_subscription_update(

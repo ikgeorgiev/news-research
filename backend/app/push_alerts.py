@@ -28,6 +28,7 @@ _active_dispatcher_count = 0
 
 ALL_SCOPE_KEY = "all"
 MAX_ERROR_TEXT_LEN = 500
+_SUBSCRIPTION_BATCH_SIZE = 500
 
 try:
     from pywebpush import WebPushException, webpush
@@ -228,17 +229,35 @@ def _build_scope_query(db: Session, *, scope_query: PushScopeQuery):
     )
 
 
-def _normalize_last_notified(payload: dict[str, Any] | None) -> dict[str, int]:
+def _normalize_last_notified(
+    payload: dict[str, Any] | None,
+    *,
+    subscription_context: str | None = None,
+) -> dict[str, int]:
     result: dict[str, int] = {}
+    context_suffix = f" ({subscription_context})" if subscription_context else ""
     if not isinstance(payload, dict):
         return result
     for key, value in payload.items():
         try:
             parsed = int(value)
         except Exception:
+            logger.warning(
+                "Ignoring invalid push watermark for scope=%s: value=%r is not a positive integer%s",
+                key,
+                value,
+                context_suffix,
+            )
             continue
-        if parsed > 0:
-            result[str(key)] = parsed
+        if parsed <= 0:
+            logger.warning(
+                "Ignoring invalid push watermark for scope=%s: value=%r must be > 0%s",
+                key,
+                value,
+                context_suffix,
+            )
+            continue
+        result[str(key)] = parsed
     return result
 
 
@@ -247,9 +266,13 @@ def seed_last_notified_watermarks(
     *,
     scopes: dict[str, Any] | NormalizedPushScopes,
     existing: dict[str, Any] | None = None,
+    subscription_context: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     normalized_scopes = _coerce_normalized_scopes(scopes)
-    previous = _normalize_last_notified(existing)
+    previous = _normalize_last_notified(
+        existing,
+        subscription_context=subscription_context,
+    )
     seeded: dict[str, int] = {}
     next_state: dict[str, int] = {}
     for scope_query in normalized_scopes.scope_queries():
@@ -331,6 +354,7 @@ def _prepare_subscription_dispatch(
         db,
         scopes=scopes,
         existing=subscription.last_notified_json,
+        subscription_context=f"subscription_id={subscription.id}",
     )
     advanced_watermarks = dict(stable_watermarks)
     article_ids: set[int] = set()
@@ -571,26 +595,39 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
             "deactivated": 0,
         }
 
-    subscriptions = db.scalars(
-        select(PushSubscription)
-        .where(PushSubscription.active.is_(True))
-        .order_by(PushSubscription.updated_at.asc(), PushSubscription.id.asc())
-    ).all()
-
     scanned = 0
     sent = 0
     failed = 0
     deactivated = 0
     max_consecutive_failures = max(1, int(settings.push_max_consecutive_failures or 20))
+    # Snapshot IDs ordered by updated_at so that partially aborted runs
+    # resume with the least-recently-processed subscriptions first,
+    # preventing starvation of higher-ID subscriptions across restarts.
+    snapshot_ids = db.scalars(
+        select(PushSubscription.id)
+        .where(PushSubscription.active.is_(True))
+        .order_by(PushSubscription.updated_at.asc(), PushSubscription.id.asc())
+    ).all()
 
-    for subscription in subscriptions:
-        scanned += 1
-        outcome = _process_subscription_alerts(
-            db, settings, subscription, max_consecutive_failures
-        )
-        sent += outcome.sent
-        failed += outcome.failed
-        deactivated += outcome.deactivated
+    for offset in range(0, len(snapshot_ids), _SUBSCRIPTION_BATCH_SIZE):
+        chunk_ids = snapshot_ids[offset : offset + _SUBSCRIPTION_BATCH_SIZE]
+        batch = db.scalars(
+            select(PushSubscription)
+            .where(PushSubscription.id.in_(chunk_ids))
+        ).all()
+        # Preserve the updated_at ordering from the snapshot.
+        batch_by_id = {sub.id: sub for sub in batch}
+        for sub_id in chunk_ids:
+            subscription = batch_by_id.get(sub_id)
+            if subscription is None:
+                continue
+            scanned += 1
+            outcome = _process_subscription_alerts(
+                db, settings, subscription, max_consecutive_failures
+            )
+            sent += outcome.sent
+            failed += outcome.failed
+            deactivated += outcome.deactivated
 
     active_after = db.scalar(
         select(func.count()).select_from(select(PushSubscription.id).where(PushSubscription.active.is_(True)).subquery())
