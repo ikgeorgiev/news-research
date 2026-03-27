@@ -4,10 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -24,37 +21,61 @@ class IngestionScheduler:
     def __init__(self, settings: Settings, session_factory: Callable[[], Session]):
         self.settings = settings
         self.session_factory = session_factory
-        self._scheduler = BackgroundScheduler(timezone="UTC")
         self._lock = threading.Lock()
+        self._shutdown = threading.Event()
+        self._thread: threading.Thread | None = None
 
     def start(self) -> None:
         if not self.settings.scheduler_enabled:
             logger.info("Scheduler disabled by configuration")
             return
 
-        if self._scheduler.running:
+        if self._thread is not None and self._thread.is_alive():
             return
 
-        self._scheduler.add_job(
-            self._run_job,
-            trigger=IntervalTrigger(seconds=self.settings.ingest_interval_seconds),
-            id="ingestion_cycle",
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
-            jitter=10,
-            next_run_time=datetime.now(timezone.utc),
+        self._shutdown.clear()
+        self._thread = threading.Thread(
+            target=self._loop,
+            daemon=True,
+            name="ingestion-scheduler",
         )
-        self._scheduler.start()
+        self._thread.start()
         from app.monitoring import INGESTION_SCHEDULER_ENABLED, INGESTION_SCHEDULER_STARTED_AT
         INGESTION_SCHEDULER_ENABLED.set(1)
         INGESTION_SCHEDULER_STARTED_AT.set(time.time())
-        logger.info("Ingestion scheduler started")
+        logger.info(
+            "Ingestion scheduler started (cooldown=%ss)",
+            self.settings.ingest_cooldown_seconds,
+        )
 
     def shutdown(self) -> None:
-        if self._scheduler.running:
-            self._scheduler.shutdown(wait=False)
-            logger.info("Ingestion scheduler stopped")
+        self._shutdown.set()
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            self._thread = None
+        logger.info("Ingestion scheduler stopped")
+
+    def _loop(self) -> None:
+        while not self._shutdown.is_set():
+            try:
+                result = self.run_once()
+                if result is not None:
+                    logger.info(
+                        "Ingestion cycle complete",
+                        extra={
+                            "total_feeds": result["total_feeds"],
+                            "total_items_seen": result["total_items_seen"],
+                            "total_items_inserted": result["total_items_inserted"],
+                            "failed_feeds": result["failed_feeds"],
+                        },
+                    )
+            except Exception:
+                logger.exception("Ingestion cycle failed with unhandled exception")
+                if self._shutdown.wait(timeout=self.settings.ingest_cooldown_seconds):
+                    break
+                continue
+            if self._shutdown.wait(timeout=self.settings.ingest_cooldown_seconds):
+                break
 
     def run_once(self) -> IngestionCycleResult | None:
         started_at = time.perf_counter()
@@ -111,24 +132,6 @@ class IngestionScheduler:
                         logger.warning("Ingestion advisory unlock returned false (key=%s)", lock_key)
                 except Exception:
                     logger.exception("Failed to release ingestion advisory lock")
-
-    def _run_job(self) -> None:
-        try:
-            result = self.run_once()
-            if result is None:
-                return
-
-            logger.info(
-                "Ingestion cycle complete",
-                extra={
-                    "total_feeds": result["total_feeds"],
-                    "total_items_seen": result["total_items_seen"],
-                    "total_items_inserted": result["total_items_inserted"],
-                    "failed_feeds": result["failed_feeds"],
-                },
-            )
-        except Exception:
-            logger.exception("Ingestion cycle failed with unhandled exception")
 
 
 def get_scheduler() -> IngestionScheduler | None:

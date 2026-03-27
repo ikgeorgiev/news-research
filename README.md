@@ -4,7 +4,7 @@ Local-first RSS aggregation platform for closed-end funds.
 
 ## Stack
 
-- Backend: FastAPI + SQLAlchemy + APScheduler + Alembic
+- Backend: FastAPI + SQLAlchemy + Alembic
 - Frontend: Next.js (App Router)
 - DB: PostgreSQL
 - HTTP: httpx (HTTP/2, connection pooling)
@@ -12,7 +12,7 @@ Local-first RSS aggregation platform for closed-end funds.
 
 ## Features
 
-- Polls configured feeds every minute (configurable)
+- Polls configured feeds continuously with a configurable per-cycle cooldown (`INGEST_COOLDOWN_SECONDS`)
 - Normalizes RSS entries into a unified article model
 - URL + title-window dedupe
 - Tiered ticker extraction: context, exchange, paren, table cell, validated token, and token match types with confidence scoring
@@ -288,6 +288,7 @@ This reloads symbols and remaps recent unmapped page-fetch sources, including `b
 
 Ingestion reliability controls are configurable via env vars:
 
+- `INGEST_COOLDOWN_SECONDS` waits this many seconds after each ingestion cycle before the next one starts.
 - `INGESTION_STALE_RUN_TIMEOUT_SECONDS` marks stale `running` jobs as failed.
 - `FEED_FETCH_MAX_ATTEMPTS` / `FEED_FETCH_BACKOFF_SECONDS` / `FEED_FETCH_BACKOFF_JITTER_SECONDS` control feed retry behavior.
 - `RAW_FEED_RETENTION_DAYS` / `RAW_FEED_PRUNE_BATCH_SIZE` / `RAW_FEED_PRUNE_MAX_BATCHES` bound raw feed table growth.
@@ -310,7 +311,7 @@ The `validation_keywords` column is optional. When set, it overrides auto-genera
 
 - V1 includes the public Business Wire home RSS feed.
 - If a feed fails intermittently, status is tracked in `ingestion_runs`.
-- Default polling interval is 60 seconds.
+- Ingestion uses a background loop with `INGEST_COOLDOWN_SECONDS` sleep after each completed cycle.
 - SSE uses PostgreSQL `LISTEN/NOTIFY` — each per-feed commit fires `pg_notify('new_articles', count)`. The `SSEBroadcaster` runs a dedicated LISTEN thread and fans out to connected clients via `asyncio.Queue`. When the broadcaster is unavailable (SQLite or Postgres down), the frontend falls back to 30s polling.
 - The backend uses a shared `httpx.Client` for HTTP/2 and connection pooling across feed fetches and source page lookups.
 - Docker images use multi-stage builds (separate builder/runtime stages) and run as non-root `appuser`.
