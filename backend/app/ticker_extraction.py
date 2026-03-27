@@ -43,7 +43,7 @@ SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
 SOURCE_PAGE_CACHE_MAX_ITEMS = 1024
 
 EXCHANGE_PATTERN = re.compile(
-    r"\b(?:NYSE|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b"
+    r"\b(?:NYSE(?:\s+(?:American|Arca|MKT))?|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b"
 )
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
