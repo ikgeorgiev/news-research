@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 
-import { fetchNews, fetchTickers } from "@/lib/api"
+import { buildNewsRequestParams, fetchNews, fetchTickers, type NewsFilterParams } from "@/lib/api"
 import { buildApiUrl } from "@/lib/api-base"
 import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
 import { useEventSource } from "@/hooks/useEventSource"
@@ -12,6 +12,14 @@ import { buildFetchParams, dedupeById } from "./page-helpers"
 const AUTO_REFRESH_POLL_MS = 30_000
 const AUTO_REFRESH_SSE_MS = 120_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError"
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
 
 export function useNewsFeed({
   activeWatchlist,
@@ -45,6 +53,7 @@ export function useNewsFeed({
   const pendingNewItemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
   const lastAutoRefreshAtRef = useRef(0)
+  const backgroundRefreshErrorLoggedRef = useRef(false)
 
   useEffect(() => {
     itemsRef.current = items
@@ -63,13 +72,14 @@ export function useNewsFeed({
       ticker
     )
 
-    return {
+    const filters: NewsFilterParams = {
       tickers: fetchTickers,
       provider: provider || undefined,
       includeUnmappedFromProvider: includeGeneralFromProvider,
       q: searchQuery || undefined,
-      ...overrides,
     }
+
+    return buildNewsRequestParams(filters, overrides)
   }
 
   const triggerRefresh = (reason: "auto" | "manual") => {
@@ -82,7 +92,10 @@ export function useNewsFeed({
     const controller = new AbortController()
     fetchTickers(controller.signal)
       .then((data) => setTickers(data.items))
-      .catch(() => setTickers([]))
+      .catch((error: unknown) => {
+        if (isAbortError(error)) return
+        setTickers([])
+      })
 
     return () => controller.abort()
   }, [])
@@ -202,6 +215,7 @@ export function useNewsFeed({
       }))
         .then((data) => {
           if (bgGeneration !== feedGenerationRef.current) return
+          backgroundRefreshErrorLoggedRef.current = false
           if (data.global_summary) {
             setGlobalTrackedIds(data.global_summary.tracked_ids)
             setTotalCount(data.global_summary.total)
@@ -216,7 +230,13 @@ export function useNewsFeed({
             })
           }
         })
-        .catch(() => {})
+        .catch((error: unknown) => {
+          if (bgGeneration !== feedGenerationRef.current) return
+          if (isAbortError(error)) return
+          if (backgroundRefreshErrorLoggedRef.current) return
+          backgroundRefreshErrorLoggedRef.current = true
+          console.warn("Background feed refresh failed", error)
+        })
 
       return () => controller.abort()
     }
@@ -261,8 +281,8 @@ export function useNewsFeed({
       })
       .catch((err: unknown) => {
         if (requestGeneration !== feedGenerationRef.current) return
-        if (err instanceof DOMException && err.name === "AbortError") return
-        const message = err instanceof Error ? err.message : "Failed to load feed"
+        if (isAbortError(err)) return
+        const message = getErrorMessage(err, "Failed to load feed")
         setError(message)
       })
       .finally(() => {
@@ -302,7 +322,8 @@ export function useNewsFeed({
       setNextCursor(data.next_cursor)
     } catch (err: unknown) {
       if (requestGeneration !== feedGenerationRef.current) return
-      const message = err instanceof Error ? err.message : "Failed to load more"
+      if (isAbortError(err)) return
+      const message = getErrorMessage(err, "Failed to load more")
       setError(message)
     } finally {
       setLoadingMore(false)

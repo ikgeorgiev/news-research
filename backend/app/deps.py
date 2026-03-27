@@ -5,9 +5,6 @@ import secrets
 from fastapi import HTTPException, Header, status
 
 from app.config import get_settings
-from app.database import get_db  # noqa: F401 — re-export for convenience
-
-
 def require_admin_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
     settings = get_settings()
     expected_key = (settings.admin_api_key or "").strip()

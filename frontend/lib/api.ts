@@ -1,23 +1,37 @@
 import { NewsIdsResponse, NewsResponse, TickerResponse } from "./types"
 import { buildApiUrl } from "./api-base"
 
-type NewsQueryParams = {
+export type NewsFilterParams = {
   tickers?: string[]
   provider?: string
   includeUnmappedFromProvider?: string
   q?: string
+}
+
+type NewsQueryParams = NewsFilterParams & {
   cursor?: string | null
   limit?: number
 }
 
-type NewsRequestParams = NewsQueryParams & {
+export type NewsRequestParams = NewsQueryParams & {
   includeGlobalSummary?: boolean
   signal?: AbortSignal
 }
 
-type NewsIdsRequestParams = Omit<NewsQueryParams, "cursor"> & {
+export type NewsIdsRequestParams = NewsFilterParams & {
   cursor?: string
+  limit?: number
   signal?: AbortSignal
+}
+
+export function buildNewsRequestParams<T extends object>(
+  filters: NewsFilterParams,
+  overrides: T
+): NewsFilterParams & T {
+  return {
+    ...filters,
+    ...overrides,
+  }
 }
 
 function buildNewsQueryString(params: NewsQueryParams & { includeGlobalSummary?: boolean }): string {

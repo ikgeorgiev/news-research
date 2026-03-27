@@ -3,7 +3,7 @@
 import { MouseEvent, useEffect, useMemo, useState } from "react"
 
 import { fetchNewsIds } from "@/lib/api"
-import { persistJson, persistValue } from "@/lib/local-storage"
+import { persistJson, persistValue, readEnumValue, readJson } from "@/lib/local-storage"
 import { markReadIdsByQuery, ReadQueryParams, trimIdSet } from "@/lib/read-state"
 import { NewsItem } from "@/lib/types"
 
@@ -11,6 +11,12 @@ import { mergeUniqueIds, mergeUniqueNewsItems, toSafeExternalUrl } from "./page-
 
 const MAX_PERSISTED_READ_IDS = 20_000
 const NEWS_IDS_PAGE_SIZE = 1000
+const VIEW_MODES = ["list", "full"] as const
+
+function parseStoredReadIds(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null
+  return value.filter((id): id is number => Number.isInteger(id))
+}
 
 export function useFeedPreferences({
   items,
@@ -30,17 +36,13 @@ export function useFeedPreferences({
 
   useEffect(() => {
     try {
-      const storedRead = localStorage.getItem("readNewsIds")
-      if (storedRead) {
-        const parsed = JSON.parse(storedRead)
-        if (Array.isArray(parsed)) {
-          const validIds = parsed.filter((id): id is number => Number.isInteger(id))
-          setReadIds(trimIdSet(new Set(validIds), MAX_PERSISTED_READ_IDS))
-        }
+      const storedReadIds = readJson("readNewsIds", parseStoredReadIds)
+      if (storedReadIds) {
+        setReadIds(trimIdSet(new Set(storedReadIds), MAX_PERSISTED_READ_IDS))
       }
 
-      const storedViewMode = localStorage.getItem("newsViewMode")
-      if (storedViewMode === "list" || storedViewMode === "full") {
+      const storedViewMode = readEnumValue("newsViewMode", VIEW_MODES)
+      if (storedViewMode) {
         setViewMode(storedViewMode)
       }
     } catch (error) {

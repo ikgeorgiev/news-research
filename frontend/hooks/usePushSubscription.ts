@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import {
   disablePushNotifications,
@@ -9,11 +9,20 @@ import {
   isPushSupported,
   syncPushScopes,
 } from "@/lib/push"
-import { persistJson, persistValue } from "@/lib/local-storage"
+import { persistJson, persistValue, readBooleanValue, readJson } from "@/lib/local-storage"
 import { PushAlertScopes, Watchlist } from "@/lib/types"
 
 const ALERT_INCLUDE_ALL_STORAGE_KEY = "alertIncludeAllNews"
 const ALERT_WATCHLIST_IDS_STORAGE_KEY = "alertWatchlistIds"
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError"
+}
+
+function parseStoredAlertWatchlistIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  return value.filter((id): id is string => typeof id === "string" && id.length > 0)
+}
 
 export function usePushSubscription({
   customWatchlists,
@@ -26,6 +35,8 @@ export function usePushSubscription({
   const [pushError, setPushError] = useState<string | null>(null)
   const [alertIncludeAllNews, setAlertIncludeAllNews] = useState(true)
   const [alertWatchlistIds, setAlertWatchlistIds] = useState<Set<string>>(new Set())
+  const pushStatusErrorLoggedRef = useRef(false)
+  const pushScopeSyncErrorLoggedRef = useRef(false)
 
   const alertWatchlistKey = useMemo(
     () => Array.from(alertWatchlistIds).sort().join(","),
@@ -67,18 +78,17 @@ export function usePushSubscription({
 
   useEffect(() => {
     try {
-      const storedAlertIncludeAll = localStorage.getItem(ALERT_INCLUDE_ALL_STORAGE_KEY)
+      const storedAlertIncludeAll = readBooleanValue(ALERT_INCLUDE_ALL_STORAGE_KEY)
       if (storedAlertIncludeAll !== null) {
-        setAlertIncludeAllNews(storedAlertIncludeAll === "true")
+        setAlertIncludeAllNews(storedAlertIncludeAll)
       }
 
-      const storedAlertWatchlistIds = localStorage.getItem(ALERT_WATCHLIST_IDS_STORAGE_KEY)
+      const storedAlertWatchlistIds = readJson(
+        ALERT_WATCHLIST_IDS_STORAGE_KEY,
+        parseStoredAlertWatchlistIds
+      )
       if (storedAlertWatchlistIds) {
-        const parsed = JSON.parse(storedAlertWatchlistIds)
-        if (Array.isArray(parsed)) {
-          const validIds = parsed.filter((id): id is string => typeof id === "string" && id.length > 0)
-          setAlertWatchlistIds(new Set(validIds))
-        }
+        setAlertWatchlistIds(new Set(storedAlertWatchlistIds))
       }
     } catch (err) {
       console.error("Failed to parse push subscription storage", err)
@@ -98,8 +108,14 @@ export function usePushSubscription({
       try {
         const status = await getPushStatus()
         if (cancelled) return
+        pushStatusErrorLoggedRef.current = false
         setPushSubscribed(status.subscribed)
-      } catch {
+      } catch (error) {
+        if (isAbortError(error) || cancelled) return
+        if (!pushStatusErrorLoggedRef.current) {
+          pushStatusErrorLoggedRef.current = true
+          console.warn("Failed to refresh push status", error)
+        }
         if (!cancelled) {
           setPushSubscribed(false)
         }
@@ -138,7 +154,13 @@ export function usePushSubscription({
     const run = async () => {
       try {
         await syncPushScopes(pushScopes)
-      } catch {
+        pushScopeSyncErrorLoggedRef.current = false
+      } catch (error) {
+        if (isAbortError(error)) return
+        if (!pushScopeSyncErrorLoggedRef.current) {
+          pushScopeSyncErrorLoggedRef.current = true
+          console.warn("Failed to sync push scopes", error)
+        }
         // Keep local UI responsive even if backend sync fails.
       }
     }

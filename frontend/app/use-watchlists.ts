@@ -2,7 +2,7 @@
 
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react"
 
-import { persistJson } from "@/lib/local-storage"
+import { persistJson, readJson } from "@/lib/local-storage"
 import { Watchlist } from "@/lib/types"
 
 import { createWatchlistId } from "./page-helpers"
@@ -13,48 +13,40 @@ const DEFAULT_WATCHLISTS: Watchlist[] = [
 
 export type ContextMenuState = { watchlistId: string; x: number; y: number } | null
 
-function normalizeStoredWatchlists(value: string | null): Watchlist[] {
-  if (!value) return []
+function normalizeStoredWatchlists(value: unknown): Watchlist[] | null {
+  if (!Array.isArray(value)) return []
 
-  try {
-    const parsed = JSON.parse(value)
-    if (!Array.isArray(parsed)) return []
-
-    return parsed
-      .filter((item): item is Partial<Watchlist> & { id: unknown; name: unknown } => (
-        typeof item === "object" && item !== null && "id" in item && "name" in item
-      ))
-      .map((item) => {
-        const tickers = Array.isArray(item.tickers)
-          ? Array.from(
-              new Set(
-                item.tickers
-                  .filter((symbol): symbol is string => typeof symbol === "string")
-                  .map((symbol) => symbol.trim().toUpperCase())
-                  .filter((symbol) => symbol.length > 0)
-              )
+  return value
+    .filter((item): item is Partial<Watchlist> & { id: unknown; name: unknown } => (
+      typeof item === "object" && item !== null && "id" in item && "name" in item
+    ))
+    .map((item) => {
+      const tickers = Array.isArray(item.tickers)
+        ? Array.from(
+            new Set(
+              item.tickers
+                .filter((symbol): symbol is string => typeof symbol === "string")
+                .map((symbol) => symbol.trim().toUpperCase())
+                .filter((symbol) => symbol.length > 0)
             )
-          : []
+          )
+        : []
 
-        return {
-          id: String(item.id),
-          name: String(item.name),
-          provider:
-            typeof item.provider === "string" && item.provider.trim().length > 0
-              ? item.provider.trim()
-              : undefined,
-          q:
-            typeof item.q === "string" && item.q.trim().length > 0
-              ? item.q.trim()
-              : undefined,
-          tickers,
-        }
-      })
-      .filter((item) => item.id === "all" || item.tickers.length > 0 || Boolean(item.provider) || Boolean(item.q))
-  } catch (error) {
-    console.error("Failed to parse stored watchlists", error)
-    return []
-  }
+      return {
+        id: String(item.id),
+        name: String(item.name),
+        provider:
+          typeof item.provider === "string" && item.provider.trim().length > 0
+            ? item.provider.trim()
+            : undefined,
+        q:
+          typeof item.q === "string" && item.q.trim().length > 0
+            ? item.q.trim()
+            : undefined,
+        tickers,
+      }
+    })
+    .filter((item) => item.id === "all" || item.tickers.length > 0 || Boolean(item.provider) || Boolean(item.q))
 }
 
 export function useWatchlists({
@@ -79,7 +71,12 @@ export function useWatchlists({
   }, [activeWatchlistId, customWatchlists])
 
   useEffect(() => {
-    setCustomWatchlists(normalizeStoredWatchlists(localStorage.getItem("customWatchlists")))
+    try {
+      setCustomWatchlists(readJson("customWatchlists", normalizeStoredWatchlists) ?? [])
+    } catch (error) {
+      console.error("Failed to parse stored watchlists", error)
+      setCustomWatchlists([])
+    }
   }, [])
 
   useEffect(() => {

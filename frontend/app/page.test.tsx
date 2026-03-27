@@ -4,11 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import Page from "./page"
 import * as api from "@/lib/api"
 
-vi.mock("@/lib/api", () => ({
-  fetchNews: vi.fn(),
-  fetchNewsIds: vi.fn(),
-  fetchTickers: vi.fn(),
-}))
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>()
+  return {
+    ...actual,
+    fetchNews: vi.fn(),
+    fetchNewsIds: vi.fn(),
+    fetchTickers: vi.fn(),
+  }
+})
 
 vi.mock("@/hooks/usePushSubscription", () => ({
   usePushSubscription: vi.fn(() => ({
@@ -23,10 +27,14 @@ vi.mock("@/hooks/usePushSubscription", () => ({
   })),
 }))
 
-vi.mock("@/lib/local-storage", () => ({
-  persistJson: vi.fn(),
-  persistValue: vi.fn(),
-}))
+vi.mock("@/lib/local-storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/local-storage")>()
+  return {
+    ...actual,
+    persistJson: vi.fn(),
+    persistValue: vi.fn(),
+  }
+})
 
 const mockedApi = vi.mocked(api)
 

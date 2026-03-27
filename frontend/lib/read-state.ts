@@ -1,16 +1,11 @@
+import type { NewsFilterParams, NewsIdsRequestParams } from "./api"
 import type { NewsIdsResponse } from "./types"
 
-export type ReadQueryParams = {
-  tickers?: string[]
-  provider?: string
-  includeUnmappedFromProvider?: string
-  q?: string
-}
+import { buildNewsRequestParams } from "./api"
 
-type FetchNewsIdsPage = (params: ReadQueryParams & {
-  cursor?: string
-  limit?: number
-}) => Promise<NewsIdsResponse>
+export type ReadQueryParams = NewsFilterParams
+
+type FetchNewsIdsPage = (params: NewsIdsRequestParams) => Promise<NewsIdsResponse>
 
 type SetReadIds = (updater: (previous: Set<number>) => Set<number>) => void
 
@@ -53,11 +48,10 @@ export async function markReadIdsByQuery({
 
   try {
     for (;;) {
-      const data = await fetchIds({
-        ...params,
+      const data = await fetchIds(buildNewsRequestParams(params, {
         limit: pageSize,
         cursor,
-      })
+      }))
       for (const id of data.ids) {
         collectedIds.add(id)
       }
