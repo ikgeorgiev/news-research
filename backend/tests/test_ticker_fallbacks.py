@@ -179,6 +179,130 @@ def test_prnewswire_fallback_validates_plain_token_from_fetched_body(monkeypatch
     assert hits["CGO"][0] == "validated_token"
     assert hits["CGO"][1] >= MIN_PERSIST_CONFIDENCE
 
+
+def test_prnewswire_fallback_ignores_timezone_token_false_positive(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>BlackRock retains first place in a new brand study.</p>
+            <p>A webinar is scheduled for Tuesday, 14 April 2026 at 2:00pm BST | 9:00am EST | 9:00pm CST.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BlackRock retains top spot",
+        "",
+        "https://www.prnewswire.com/news-releases/blackrock-302729339.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset({"blackrock", "technology", "science"})
+        },
+    )
+
+    assert "BST" not in hits
+
+
+def test_prnewswire_fallback_keeps_ticker_near_bare_number(monkeypatch):
+    """BST should still match when a bare number (not a time) precedes it."""
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>In 26 BST returned over 15% for the year. BlackRock technology trust.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BST annual performance review",
+        "",
+        "https://www.prnewswire.com/news-releases/bst-performance-12345.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset({"blackrock", "technology", "science"})
+        },
+    )
+
+    assert "BST" in hits
+
+
+def test_prnewswire_fallback_ignores_parenthesized_timezone_false_positive(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>BlackRock retains first place in a new brand study.</p>
+            <p>A webinar is scheduled for Tuesday, 14 April 2026 at 2:00pm (BST).</p>
+            <p>BlackRock science and technology trust remains a leader in the segment.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BlackRock retains top spot",
+        "",
+        "https://www.prnewswire.com/news-releases/blackrock-302729339.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset({"blackrock", "technology", "science"})
+        },
+    )
+
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_extract_entry_tickers_keeps_title_token_when_summary_starts_with_time():
+    hits = _extract_entry_tickers(
+        "BlackRock Science and Technology Trust BST",
+        "9:00am webcast tomorrow",
+        "https://example.com",
+        "",
+        {"BST"},
+        symbol_keywords={"BST": frozenset({"blackrock", "technology", "science"})},
+    )
+
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_extract_entry_tickers_keeps_title_paren_when_summary_starts_with_time():
+    hits = _extract_entry_tickers(
+        "BlackRock Science and Technology Trust (BST)",
+        "9:00am webcast tomorrow",
+        "https://example.com",
+        "",
+        {"BST"},
+        symbol_keywords={"BST": frozenset({"blackrock", "technology", "science"})},
+    )
+
+    assert hits["BST"][0] == "paren"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
 def test_globenewswire_fallback_extracts_exchange_and_table(monkeypatch):
     config = PAGE_FETCH_CONFIGS["globenewswire"]
 

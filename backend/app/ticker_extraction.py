@@ -51,6 +51,15 @@ TABLE_CELL_SYMBOL_PATTERN = re.compile(
     r"<td[^>]*>(?:\s|<[^>]+>)*([A-Z][A-Z0-9\.\-]{0,9})(?:\s|<[^>]+>)*</td>",
     flags=re.IGNORECASE,
 )
+TIME_CONTEXT_BEFORE_PATTERN = re.compile(
+    r"\b\d{1,2}(?::\d{2})\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:\(|\[)?\s*$"
+    r"|"
+    r"\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\s*(?:\(|\[)?\s*$",
+    re.IGNORECASE,
+)
+TIME_CONTEXT_AFTER_PATTERN = re.compile(
+    r"(?i)^\s*(?:[|/,;\-]\s*)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b"
+)
 STOPWORDS = {
     "A",
     "AN",
@@ -83,6 +92,34 @@ STOPWORDS = {
 AMBIGUOUS_TOKEN_SYMBOLS = {
     "FUND",
     "IDE",
+}
+TIMEZONE_ABBREVIATIONS = {
+    "ACDT",
+    "ACST",
+    "AEDT",
+    "AEST",
+    "AKDT",
+    "AKST",
+    "AST",
+    "BST",
+    "CDT",
+    "CEST",
+    "CET",
+    "CST",
+    "EDT",
+    "EEST",
+    "EET",
+    "EST",
+    "GMT",
+    "HKT",
+    "IST",
+    "JST",
+    "MDT",
+    "MST",
+    "PDT",
+    "PST",
+    "SGT",
+    "UTC",
 }
 
 _source_page_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
@@ -164,6 +201,19 @@ def _strip_noise_elements(html_text: str) -> str:
 
 def _extract_article_body(html_text: str) -> str | None:
     return extract_article_body(html_text)
+
+
+def _is_timezone_token_in_time_context(text: str, start: int, end: int) -> bool:
+    symbol = text[start:end].upper()
+    if symbol not in TIMEZONE_ABBREVIATIONS:
+        return False
+
+    before = text[max(0, start - 24) : start]
+    after = text[end : min(len(text), end + 24)]
+    return bool(
+        TIME_CONTEXT_BEFORE_PATTERN.search(before)
+        or TIME_CONTEXT_AFTER_PATTERN.search(after)
+    )
 
 
 def _extract_source_fallback_tickers(
@@ -254,50 +304,64 @@ def _extract_entry_tickers(
     if len(context_symbols) == 1:
         add(context_symbols[0], "context", CONFIDENCE_CONTEXT)
 
-    text = " ".join([title or "", summary or "", link or ""])
+    text_segments = [segment for segment in [title, summary, link] if segment]
+    text = " ".join(text_segments)
     text_lower = text.lower() if symbol_keywords is not None else None
 
-    for symbol in EXCHANGE_PATTERN.findall(text):
-        add(symbol.upper(), "exchange", CONFIDENCE_EXCHANGE)
+    for segment in text_segments:
+        for symbol in EXCHANGE_PATTERN.findall(segment):
+            add(symbol.upper(), "exchange", CONFIDENCE_EXCHANGE)
 
-    for symbol in PAREN_SYMBOL_PATTERN.findall(text):
-        upper = symbol.upper()
-        if upper in STOPWORDS:
-            if (
-                symbol_keywords is not None
-                and text_lower is not None
-                and upper in known_symbols
-            ):
-                kws = symbol_keywords.get(upper, frozenset())
-                if kws and _text_matches_validation_keywords(text_lower, kws):
-                    add(upper, "paren", CONFIDENCE_PAREN)
-            continue
-        if symbol_keywords is not None:
-            kws = symbol_keywords.get(upper, frozenset())
-            if not kws:
-                add(upper, "paren", NO_KEYWORDS_CONFIDENCE)
-                continue
-            if (
-                text_lower is not None
-                and kws
-                and _text_matches_validation_keywords(text_lower, kws)
-            ):
-                add(upper, "paren", CONFIDENCE_PAREN)
-            else:
-                add(upper, "paren", CONFIDENCE_UNVALIDATED)
-            continue
-        add(upper, "paren", CONFIDENCE_PAREN)
-
-    if include_token:
-        for symbol in TOKEN_PATTERN.findall(text):
+        for match in PAREN_SYMBOL_PATTERN.finditer(segment):
+            symbol = match.group(1)
             upper = symbol.upper()
-            if upper in STOPWORDS or upper in AMBIGUOUS_TOKEN_SYMBOLS:
+            if upper in STOPWORDS:
+                if (
+                    symbol_keywords is not None
+                    and text_lower is not None
+                    and upper in known_symbols
+                ):
+                    kws = symbol_keywords.get(upper, frozenset())
+                    if kws and _text_matches_validation_keywords(text_lower, kws):
+                        add(upper, "paren", CONFIDENCE_PAREN)
+                continue
+            if _is_timezone_token_in_time_context(
+                segment, match.start(1), match.end(1)
+            ):
+                continue
+            if symbol_keywords is not None:
+                kws = symbol_keywords.get(upper, frozenset())
+                if not kws:
+                    add(upper, "paren", NO_KEYWORDS_CONFIDENCE)
+                    continue
+                if (
+                    text_lower is not None
+                    and kws
+                    and _text_matches_validation_keywords(text_lower, kws)
+                ):
+                    add(upper, "paren", CONFIDENCE_PAREN)
+                else:
+                    add(upper, "paren", CONFIDENCE_UNVALIDATED)
+                continue
+            add(upper, "paren", CONFIDENCE_PAREN)
+
+        if not include_token:
+            continue
+
+        for match in TOKEN_PATTERN.finditer(segment):
+            symbol = match.group(0)
+            upper = symbol.upper()
+            if upper in STOPWORDS:
                 continue
             if symbol_keywords is not None and text_lower is not None:
                 kws = symbol_keywords.get(upper, frozenset())
                 if kws and _text_matches_validation_keywords(text_lower, kws):
                     add(upper, "validated_token", CONFIDENCE_VALIDATED_TOKEN)
                     continue
+            if upper in AMBIGUOUS_TOKEN_SYMBOLS:
+                continue
+            if _is_timezone_token_in_time_context(segment, match.start(), match.end()):
+                continue
             add(upper, "token", CONFIDENCE_UNVALIDATED)
 
     return hits
