@@ -58,13 +58,23 @@ class SourcePageConfig:
     source_code: str
     hostname_suffix: str
     table_match_type: str
+    allow_body_token_match: bool = True
+    require_phrase_or_short_body_keyword: bool = False
 
 
 PAGE_FETCH_CONFIGS: dict[str, SourcePageConfig] = {
     "businesswire": SourcePageConfig("businesswire", "businesswire.com", "bw_table"),
-    "prnewswire": SourcePageConfig("prnewswire", "prnewswire.com", "prn_table"),
+    "prnewswire": SourcePageConfig(
+        "prnewswire",
+        "prnewswire.com",
+        "prn_table",
+        allow_body_token_match=True,
+        require_phrase_or_short_body_keyword=True,
+    ),
     "globenewswire": SourcePageConfig(
-        "globenewswire", "globenewswire.com", "gnw_table"
+        "globenewswire",
+        "globenewswire.com",
+        "gnw_table",
     ),
 }
 

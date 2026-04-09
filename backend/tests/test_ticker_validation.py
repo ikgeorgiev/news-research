@@ -210,6 +210,31 @@ def test_token_match_validated_when_short_sponsor_acronym_present():
     assert hits["CMU"][0] == "validated_token"
     assert hits["CMU"][1] >= MIN_PERSIST_CONFIDENCE
 
+def test_distribution_words_still_validate_normal_feed_title_match():
+    known = {"PDT"}
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "PDT",
+                "JHancock Premium Dividend Fund",
+                "John Hancock",
+            )
+        ]
+    )
+    hits = _extract_entry_tickers(
+        "Premium Dividend Fund PDT declares monthly distribution",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "premium dividend" in sym_kws["PDT"]
+    assert "PDT" in hits
+    assert hits["PDT"][0] == "validated_token"
+    assert hits["PDT"][1] >= MIN_PERSIST_CONFIDENCE
+
 def test_short_keyword_validation_respects_word_boundaries():
     known = {"DNP"}
     sym_kws = {"DNP": frozenset({"il"})}

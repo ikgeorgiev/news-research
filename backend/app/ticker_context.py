@@ -68,6 +68,36 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "first",
     }
 )
+
+_GENERIC_PRNEWSWIRE_BODY_KEYWORDS = frozenset(
+    {
+        "asset",
+        "assets",
+        "bond",
+        "bonds",
+        "capital",
+        "credit",
+        "debt",
+        "emerging",
+        "equity",
+        "fund",
+        "global",
+        "income",
+        "market",
+        "markets",
+        "muni",
+        "municipal",
+        "opportunities",
+        "opportunity",
+        "premium",
+        "return",
+        "strategic",
+        "strategy",
+        "total",
+        "trust",
+        "yield",
+    }
+)
 _SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
     {
         "ag",
@@ -113,14 +143,20 @@ def _validation_keyword_pattern(keyword: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])")
 
 
-def _text_matches_validation_keywords(
+def _matching_validation_keywords(
     text_lower: str, keywords: frozenset[str]
-) -> bool:
-    matched_keywords = [
+) -> frozenset[str]:
+    return frozenset(
         keyword
         for keyword in keywords
         if _validation_keyword_pattern(keyword).search(text_lower) is not None
-    ]
+    )
+
+
+def _text_matches_validation_keywords(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    matched_keywords = _matching_validation_keywords(text_lower, keywords)
     if not matched_keywords:
         return False
     if any(" " in keyword for keyword in matched_keywords):
@@ -128,6 +164,34 @@ def _text_matches_validation_keywords(
     if any(len(keyword) <= 3 for keyword in matched_keywords):
         return True
     return len(set(matched_keywords)) >= 2
+
+
+def _has_phrase_or_short_validation_keyword_match(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    matched_keywords = _matching_validation_keywords(text_lower, keywords)
+    if not matched_keywords:
+        return False
+    return any(" " in keyword or len(keyword) <= 3 for keyword in matched_keywords)
+
+
+def _has_phrase_short_or_two_keyword_override_match(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    matched_keywords = _matching_validation_keywords(text_lower, keywords)
+    if not matched_keywords:
+        return False
+    if any(" " in keyword or len(keyword) <= 3 for keyword in matched_keywords):
+        return True
+    distinct_matches = set(matched_keywords)
+    if len(distinct_matches) < 2:
+        return False
+    if len(keywords) == 2:
+        return True
+    return any(
+        keyword not in _GENERIC_PRNEWSWIRE_BODY_KEYWORDS
+        for keyword in distinct_matches
+    )
 
 
 def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:

@@ -19,6 +19,8 @@ from app.constants import (
 )
 from app.ticker_context import (
     _build_symbol_keywords as _build_symbol_keywords_impl,
+    _has_phrase_or_short_validation_keyword_match as _has_phrase_or_short_validation_keyword_match_impl,
+    _has_phrase_short_or_two_keyword_override_match as _has_phrase_short_or_two_keyword_override_match_impl,
     _text_matches_validation_keywords as _text_matches_validation_keywords_impl,
 )
 from app.sources import (
@@ -138,6 +140,20 @@ def _build_symbol_keywords(
     return _build_symbol_keywords_impl(ticker_rows)
 
 
+def _has_phrase_or_short_validation_keyword_match(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    return _has_phrase_or_short_validation_keyword_match_impl(text_lower, keywords)
+
+
+def _has_phrase_short_or_two_keyword_override_match(
+    text_lower: str, keywords: frozenset[str]
+) -> bool:
+    return _has_phrase_short_or_two_keyword_override_match_impl(
+        text_lower, keywords
+    )
+
+
 def _parse_context_symbols(feed_url: str) -> list[str]:
     parsed = urlparse(feed_url)
     values = parse_qs(parsed.query).get("s", [])
@@ -238,23 +254,96 @@ def _extract_source_fallback_tickers(
         if trafilatura_text is not None
         else _html_to_plain_text(table_html)
     )
-    validation_text_lower = (
-        " ".join([part for part in [title, summary, plain_text] if part]).lower()
-        if symbol_keywords is not None
-        else None
-    )
-    enriched_summary = " ".join(
-        [part for part in [summary, plain_text] if part]
+    validation_text = " ".join(
+        [part for part in [title, summary, plain_text] if part]
     ).strip()
-    hits = _extract_entry_tickers(
+    explicit_hit_validation_text = " ".join(
+        [part for part in [title, summary, plain_text, link] if part]
+    ).strip()
+    validation_text_lower = (
+        validation_text.lower() if symbol_keywords is not None else None
+    )
+    raw_entry_hits = _extract_entry_tickers(
         title,
-        enriched_summary,
+        summary,
         link,
         feed_url,
         known_symbols,
         include_token=True,
         symbol_keywords=symbol_keywords,
     )
+    entry_hits = _extract_entry_tickers(
+        title,
+        summary,
+        link,
+        feed_url,
+        known_symbols,
+        include_token=True,
+        symbol_keywords=symbol_keywords,
+        validation_text=explicit_hit_validation_text,
+    )
+    body_hits = _extract_entry_tickers(
+        "",
+        plain_text,
+        "",
+        "",
+        known_symbols,
+        # PRNewswire/GlobeNewswire page fetches are broad press-release pages:
+        # Keep body fallback scoped to explicit ticker syntax. Bare-token rescue
+        # is handled separately below so slug keywords cannot validate generic
+        # body tokens or stray table values.
+        include_token=False,
+        symbol_keywords=symbol_keywords,
+        validation_text=explicit_hit_validation_text,
+    )
+    if config.allow_body_token_match:
+        token_body_hits = _extract_entry_tickers(
+            "",
+            plain_text,
+            "",
+            "",
+            known_symbols,
+            include_token=True,
+            symbol_keywords=symbol_keywords,
+            validation_text=validation_text,
+        )
+        body_hits = {
+            symbol: hit
+            for symbol, hit in token_body_hits.items()
+            if hit[0] in {"validated_token", "token"}
+        } | body_hits
+    if (
+        config.require_phrase_or_short_body_keyword
+        and symbol_keywords is not None
+    ):
+        plain_text_lower = plain_text.lower()
+        validation_evidence_lower = (
+            explicit_hit_validation_text.lower()
+            if symbol_keywords is not None
+            else plain_text_lower
+        )
+        entry_validation_evidence_lower = validation_text_lower or plain_text_lower
+        for symbol, hit in list(entry_hits.items()):
+            raw_hit = raw_entry_hits.get(symbol)
+            if hit[0] != "validated_token":
+                continue
+            if raw_hit is not None and raw_hit[1] >= hit[1]:
+                continue
+            keywords = symbol_keywords.get(symbol, frozenset())
+            if keywords and not _has_phrase_short_or_two_keyword_override_match(
+                entry_validation_evidence_lower, keywords
+            ):
+                entry_hits[symbol] = ("token", CONFIDENCE_UNVALIDATED)
+        for symbol, hit in list(body_hits.items()):
+            if hit[0] != "validated_token":
+                continue
+            keywords = symbol_keywords.get(symbol, frozenset())
+            if keywords and not _has_phrase_short_or_two_keyword_override_match(
+                validation_evidence_lower, keywords
+            ):
+                body_hits.pop(symbol, None)
+    hits = dict(entry_hits)
+    _merge_ticker_hits(hits, body_hits)
     hits = {
         symbol: hit
         for symbol, hit in hits.items()
@@ -290,6 +379,7 @@ def _extract_entry_tickers(
     *,
     include_token: bool = True,
     symbol_keywords: dict[str, frozenset[str]] | None = None,
+    validation_text: str | None = None,
 ) -> dict[str, tuple[str, float]]:
     hits: dict[str, tuple[str, float]] = {}
 
@@ -305,7 +395,7 @@ def _extract_entry_tickers(
         add(context_symbols[0], "context", CONFIDENCE_CONTEXT)
 
     text_segments = [segment for segment in [title, summary, link] if segment]
-    text = " ".join(text_segments)
+    text = validation_text if validation_text is not None else " ".join(text_segments)
     text_lower = text.lower() if symbol_keywords is not None else None
 
     for segment in text_segments:

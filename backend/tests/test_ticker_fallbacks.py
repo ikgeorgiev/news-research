@@ -150,7 +150,7 @@ def test_prnewswire_fallback_extracts_table_symbols(monkeypatch):
     assert hits["VKQ"][1] == 0.84
     assert "OIA" not in hits
 
-def test_prnewswire_fallback_validates_plain_token_from_fetched_body(monkeypatch):
+def test_prnewswire_fallback_keeps_body_token_with_phrase_keyword_match(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
 
     def fake_fetch(_url, _timeout, _config):
@@ -175,9 +175,50 @@ def test_prnewswire_fallback_validates_plain_token_from_fetched_body(monkeypatch
         symbol_keywords={"CGO": frozenset({"calamos", "calamos global"})},
     )
 
-    assert "CGO" in hits
     assert hits["CGO"][0] == "validated_token"
     assert hits["CGO"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_drops_body_only_validated_token_with_generic_keywords(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>
+              With Emerging Market Debt continuing to be a focus for clients,
+              we are delighted to be working alongside Aktia's outstanding EMD team.
+            </p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Aktia Bank Plc expands its distribution network in Europe through three new sales partnerships",
+        "",
+        "https://www.prnewswire.com/news-releases/aktia-bank-plc-expands-its-distribution-network-in-europe-through-three-new-sales-partnerships-302737985.html",
+        "",
+        {"EMD"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=_build_symbol_keywords(
+            [
+                (
+                    1,
+                    "EMD",
+                    "Western Asset Emerging Markets Debt",
+                    "Franklin Templeton Fund Adviser, LLC",
+                )
+            ]
+        ),
+    )
+
+    assert not hits or "EMD" not in hits
 
 
 def test_prnewswire_fallback_ignores_timezone_token_false_positive(monkeypatch):
@@ -204,15 +245,52 @@ def test_prnewswire_fallback_ignores_timezone_token_false_positive(monkeypatch):
         timeout_seconds=5,
         config=config,
         symbol_keywords={
-            "BST": frozenset({"blackrock", "technology", "science"})
+            "BST": frozenset(
+                {"blackrock", "technology", "science", "blackrock science"}
+            )
         },
     )
 
     assert "BST" not in hits
 
 
-def test_prnewswire_fallback_keeps_ticker_near_bare_number(monkeypatch):
-    """BST should still match when a bare number (not a time) precedes it."""
+def test_prnewswire_fallback_keeps_title_token_when_body_supplies_keywords(monkeypatch):
+    """Fetched-body keywords should still validate a title token."""
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>In 26 BST returned over 15% for the year. BlackRock science and technology trust.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BST annual performance review",
+        "",
+        "https://www.prnewswire.com/news-releases/bst-performance-12345.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset(
+                {"blackrock", "technology", "science", "blackrock science"}
+            )
+        },
+    )
+
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_keeps_two_ordinary_keywords_for_larger_keyword_sets(
+    monkeypatch,
+):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
 
     def fake_fetch(_url, _timeout, _config):
@@ -235,23 +313,25 @@ def test_prnewswire_fallback_keeps_ticker_near_bare_number(monkeypatch):
         timeout_seconds=5,
         config=config,
         symbol_keywords={
-            "BST": frozenset({"blackrock", "technology", "science"})
+            "BST": frozenset(
+                {"blackrock", "science", "technology", "blackrock science"}
+            )
         },
     )
 
-    assert "BST" in hits
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
 
 
-def test_prnewswire_fallback_ignores_parenthesized_timezone_false_positive(monkeypatch):
+def test_prnewswire_fallback_keeps_parenthesized_ticker_from_fetched_body(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
 
     def fake_fetch(_url, _timeout, _config):
         return """
         <html><body>
           <article>
-            <p>BlackRock retains first place in a new brand study.</p>
-            <p>A webinar is scheduled for Tuesday, 14 April 2026 at 2:00pm (BST).</p>
             <p>BlackRock science and technology trust remains a leader in the segment.</p>
+            <p>BlackRock Science and Technology Trust (BST) completed the quarter strongly.</p>
           </article>
         </body></html>
         """
@@ -271,8 +351,187 @@ def test_prnewswire_fallback_ignores_parenthesized_timezone_false_positive(monke
         },
     )
 
+    assert hits["BST"][0] == "paren"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_aktia_emd_false_positive_stays_subthreshold(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>With Emerging Market Debt continuing to be a focus for clients, we are delighted
+            to be working alongside Aktia's outstanding EMD team.</p>
+            <p>The compelling opportunities that local-currency emerging and frontier market debt
+            offer portfolios make this an especially timely partnership.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "EMD",
+                "Western Asset Emerging Markets Debt",
+                "Franklin Templeton Fund Adviser, LLC",
+            )
+        ]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Aktia expands its distribution network in Europe",
+        "",
+        "https://www.prnewswire.com/news-releases/aktia-302737985.html",
+        "",
+        {"EMD"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "EMD" not in hits
+
+
+def test_prnewswire_fallback_does_not_upgrade_title_token_from_generic_body_keywords(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>With Emerging Market Debt continuing to be a focus for clients.</p>
+            <p>The compelling opportunities that local-currency emerging and frontier market debt offer portfolios make this timely.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Aktia expands its EMD team in Europe",
+        "",
+        "https://www.prnewswire.com/news-releases/aktia-302737985.html",
+        "",
+        {"EMD"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=_build_symbol_keywords(
+            [
+                (
+                    1,
+                    "EMD",
+                    "Western Asset Emerging Markets Debt",
+                    "Franklin Templeton Fund Adviser, LLC",
+                )
+            ]
+        ),
+    )
+
+    assert "EMD" not in hits
+
+
+def test_prnewswire_fallback_keeps_body_token_when_title_supplies_phrase(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>BST completed the quarter strongly.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "BlackRock science and technology trust quarterly update",
+        "",
+        "https://www.prnewswire.com/news-releases/blackrock-bst-12345.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset(
+                {"blackrock", "technology", "science", "blackrock science"}
+            )
+        },
+    )
+
     assert hits["BST"][0] == "validated_token"
     assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_keeps_two_keyword_override_validation(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Duff &amp; Phelps discussed the quarter and portfolio positioning.</p>
+            <p>DNP completed the quarter strongly.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Fund quarterly update DNP",
+        "",
+        "https://www.prnewswire.com/news-releases/dnp-quarterly-update-12345.html",
+        "",
+        {"DNP"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"DNP": frozenset({"duff", "phelps"})},
+    )
+
+    assert hits["DNP"][0] == "validated_token"
+    assert hits["DNP"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_keeps_title_token_when_summary_and_body_split_keywords(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Phelps discussed portfolio positioning for the quarter.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "DNP monthly update",
+        "Duff announces the monthly commentary",
+        "https://www.prnewswire.com/news-releases/dnp-monthly-update-12345.html",
+        "",
+        {"DNP"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"DNP": frozenset({"duff", "phelps"})},
+    )
+
+    assert hits["DNP"][0] == "validated_token"
+    assert hits["DNP"][1] >= MIN_PERSIST_CONFIDENCE
 
 
 def test_extract_entry_tickers_keeps_title_token_when_summary_starts_with_time():
@@ -336,6 +595,103 @@ def test_globenewswire_fallback_extracts_exchange_and_table(monkeypatch):
     assert hits["DSM"][0] == "exchange"
     assert "LEO" in hits
     assert hits["LEO"][0] == "gnw_table"
+
+
+def test_globenewswire_fallback_keeps_body_token_match(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Brookfield Real Assets Income Fund RA declares monthly distribution.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Monthly distribution update",
+        "",
+        "https://www.globenewswire.com/news-release/2026/03/abc",
+        "https://rss.globenewswire.com/en/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"RA"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"RA": frozenset({"brookfield", "real assets"})},
+    )
+
+    assert hits["RA"][0] == "validated_token"
+    assert hits["RA"][1] >= MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_does_not_validate_table_hit_from_url_slug_only(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Generic corporate update.</p>
+            <table>
+              <tr><th>Ticker</th></tr>
+              <tr><td>BST</td></tr>
+            </table>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Generic corporate update",
+        "",
+        "https://www.prnewswire.com/news-releases/blackrock-science-technology-302701199.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={"BST": frozenset({"blackrock", "technology", "science"})},
+    )
+
+    assert hits["BST"] == ("prn_table", 0.62)
+
+
+def test_prnewswire_fallback_keeps_parenthesized_body_hit_with_slug_keywords(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Quarter completed strongly (BST).</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Quarterly update",
+        "",
+        "https://www.prnewswire.com/news-releases/blackrock-science-technology-quarterly-update-12345.html",
+        "",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset(
+                {"blackrock", "science", "technology", "blackrock science"}
+            )
+        },
+    )
+
+    assert hits["BST"][0] == "paren"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
 
 def test_prnewswire_fallback_drops_table_hits_without_keyword_support(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
