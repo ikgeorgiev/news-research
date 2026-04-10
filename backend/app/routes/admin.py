@@ -125,6 +125,9 @@ def admin_purge_false_positives(
         dry_run=dry_run,
         limit=limit,
         timeout_seconds=settings.request_timeout_seconds,
+        globenewswire_source_page_timeout_seconds=getattr(
+            settings, "globenewswire_source_page_timeout_seconds", None
+        ),
     )
     return PurgeFalsePositiveResponse(
         dry_run=dry_run,
@@ -145,6 +148,9 @@ def admin_revalidate_articles(
         db,
         limit=limit,
         timeout_seconds=settings.request_timeout_seconds,
+        globenewswire_source_page_timeout_seconds=getattr(
+            settings, "globenewswire_source_page_timeout_seconds", None
+        ),
     )
     return RevalidationResponse(
         scanned=int(result["scanned"]),
@@ -177,6 +183,9 @@ def admin_remap_source(
         source_code=source_code,
         limit=limit,
         only_unmapped=only_unmapped,
+        globenewswire_source_page_timeout_seconds=getattr(
+            settings, "globenewswire_source_page_timeout_seconds", None
+        ),
     )
     return _source_remap_response_payload(result)
 
@@ -195,6 +204,9 @@ def admin_reload_tickers(
 
     source_remap_payloads: list[SourceRemapResponse] = []
     if remap_unmapped:
+        gn_timeout = getattr(
+            settings, "globenewswire_source_page_timeout_seconds", None
+        )
         for code in sorted(PAGE_FETCH_CONFIGS.keys()):
             result = remap_source_articles(
                 db,
@@ -202,6 +214,7 @@ def admin_reload_tickers(
                 source_code=code,
                 limit=remap_limit,
                 only_unmapped=True,
+                globenewswire_source_page_timeout_seconds=gn_timeout,
             )
             source_remap_payloads.append(_source_remap_response_payload(result))
 

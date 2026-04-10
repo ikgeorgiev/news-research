@@ -136,6 +136,16 @@ def _run_feed_ingestion(
         "known_symbols": ticker_context.known_symbols,
         "symbol_to_id": ticker_context.symbol_to_id,
         "timeout_seconds": settings.request_timeout_seconds,
+        "globenewswire_source_page_timeout_seconds": getattr(
+            settings,
+            "globenewswire_source_page_timeout_seconds",
+            5,
+        ),
+        "globenewswire_source_page_max_fetches_per_feed": getattr(
+            settings,
+            "globenewswire_source_page_max_fetches_per_feed",
+            3,
+        ),
         "fetch_max_attempts": settings.feed_fetch_max_attempts,
         "fetch_backoff_seconds": settings.feed_fetch_backoff_seconds,
         "fetch_backoff_jitter_seconds": settings.feed_fetch_backoff_jitter_seconds,
@@ -267,10 +277,20 @@ def _run_post_ingestion_remaps(
     source_remaps: list[SourceRemapStats] = []
     ticker_changed = ticker_sync["created"] > 0 or ticker_sync["updated"] > 0
     if ticker_changed:
+        gn_timeout = getattr(
+            settings,
+            "globenewswire_source_page_timeout_seconds",
+            None,
+        )
         for code in PAGE_FETCH_CONFIGS:
             source_remaps.append(
                 remap_source_articles(
-                    db, settings, source_code=code, limit=500, only_unmapped=True
+                    db,
+                    settings,
+                    source_code=code,
+                    limit=500,
+                    only_unmapped=True,
+                    globenewswire_source_page_timeout_seconds=gn_timeout,
                 )
             )
     return source_remaps
@@ -282,6 +302,11 @@ def _run_stale_revalidation(db: Session, settings: Settings) -> None:
             db,
             limit=100,
             timeout_seconds=settings.request_timeout_seconds,
+            globenewswire_source_page_timeout_seconds=getattr(
+                settings,
+                "globenewswire_source_page_timeout_seconds",
+                None,
+            ),
         )
         if revalidation_stats["scanned"]:
             logger.info(

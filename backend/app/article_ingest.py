@@ -42,6 +42,7 @@ from app.ticker_extraction import (
     _max_ticker_confidence,
     _merge_ticker_hits,
     _should_persist_entry,
+    _source_page_fetch_requires_network,
     _verified_ticker_hits,
 )
 from app.utils import GENERAL_SOURCE_CODE, canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_utc
@@ -277,6 +278,7 @@ class EntryResult:
     created_article: bool = False
     persisted_raw: bool = False
     has_article: bool = False
+    used_page_fetch: bool = False
     raw_guid: str | None = None
     raw_pair: tuple[str, datetime | None] | None = None
 
@@ -353,6 +355,7 @@ def _process_single_entry(
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
     page_config,
+    source_page_timeout_seconds: int | None = None,
     recorded_guids: set[str],
     recorded_pairs: set[tuple[str, datetime | None]],
     symbol_keywords: dict[str, frozenset[str]] | None = None,
@@ -439,16 +442,22 @@ def _process_single_entry(
             max_hit_conf < MIN_PERSIST_CONFIDENCE
             and page_config is not None
         ):
+            page_timeout = (
+                source_page_timeout_seconds
+                if source_page_timeout_seconds is not None
+                else timeout_seconds
+            )
             fallback_hits = _extract_source_fallback_tickers(
                 prepared.title,
                 summary or "",
                 prepared.raw_link,
                 feed_url,
                 known_symbols,
-                timeout_seconds,
+                page_timeout,
                 page_config,
                 symbol_keywords=symbol_keywords,
             )
+            result.used_page_fetch = True
             if fallback_hits:
                 _merge_ticker_hits(ticker_hits, fallback_hits)
 
@@ -531,6 +540,8 @@ def ingest_feed(
     known_symbols: set[str],
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
+    globenewswire_source_page_timeout_seconds: int = 5,
+    globenewswire_source_page_max_fetches_per_feed: int = 3,
     fetch_max_attempts: int = 3,
     fetch_backoff_seconds: float = 1.0,
     fetch_backoff_jitter_seconds: float = 0.3,
@@ -611,8 +622,33 @@ def ingest_feed(
 
                 provider_name = _clamp_label(source.name)
                 page_config = PAGE_FETCH_CONFIGS.get(source.code)
+                source_page_timeout_seconds = (
+                    globenewswire_source_page_timeout_seconds
+                    if source.code == "globenewswire"
+                    else None
+                )
+                page_fetches_remaining = (
+                    globenewswire_source_page_max_fetches_per_feed
+                    if source.code == "globenewswire"
+                    else None
+                )
 
                 for prepared in prepared_entries:
+                    page_fetch_requires_network = False
+                    effective_page_config = page_config
+                    if (
+                        page_config is not None
+                        and page_fetches_remaining is not None
+                    ):
+                        page_fetch_requires_network = _source_page_fetch_requires_network(
+                            prepared.raw_link,
+                            page_config,
+                        )
+                        if (
+                            page_fetch_requires_network
+                            and page_fetches_remaining <= 0
+                        ):
+                            effective_page_config = None
                     try:
                         entry_result = _process_single_entry(
                             db,
@@ -624,11 +660,18 @@ def ingest_feed(
                             known_symbols=known_symbols,
                             symbol_to_id=symbol_to_id,
                             timeout_seconds=timeout_seconds,
-                            page_config=page_config,
+                            page_config=effective_page_config,
+                            source_page_timeout_seconds=source_page_timeout_seconds,
                             recorded_guids=recorded_guids,
                             recorded_pairs=recorded_pairs,
                             symbol_keywords=symbol_keywords,
                         )
+                        if (
+                            page_fetch_requires_network
+                            and page_fetches_remaining is not None
+                            and entry_result.used_page_fetch
+                        ):
+                            page_fetches_remaining -= 1
 
                         if entry_result.persisted_raw:
                             if entry_result.created_article:
@@ -639,6 +682,11 @@ def ingest_feed(
                                 recorded_pairs.add(entry_result.raw_pair)
 
                     except Exception as entry_exc:  # fault-isolation: broad catch intentional
+                        if (
+                            page_fetch_requires_network
+                            and page_fetches_remaining is not None
+                        ):
+                            page_fetches_remaining -= 1
                         entry_errors += 1
                         error_text = f"Skipped {entry_errors} malformed entr{'y' if entry_errors == 1 else 'ies'}: {entry_exc}"
                         continue

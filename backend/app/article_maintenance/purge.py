@@ -33,6 +33,7 @@ def purge_token_only_articles(
     dry_run: bool = True,
     limit: int = 2000,
     timeout_seconds: int = 20,
+    globenewswire_source_page_timeout_seconds: int | None = None,
 ) -> PurgeFalsePositiveStats:
     ticker_context = load_ticker_context(db)
 
@@ -210,6 +211,7 @@ def purge_token_only_articles(
                 raw_contexts,
                 ticker_context.known_symbols,
                 timeout_seconds,
+                globenewswire_source_page_timeout_seconds=globenewswire_source_page_timeout_seconds,
                 symbol_keywords=ticker_context.symbol_keywords,
                 stop_when_existing_symbols_verified=existing_symbols,
                 page_fetch_status=fetch_status,

@@ -32,6 +32,7 @@ def remap_source_articles(
     source_code: str,
     limit: int = 500,
     only_unmapped: bool = True,
+    globenewswire_source_page_timeout_seconds: int | None = None,
 ) -> SourceRemapStats:
     ticker_context = load_ticker_context(db)
 
@@ -76,6 +77,7 @@ def remap_source_articles(
             raw_contexts,
             ticker_context.known_symbols,
             settings.request_timeout_seconds,
+            globenewswire_source_page_timeout_seconds=globenewswire_source_page_timeout_seconds,
             symbol_keywords=ticker_context.symbol_keywords,
         )
         if not verified_hits:

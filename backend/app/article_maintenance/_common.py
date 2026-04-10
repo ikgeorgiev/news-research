@@ -191,6 +191,7 @@ def _reextract_purge_article_tickers(
     known_symbols: set[str],
     timeout_seconds: int,
     *,
+    globenewswire_source_page_timeout_seconds: int | None = None,
     symbol_keywords: dict[str, frozenset[str]] | None = None,
     stop_when_existing_symbols_verified: set[str] | None = None,
     page_fetch_status: list[str] | None = None,
@@ -228,13 +229,21 @@ def _reextract_purge_article_tickers(
         if config is None:
             continue
         any_fetch_attempted = True
+        page_timeout = (
+            globenewswire_source_page_timeout_seconds
+            if (
+                source_code == "globenewswire"
+                and globenewswire_source_page_timeout_seconds is not None
+            )
+            else timeout_seconds
+        )
         fallback_hits = _extract_source_fallback_tickers(
             article.title,
             article.summary or "",
             raw_link or article.canonical_url,
             feed_url or "",
             known_symbols,
-            timeout_seconds,
+            page_timeout,
             config,
             symbol_keywords=symbol_keywords,
         )

@@ -30,6 +30,7 @@ def revalidate_stale_article_tickers(
     *,
     limit: int = 200,
     timeout_seconds: int = 20,
+    globenewswire_source_page_timeout_seconds: int | None = None,
 ) -> RevalidationStats:
     ticker_context = load_ticker_context(db)
     if not ticker_context.symbol_to_id:
@@ -79,6 +80,7 @@ def revalidate_stale_article_tickers(
             raw_contexts,
             ticker_context.known_symbols,
             timeout_seconds,
+            globenewswire_source_page_timeout_seconds=globenewswire_source_page_timeout_seconds,
             symbol_keywords=ticker_context.symbol_keywords,
         )
 

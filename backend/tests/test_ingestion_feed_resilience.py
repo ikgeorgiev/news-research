@@ -12,6 +12,7 @@ from app.feed_runtime import (
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
+from app.article_ingest import EntryResult
 from app.models import (
     Article,
     ArticleTicker,
@@ -988,4 +989,96 @@ def test_ingest_feed_keeps_distinct_businesswire_same_headline_stories(
     articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
     assert result["status"] == "success"
     assert len(articles) == 2
+
+
+def test_ingest_feed_globenewswire_cap_does_not_apply_to_prnewswire(
+    db_session, stub_feed_io, monkeypatch
+):
+    db = db_session
+    source = seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    entries = [
+        {
+            "id": f"guid-{idx}",
+            "guid": f"guid-{idx}",
+            "title": f"PRN story {idx}",
+            "link": f"https://www.prnewswire.com/news-releases/story-{idx}.html",
+            "summary": "Summary text",
+            "published": "2026-01-01T00:00:00Z",
+        }
+        for idx in range(4)
+    ]
+    stub_feed_io(entries, "PR Newswire")
+
+    seen_page_configs: list[str | None] = []
+
+    def fake_process_single_entry(*_args, page_config, **_kwargs):
+        seen_page_configs.append(None if page_config is None else page_config.source_code)
+        return EntryResult()
+
+    monkeypatch.setattr("app.article_ingest._process_single_entry", fake_process_single_entry)
+
+    result = call_ingest(
+        db,
+        source,
+        "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
+        globenewswire_source_page_max_fetches_per_feed=0,
+    )
+
+    assert result["status"] == "success"
+    assert seen_page_configs == ["prnewswire", "prnewswire", "prnewswire", "prnewswire"]
+
+
+def test_ingest_feed_globenewswire_budget_ignores_cached_or_skipped_fallbacks(
+    db_session, stub_feed_io, monkeypatch
+):
+    db = db_session
+    source = seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
+    entries = [
+        {
+            "id": f"guid-{idx}",
+            "guid": f"guid-{idx}",
+            "title": f"GN story {idx}",
+            "link": f"https://www.globenewswire.com/news-release/2026/03/story-{idx}",
+            "summary": "Summary text",
+            "published": "2026-01-01T00:00:00Z",
+        }
+        for idx in range(4)
+    ]
+    stub_feed_io(entries, "GlobeNewswire")
+
+    page_configs: list[str | None] = []
+    network_sequence = iter([True, False, True, True])
+
+    def fake_requires_network(_url, _config):
+        return next(network_sequence)
+
+    def fake_process_single_entry(*_args, page_config, **_kwargs):
+        page_configs.append(None if page_config is None else page_config.source_code)
+        return EntryResult(used_page_fetch=page_config is not None)
+
+    monkeypatch.setattr(
+        "app.article_ingest._source_page_fetch_requires_network",
+        fake_requires_network,
+    )
+    monkeypatch.setattr("app.article_ingest._process_single_entry", fake_process_single_entry)
+
+    result = call_ingest(
+        db,
+        source,
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        globenewswire_source_page_max_fetches_per_feed=2,
+    )
+
+    assert result["status"] == "success"
+    assert page_configs == ["globenewswire", "globenewswire", "globenewswire", None]
 

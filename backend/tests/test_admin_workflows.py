@@ -16,7 +16,7 @@ def test_admin_reload_tickers_returns_source_remaps(monkeypatch, db_session):
         return {"loaded": 25, "created": 4, "updated": 5, "unchanged": 16}
 
     def fake_remap(
-        _db: Session, _settings, *, source_code: str, limit: int, only_unmapped: bool,  # noqa: ANN001
+        _db: Session, _settings, *, source_code: str, limit: int, only_unmapped: bool, **_kw,  # noqa: ANN001,ANN003
     ):
         calls["limit"] = limit
         calls["only_unmapped"] = only_unmapped
@@ -112,7 +112,7 @@ def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, d
 
 
 def test_admin_revalidate_articles_response_contract(monkeypatch, db_session):
-    def fake_revalidate(_db: Session, *, limit: int, timeout_seconds: int):  # noqa: ANN001
+    def fake_revalidate(_db: Session, *, limit: int, timeout_seconds: int, **_kw):  # noqa: ANN001,ANN003
         assert limit == 321
         assert timeout_seconds > 0
         return {"scanned": 12, "revalidated": 4, "purged": 3, "unchanged": 5}

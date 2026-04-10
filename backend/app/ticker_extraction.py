@@ -27,6 +27,7 @@ from app.sources import (
     POLICY_GENERAL_ALLOWED,
     POLICY_SCOPED_CONTEXT_REQUIRED,
     SourcePageConfig,
+    _canonical_source_article_url as _canonical_source_article_url_impl,
     _canonical_businesswire_article_url as _canonical_businesswire_article_url_impl,
     _fetch_source_page_html as _fetch_source_page_html_impl,
     _is_businesswire_article_url as _is_businesswire_article_url_impl,
@@ -192,6 +193,30 @@ def _fetch_source_page_html(
         cache_max_items=SOURCE_PAGE_CACHE_MAX_ITEMS,
         now_fn=time.time,
     )
+
+
+def _source_page_fetch_requires_network(
+    url: str,
+    config: SourcePageConfig,
+    *,
+    now_fn=time.time,
+) -> bool:
+    fetch_url = _canonical_source_article_url_impl(url)
+    if not _is_source_article_url(fetch_url, config.hostname_suffix):
+        return False
+
+    now = now_fn()
+    with _source_page_cache_lock:
+        cached = _source_page_cache.get(fetch_url)
+        if cached is None:
+            return True
+        fetched_at, cached_html = cached
+        ttl_seconds = (
+            SOURCE_PAGE_CACHE_TTL_SECONDS
+            if cached_html is not None
+            else SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS
+        )
+        return now - fetched_at > ttl_seconds
 
 
 def _extract_table_cell_symbols_from_html(

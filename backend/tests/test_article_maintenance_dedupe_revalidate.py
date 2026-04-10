@@ -434,3 +434,69 @@ def test_revalidation_respects_limit(db_session, monkeypatch):
 
     assert result["scanned"] == 2
     assert len(stale_rows) == 1
+
+
+def test_revalidation_uses_globenewswire_specific_page_timeout(db_session, monkeypatch):
+    db = db_session
+    source = seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
+    article, _ticker = seed_article_with_raw(
+        db,
+        source,
+        ticker_kwargs=dict(
+            symbol="CGO",
+            fund_name="Calamos Global Total Return Fund",
+            sponsor="Calamos",
+        ),
+        article_kwargs=dict(
+            canonical_url="https://www.globenewswire.com/news-release/2026/03/example",
+            title="Acme announces quarterly distribution",
+            published_at=datetime(2026, 3, 10, 20, 5, tzinfo=timezone.utc),
+            source_name="GlobeNewswire",
+            provider_name="GlobeNewswire",
+        ),
+        match_type="token",
+        confidence=0.62,
+        raw_guid="gn-guid-revalidation-timeout",
+        feed_url="https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        extraction_version=1,
+    )
+
+    seen_timeouts: list[int] = []
+
+    def fake_fallback(
+        _title,
+        _summary,
+        _link,
+        _feed_url,
+        _known_symbols,
+        timeout_seconds,
+        _config,
+        *,
+        symbol_keywords=None,
+    ):
+        seen_timeouts.append(timeout_seconds)
+        return {}
+
+    monkeypatch.setattr(
+        "app.article_maintenance._common._extract_source_fallback_tickers",
+        fake_fallback,
+    )
+
+    result = revalidate_stale_article_tickers(
+        db,
+        limit=10,
+        timeout_seconds=20,
+        globenewswire_source_page_timeout_seconds=5,
+    )
+    row = db.scalar(select(ArticleTicker).where(ArticleTicker.article_id == article.id))
+
+    assert result["scanned"] == 1
+    assert result["unchanged"] == 1
+    assert row is not None
+    assert row.extraction_version == 1
+    assert seen_timeouts == [5]

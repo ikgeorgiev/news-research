@@ -71,6 +71,18 @@ class Settings(BaseSettings):
     source_enable_bw: bool = True
 
     request_timeout_seconds: int = Field(default=20, ge=5, le=120)
+    globenewswire_source_page_timeout_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=30,
+        description="Per-request timeout for GlobeNewswire source-page fallback HTML fetches.",
+    )
+    globenewswire_source_page_max_fetches_per_feed: int = Field(
+        default=3,
+        ge=0,
+        le=50,
+        description="Max uncached GlobeNewswire source-page fallback fetches per feed per cycle.",
+    )
     sse_max_connections_per_ip: int = Field(default=5, ge=1, le=100)
     behind_proxy: bool = False
     push_send_timeout_seconds: int = Field(default=10, ge=1, le=120)
