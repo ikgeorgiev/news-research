@@ -34,6 +34,7 @@ from app.raw_feed_items import (
 )
 from app.sse import notify_new_articles
 from app.sources import PAGE_FETCH_CONFIGS
+from app.ticker_context import SymbolKeywordProfile
 from app.ticker_extraction import (
     _canonical_businesswire_article_url,
     _extract_entry_tickers,
@@ -358,7 +359,7 @@ def _process_single_entry(
     source_page_timeout_seconds: int | None = None,
     recorded_guids: set[str],
     recorded_pairs: set[tuple[str, datetime | None]],
-    symbol_keywords: dict[str, frozenset[str]] | None = None,
+    symbol_keywords: dict[str, SymbolKeywordProfile | frozenset[str]] | None = None,
 ) -> EntryResult:
     result = EntryResult()
     article: Article | None = None
@@ -548,7 +549,7 @@ def ingest_feed(
     enable_conditional_get: bool = True,
     failure_backoff_base_seconds: float = 30.0,
     failure_backoff_max_seconds: float = 600.0,
-    symbol_keywords: dict[str, frozenset[str]] | None = None,
+    symbol_keywords: dict[str, SymbolKeywordProfile | frozenset[str]] | None = None,
 ) -> IngestFeedResult:
     run = IngestionRun(
         source_id=source.id,

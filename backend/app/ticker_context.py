@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from functools import lru_cache
+from typing import AbstractSet, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,36 +69,6 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "first",
     }
 )
-
-_GENERIC_PRNEWSWIRE_BODY_KEYWORDS = frozenset(
-    {
-        "asset",
-        "assets",
-        "bond",
-        "bonds",
-        "capital",
-        "credit",
-        "debt",
-        "emerging",
-        "equity",
-        "fund",
-        "global",
-        "income",
-        "market",
-        "markets",
-        "muni",
-        "municipal",
-        "opportunities",
-        "opportunity",
-        "premium",
-        "return",
-        "strategic",
-        "strategy",
-        "total",
-        "trust",
-        "yield",
-    }
-)
 _SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
     {
         "ag",
@@ -115,6 +86,117 @@ _SHORT_SPONSOR_KEYWORD_STOPWORDS = frozenset(
     }
 )
 _ALLOWED_TWO_CHAR_SPONSOR_KEYWORDS = frozenset({"c1"})
+_TIMEZONE_KEYWORD_EDGE_STOPWORDS = frozenset({"and", "of", "for", "the"})
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class SymbolKeywordProfile:
+    fund_terms: frozenset[str] = frozenset()
+    sponsor_terms: frozenset[str] = frozenset()
+    fund_phrases: frozenset[str] = frozenset()
+    sponsor_phrases: frozenset[str] = frozenset()
+    all_terms: frozenset[str] = frozenset()
+    all_phrases: frozenset[str] = frozenset()
+    all_keywords: frozenset[str] = frozenset()
+    timezone_safe_terms: frozenset[str] = frozenset()
+    timezone_safe_phrases: frozenset[str] = frozenset()
+
+    def __contains__(self, item: object) -> bool:
+        return item in self.all_keywords
+
+    def __iter__(self):
+        return iter(self.all_keywords)
+
+    def __len__(self) -> int:
+        return len(self.all_keywords)
+
+    def __bool__(self) -> bool:
+        return bool(self.all_keywords)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, SymbolKeywordProfile):
+            return (
+                self.fund_terms == other.fund_terms
+                and self.sponsor_terms == other.sponsor_terms
+                and self.fund_phrases == other.fund_phrases
+                and self.sponsor_phrases == other.sponsor_phrases
+                and self.all_terms == other.all_terms
+                and self.all_phrases == other.all_phrases
+                and self.all_keywords == other.all_keywords
+                and self.timezone_safe_terms == other.timezone_safe_terms
+                and self.timezone_safe_phrases == other.timezone_safe_phrases
+            )
+        if isinstance(other, (set, frozenset)):
+            return self.all_keywords == frozenset(other)
+        return NotImplemented
+
+
+def _timezone_safe_phrases(
+    phrases: Iterable[str],
+) -> frozenset[str]:
+    return frozenset(
+        phrase
+        for phrase in phrases
+        if phrase
+        and phrase.split()[0] not in _TIMEZONE_KEYWORD_EDGE_STOPWORDS
+        and phrase.split()[-1] not in _TIMEZONE_KEYWORD_EDGE_STOPWORDS
+    )
+
+
+def _split_override_keywords(
+    keywords: frozenset[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    terms = frozenset(keyword for keyword in keywords if " " not in keyword)
+    phrases = frozenset(keyword for keyword in keywords if " " in keyword)
+    return terms, phrases
+
+
+def _profile_from_keyword_groups(
+    *,
+    fund_terms: AbstractSet[str] | None = None,
+    sponsor_terms: AbstractSet[str] | None = None,
+    fund_phrases: AbstractSet[str] | None = None,
+    sponsor_phrases: AbstractSet[str] | None = None,
+    override_keywords: AbstractSet[str] | None = None,
+) -> SymbolKeywordProfile:
+    if override_keywords is not None:
+        override = frozenset(override_keywords)
+        override_terms, override_phrases = _split_override_keywords(override)
+        return SymbolKeywordProfile(
+            all_terms=override_terms,
+            all_phrases=override_phrases,
+            all_keywords=override,
+            timezone_safe_terms=override_terms,
+            timezone_safe_phrases=_timezone_safe_phrases(override_phrases),
+        )
+
+    fund_terms_frozen = frozenset(fund_terms or ())
+    sponsor_terms_frozen = frozenset(sponsor_terms or ())
+    fund_phrases_frozen = frozenset(fund_phrases or ())
+    sponsor_phrases_frozen = frozenset(sponsor_phrases or ())
+    all_terms = fund_terms_frozen | sponsor_terms_frozen
+    all_phrases = fund_phrases_frozen | sponsor_phrases_frozen
+    return SymbolKeywordProfile(
+        fund_terms=fund_terms_frozen,
+        sponsor_terms=sponsor_terms_frozen,
+        fund_phrases=fund_phrases_frozen,
+        sponsor_phrases=sponsor_phrases_frozen,
+        all_terms=all_terms,
+        all_phrases=all_phrases,
+        all_keywords=all_terms | all_phrases,
+        timezone_safe_terms=all_terms,
+        timezone_safe_phrases=_timezone_safe_phrases(all_phrases),
+    )
+
+
+def _coerce_symbol_keyword_profile(
+    keywords: SymbolKeywordProfile | frozenset[str] | None,
+) -> SymbolKeywordProfile:
+    if isinstance(keywords, SymbolKeywordProfile):
+        return keywords
+    if keywords is None:
+        return SymbolKeywordProfile()
+    return _profile_from_keyword_groups(override_keywords=keywords)
 
 
 def _is_short_sponsor_keyword(
@@ -144,17 +226,18 @@ def _validation_keyword_pattern(keyword: str) -> re.Pattern[str]:
 
 
 def _matching_validation_keywords(
-    text_lower: str, keywords: frozenset[str]
+    text_lower: str, keywords: SymbolKeywordProfile | frozenset[str]
 ) -> frozenset[str]:
+    profile = _coerce_symbol_keyword_profile(keywords)
     return frozenset(
         keyword
-        for keyword in keywords
+        for keyword in profile.all_keywords
         if _validation_keyword_pattern(keyword).search(text_lower) is not None
     )
 
 
 def _text_matches_validation_keywords(
-    text_lower: str, keywords: frozenset[str]
+    text_lower: str, keywords: SymbolKeywordProfile | frozenset[str]
 ) -> bool:
     matched_keywords = _matching_validation_keywords(text_lower, keywords)
     if not matched_keywords:
@@ -164,34 +247,6 @@ def _text_matches_validation_keywords(
     if any(len(keyword) <= 3 for keyword in matched_keywords):
         return True
     return len(set(matched_keywords)) >= 2
-
-
-def _has_phrase_or_short_validation_keyword_match(
-    text_lower: str, keywords: frozenset[str]
-) -> bool:
-    matched_keywords = _matching_validation_keywords(text_lower, keywords)
-    if not matched_keywords:
-        return False
-    return any(" " in keyword or len(keyword) <= 3 for keyword in matched_keywords)
-
-
-def _has_phrase_short_or_two_keyword_override_match(
-    text_lower: str, keywords: frozenset[str]
-) -> bool:
-    matched_keywords = _matching_validation_keywords(text_lower, keywords)
-    if not matched_keywords:
-        return False
-    if any(" " in keyword or len(keyword) <= 3 for keyword in matched_keywords):
-        return True
-    distinct_matches = set(matched_keywords)
-    if len(distinct_matches) < 2:
-        return False
-    if len(keywords) == 2:
-        return True
-    return any(
-        keyword not in _GENERIC_PRNEWSWIRE_BODY_KEYWORDS
-        for keyword in distinct_matches
-    )
 
 
 def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:
@@ -206,8 +261,8 @@ def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:
 
 def _build_symbol_keywords(
     ticker_rows: list,
-) -> dict[str, frozenset[str]]:
-    result: dict[str, frozenset[str]] = {}
+) -> dict[str, SymbolKeywordProfile]:
+    result: dict[str, SymbolKeywordProfile] = {}
     for row in ticker_rows:
         symbol = row[1]
         symbol_lower = symbol.lower()
@@ -217,10 +272,13 @@ def _build_symbol_keywords(
 
         override_keywords = _normalize_validation_keywords(validation_kw_raw)
         if override_keywords:
-            result[symbol.upper()] = override_keywords
+            result[symbol.upper()] = _profile_from_keyword_groups(
+                override_keywords=override_keywords
+            )
             continue
 
-        keywords: set[str] = set()
+        fund_terms: set[str] = set()
+        fund_phrases: set[str] = set()
         cleaned_fund_words: list[str] = []
         if fund_name:
             word_supports_phrase: list[bool] = []
@@ -238,18 +296,20 @@ def _build_symbol_keywords(
                     len(cleaned) >= 4 and cleaned not in _FUND_KEYWORD_STOPWORDS
                 )
                 if is_distinctive_keyword:
-                    keywords.add(cleaned)
+                    fund_terms.add(cleaned)
                 elif is_short_keyword:
-                    keywords.add(cleaned)
+                    fund_terms.add(cleaned)
                 word_supports_phrase.append(
                     is_distinctive_keyword or is_short_keyword
                 )
             for idx in range(len(cleaned_fund_words) - 1):
                 if not (word_supports_phrase[idx] or word_supports_phrase[idx + 1]):
                     continue
-                keywords.add(
+                fund_phrases.add(
                     f"{cleaned_fund_words[idx]} {cleaned_fund_words[idx + 1]}"
                 )
+        sponsor_terms: set[str] = set()
+        sponsor_phrases: set[str] = set()
         if sponsor:
             sponsor_distinctive_words: list[str] = []
             for idx, raw_word in enumerate(sponsor.split()):
@@ -261,7 +321,7 @@ def _build_symbol_keywords(
                     cleaned,
                     is_leading_sponsor_word=idx == 0,
                 ):
-                    keywords.add(cleaned)
+                    sponsor_terms.add(cleaned)
                 elif (
                     len(cleaned) >= 4
                     and cleaned not in _FUND_KEYWORD_STOPWORDS
@@ -278,12 +338,22 @@ def _build_symbol_keywords(
                     brand_words.append(sponsor_word)
                 else:
                     break
+            sponsor_terms.update(
+                word
+                for word in brand_words
+                if len(word) >= 4 and word not in _FUND_KEYWORD_STOPWORDS
+            )
             if len(brand_words) >= 2:
-                keywords.add(" ".join(brand_words))
-            elif not keywords and len(sponsor_distinctive_words) == 2:
-                keywords.add(" ".join(sponsor_distinctive_words))
+                sponsor_phrases.add(" ".join(brand_words))
+            elif not sponsor_terms and not sponsor_phrases and len(sponsor_distinctive_words) == 2:
+                sponsor_phrases.add(" ".join(sponsor_distinctive_words))
 
-        result[symbol.upper()] = frozenset(keywords)
+        result[symbol.upper()] = _profile_from_keyword_groups(
+            fund_terms=fund_terms,
+            sponsor_terms=sponsor_terms,
+            fund_phrases=fund_phrases,
+            sponsor_phrases=sponsor_phrases,
+        )
     return result
 
 
@@ -292,7 +362,7 @@ class TickerContext:
     symbol_to_id: dict[str, int]
     id_to_symbol: dict[int, str]
     known_symbols: frozenset[str]
-    symbol_keywords: dict[str, frozenset[str]]
+    symbol_keywords: dict[str, SymbolKeywordProfile]
 
 
 def load_ticker_context(db: Session) -> TickerContext:

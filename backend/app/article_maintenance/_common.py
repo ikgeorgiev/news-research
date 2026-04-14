@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_policy
 from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
+from app.ticker_context import SymbolKeywordProfile
 from app.ticker_extraction import (
     _extract_entry_tickers,
     _extract_source_fallback_tickers,
@@ -192,7 +193,7 @@ def _reextract_purge_article_tickers(
     timeout_seconds: int,
     *,
     globenewswire_source_page_timeout_seconds: int | None = None,
-    symbol_keywords: dict[str, frozenset[str]] | None = None,
+    symbol_keywords: dict[str, SymbolKeywordProfile | frozenset[str]] | None = None,
     stop_when_existing_symbols_verified: set[str] | None = None,
     page_fetch_status: list[str] | None = None,
 ) -> dict[str, tuple[str, float]]:

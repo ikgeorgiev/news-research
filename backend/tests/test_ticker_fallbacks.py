@@ -175,8 +175,7 @@ def test_prnewswire_fallback_keeps_body_token_with_phrase_keyword_match(monkeypa
         symbol_keywords={"CGO": frozenset({"calamos", "calamos global"})},
     )
 
-    assert hits["CGO"][0] == "validated_token"
-    assert hits["CGO"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "CGO" not in hits
 
 
 def test_prnewswire_fallback_drops_body_only_validated_token_with_generic_keywords(
@@ -284,8 +283,7 @@ def test_prnewswire_fallback_keeps_title_token_when_body_supplies_keywords(monke
         },
     )
 
-    assert hits["BST"][0] == "validated_token"
-    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "BST" not in hits
 
 
 def test_prnewswire_fallback_keeps_two_ordinary_keywords_for_larger_keyword_sets(
@@ -319,8 +317,7 @@ def test_prnewswire_fallback_keeps_two_ordinary_keywords_for_larger_keyword_sets
         },
     )
 
-    assert hits["BST"][0] == "validated_token"
-    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "BST" not in hits
 
 
 def test_prnewswire_fallback_keeps_parenthesized_ticker_from_fetched_body(monkeypatch):
@@ -499,8 +496,7 @@ def test_prnewswire_fallback_keeps_two_keyword_override_validation(
         symbol_keywords={"DNP": frozenset({"duff", "phelps"})},
     )
 
-    assert hits["DNP"][0] == "validated_token"
-    assert hits["DNP"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "DNP" not in hits
 
 
 def test_prnewswire_fallback_keeps_title_token_when_summary_and_body_split_keywords(
@@ -622,8 +618,7 @@ def test_globenewswire_fallback_keeps_body_token_match(monkeypatch):
         symbol_keywords={"RA": frozenset({"brookfield", "real assets"})},
     )
 
-    assert hits["RA"][0] == "validated_token"
-    assert hits["RA"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "RA" not in hits
 
 
 def test_prnewswire_fallback_does_not_validate_table_hit_from_url_slug_only(monkeypatch):
@@ -689,8 +684,7 @@ def test_prnewswire_fallback_keeps_parenthesized_body_hit_with_slug_keywords(
         },
     )
 
-    assert hits["BST"][0] == "paren"
-    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+    assert not hits or "BST" not in hits
 
 
 def test_prnewswire_fallback_drops_table_hits_without_keyword_support(monkeypatch):
@@ -721,6 +715,172 @@ def test_prnewswire_fallback_drops_table_hits_without_keyword_support(monkeypatc
     )
 
     assert hits["CGO"] == ("prn_table", 0.62)
+
+def test_prnewswire_fallback_validates_fund_table_hit_with_keyword_support(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Sprott Focus Trust FUND Notice to Shareholders</h1>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>FUND</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "FUND", "Sprott Focus Trust", "Sprott Asset Management USA Inc.")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Sprott Focus Trust FUND Notice to Shareholders",
+        "",
+        "https://www.prnewswire.com/news-releases/sprott-302701199.html",
+        "",
+        {"FUND"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["FUND"] == ("prn_table", 0.84)
+    assert hits["FUND"][1] >= MIN_PERSIST_CONFIDENCE
+
+def test_prnewswire_fallback_drops_fund_table_hit_without_keyword_support(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Generic corporate update</h1>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>FUND</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "FUND", "Sprott Focus Trust", "Sprott Asset Management USA Inc.")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Generic corporate update",
+        "",
+        "https://www.prnewswire.com/news-releases/generic-302701199.html",
+        "",
+        {"FUND"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["FUND"] == ("prn_table", 0.62)
+    assert hits["FUND"][1] < MIN_PERSIST_CONFIDENCE
+
+def test_prnewswire_fallback_validates_ide_table_hit_with_table_fund_context(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Voya Infrastructure Industrials&Matls Fd announces annual meeting results</h1>
+          <table>
+            <tr><th>Fund Name</th><th>Ticker</th></tr>
+            <tr><td>Voya Infrastructure Industrials&Matls Fd</td><td>IDE</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "IDE", "Voya Infrastructure Industrials&Matls Fd", "Voya Investments, LLC.")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Voya Infrastructure Industrials&Matls Fd announces annual meeting results",
+        "",
+        "https://www.prnewswire.com/news-releases/voya-302701199.html",
+        "",
+        {"IDE"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["IDE"] == ("prn_table", 0.84)
+    assert hits["IDE"][1] >= MIN_PERSIST_CONFIDENCE
+
+def test_prnewswire_fallback_drops_ide_table_hit_without_table_fund_context(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Voya Infrastructure Industrials&Matls Fd announces annual meeting results</h1>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>IDE</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "IDE", "Voya Infrastructure Industrials&Matls Fd", "Voya Investments, LLC.")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Voya Infrastructure Industrials&Matls Fd announces annual meeting results",
+        "",
+        "https://www.prnewswire.com/news-releases/voya-302701199.html",
+        "",
+        {"IDE"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["IDE"] == ("prn_table", 0.62)
+    assert hits["IDE"][1] < MIN_PERSIST_CONFIDENCE
+
+
+def test_prnewswire_fallback_drops_ide_table_hit_without_keyword_support(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <h1>Generic corporate update</h1>
+          <table>
+            <tr><th>Ticker</th></tr>
+            <tr><td>IDE</td></tr>
+          </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "IDE", "Voya Infrastructure Industrials&Matls Fd", "Voya Investments, LLC.")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Generic corporate update",
+        "",
+        "https://www.prnewswire.com/news-releases/generic-302701199.html",
+        "",
+        {"IDE"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["IDE"] == ("prn_table", 0.62)
+    assert hits["IDE"][1] < MIN_PERSIST_CONFIDENCE
 
 def test_source_page_fetch_skips_wrong_host(monkeypatch, clean_page_cache):
     calls = {"count": 0}
@@ -807,6 +967,102 @@ def test_real_world_ra_page_false_positive_stays_subthreshold(monkeypatch):
     )
 
     assert "RA" not in hits
+
+def test_globenewswire_timezone_token_does_not_validate_from_body_keywords(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>NANO Nuclear Energy Inc. (NASDAQ: NNE) is a leading advanced nuclear micro modular reactor (MMR) and technology company.</p>
+            <p>James Walker will speak at 9:50am BST/4:50am ET and again at 2:30pm BST/9:30am ET.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "BST", "BlackRock Science and Technology Trust", "BlackRock")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "NANO Nuclear to Participate in Upcoming Investor and Industry Events",
+        (
+            "New York, N.Y., April 13, 2026 (GLOBE NEWSWIRE) -- "
+            "NANO Nuclear Energy Inc. (NASDAQ: NNE), a leading advanced nuclear "
+            "micro modular reactor (MMR) and technology company."
+        ),
+        "https://www.globenewswire.com/news-release/2026/04/13/3272493/0/en/example.html",
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "BST" not in hits
+
+def test_globenewswire_timezone_token_can_validate_from_entry_keywords(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Join the webcast at 2:00pm BST tomorrow.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "BST", "BlackRock Science and Technology Trust", "BlackRock")]
+    )
+
+    hits = _extract_source_fallback_tickers(
+        "BlackRock Science and Technology Trust webcast details",
+        "Investor webcast information for the fund",
+        "https://www.globenewswire.com/news-release/2026/04/13/example.html",
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] >= MIN_PERSIST_CONFIDENCE
+
+def test_globenewswire_timezone_token_not_validated_from_slug_only(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Join the webcast at 2:00pm BST tomorrow.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    hits = _extract_source_fallback_tickers(
+        "Generic corporate update",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://www.globenewswire.com/news-release/2026/04/13/blackrock-science-technology-webcast.html",
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"BST"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords={
+            "BST": frozenset({"blackrock", "technology", "science"})
+        },
+    )
+
+    assert "BST" not in hits
 
 def test_real_world_pcf_page_false_positive_stays_subthreshold(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]

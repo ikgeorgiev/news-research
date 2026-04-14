@@ -101,6 +101,113 @@ def test_token_match_validated_when_fund_name_present():
     assert hits["CGO"][0] == "validated_token"
     assert hits["CGO"][1] == 0.68
 
+def test_ambiguous_symbol_can_still_validate_with_fund_keywords():
+    known = {"IDE"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "IDE", "Voya Infrastructure Industrials&Matls Fd", "Voya Investments, LLC.")]
+    )
+    hits = _extract_entry_tickers(
+        "Voya Infrastructure Industrials&Matls Fd IDE declares distribution",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert hits["IDE"][0] == "validated_token"
+    assert hits["IDE"][1] == 0.68
+
+def test_fund_symbol_remains_blocked_as_bare_validated_token():
+    known = {"FUND"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "FUND", "Sprott Focus Trust", "Sprott Asset Management USA Inc.")]
+    )
+    hits = _extract_entry_tickers(
+        "SPROTT FOCUS FUND NOTICE TO SHAREHOLDERS",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "FUND" not in hits
+
+def test_connector_phrase_can_still_validate_token_match():
+    known = {"CCD"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "CCD", "Calamos Dynamic Convertible and Income", "Calamos")]
+    )
+    hits = _extract_entry_tickers(
+        "Convertible and Income CCD declares distribution",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "convertible and" in sym_kws["CCD"]
+    assert hits["CCD"][0] == "validated_token"
+    assert hits["CCD"][1] == 0.68
+
+def test_leading_article_phrase_can_still_validate_token_match():
+    known = {"IFN"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "IFN", "The India Fund Inc", "abrdn Asia Limited")]
+    )
+    hits = _extract_entry_tickers(
+        "The India IFN declares distribution",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "the india" in sym_kws["IFN"]
+    assert hits["IFN"][0] == "validated_token"
+    assert hits["IFN"][1] == 0.68
+
+def test_timezone_abbreviation_can_validate_in_entry_text_with_fund_keywords():
+    known = {"BST"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "BST", "BlackRock Science and Technology Trust", "BlackRock")]
+    )
+    hits = _extract_entry_tickers(
+        "BlackRock Science and Technology Trust webcast details",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] == 0.68
+
+def test_timezone_abbreviation_not_validated_from_url_slug_only():
+    known = {"BST"}
+    sym_kws = {"BST": frozenset({"blackrock", "technology", "science"})}
+    hits = _extract_entry_tickers(
+        "Generic corporate update",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/blackrock-science-technology-webcast",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "BST" not in hits
+
+def test_timezone_abbreviation_not_validated_from_two_generic_keywords():
+    known = {"BST"}
+    sym_kws = {"BST": frozenset({"blackrock", "technology", "science"})}
+    hits = _extract_entry_tickers(
+        "BlackRock technology conference webcast details",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "BST" not in hits
+
 def test_token_match_not_validated_without_fund_name():
     known = {"CGO"}
     sym_kws = {"CGO": frozenset({"calamos", "calamos global"})}
@@ -446,6 +553,95 @@ def test_empty_keyword_symbol_gets_reduced_confidence():
 
 def test_no_keywords_confidence_still_persists():
     assert NO_KEYWORDS_CONFIDENCE >= MIN_PERSIST_CONFIDENCE
+
+
+def test_ide_generic_tooling_headline_not_validated():
+    known = {"IDE"}
+    sym_kws = _build_symbol_keywords(
+        [(1, "IDE", "Voya Infrastructure Industrials&Matls Fd", "Voya Investments, LLC.")]
+    )
+    hits = _extract_entry_tickers(
+        "Voya Infrastructure launches new IDE tooling partnership",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "IDE" not in hits
+
+def test_timezone_symbol_validates_with_override_keywords_phrase():
+    """Override-keyword BST should validate when title/summary has a phrase match."""
+    known = {"BST"}
+    sym_kws = {"BST": frozenset({"blackrock", "science", "technology", "blackrock science"})}
+    hits = _extract_entry_tickers(
+        "BlackRock Science and Technology Trust webcast details",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] == 0.68
+
+def test_timezone_symbol_validates_with_override_keywords_three_terms():
+    """Override-keyword BST should validate with 3+ distinct term matches."""
+    known = {"BST"}
+    sym_kws = {"BST": frozenset({"blackrock", "science", "technology"})}
+    hits = _extract_entry_tickers(
+        "BlackRock Science and Technology Trust webcast details",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert hits["BST"][0] == "validated_token"
+    assert hits["BST"][1] == 0.68
+
+def test_timezone_symbol_not_validated_with_override_keywords_two_terms():
+    """Override-keyword BST should NOT validate with only 2 term matches."""
+    known = {"BST"}
+    sym_kws = {"BST": frozenset({"blackrock", "technology", "science"})}
+    hits = _extract_entry_tickers(
+        "BlackRock technology conference webcast details",
+        "Join the webcast at 2:00pm BST tomorrow",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "BST" not in hits
+
+def test_ambiguous_symbol_validates_with_override_keywords():
+    """Override-keyword IDE should validate on finance-intent headline with 2+ terms."""
+    known = {"IDE"}
+    sym_kws = {"IDE": frozenset({"voya", "infrastructure"})}
+    hits = _extract_entry_tickers(
+        "Voya Infrastructure IDE declares distribution",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert hits["IDE"][0] == "validated_token"
+    assert hits["IDE"][1] == 0.68
+
+def test_ambiguous_symbol_not_validated_with_override_keywords_no_finance_intent():
+    """Override-keyword IDE should NOT validate without finance-intent pattern."""
+    known = {"IDE"}
+    sym_kws = {"IDE": frozenset({"voya", "infrastructure"})}
+    hits = _extract_entry_tickers(
+        "Voya Infrastructure launches new IDE tooling partnership",
+        "",
+        "https://example.com/story",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+    assert "IDE" not in hits
 
 def test_first_trust_ffa_not_validated_by_common_word_first():
     """'first' is too generic to validate FFA token matches."""
