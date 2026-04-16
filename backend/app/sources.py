@@ -28,6 +28,13 @@ SOURCE_POLICY: dict[str, str] = {
 }
 
 
+@dataclass(slots=True, frozen=True)
+class FeedDef:
+    url: str
+    persistence_policy_override: str | None = None
+    article_source_name: str = ""
+
+
 PRNEWSWIRE_FEEDS: list[str] = [
     "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss",
     "https://www.prnewswire.com/rss/financial-services-latest-news/mutual-funds-list.rss",
@@ -40,9 +47,21 @@ GLOBENEWSWIRE_FEEDS: list[str] = [
     "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
 ]
 
-BUSINESSWIRE_FEEDS: list[str] = [
-    "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+BUSINESSWIRE_FEEDS: list[FeedDef] = [
+    FeedDef(
+        url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+        article_source_name="Business Wire",
+    ),
+    FeedDef(
+        url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override=POLICY_VALIDATED_MAPPING_REQUIRED,
+        article_source_name="Business Wire",
+    ),
 ]
+
+FEED_POLICY_REGISTRY: dict[str, list[FeedDef]] = {
+    "businesswire": BUSINESSWIRE_FEEDS,
+}
 
 
 @dataclass(slots=True)
@@ -50,7 +69,7 @@ class SourceFeed:
     code: str
     name: str
     base_url: str
-    feed_urls: list[str]
+    feeds: list[FeedDef]
 
 
 @dataclass(slots=True, frozen=True)
@@ -177,6 +196,41 @@ def get_source_policy(source_code: str) -> str:
     return SOURCE_POLICY.get(source_code, POLICY_VALIDATED_MAPPING_REQUIRED)
 
 
+def get_feed_policy_override(source_code: str, feed_url: str | None) -> str | None:
+    if not feed_url:
+        return None
+    for feed in FEED_POLICY_REGISTRY.get(source_code, []):
+        if feed.url == feed_url:
+            return feed.persistence_policy_override
+    return None
+
+
+def get_effective_source_policy(
+    source_code: str,
+    *,
+    feed_url: str | None = None,
+    persistence_policy_override: str | None = None,
+) -> str:
+    return (
+        persistence_policy_override
+        or get_feed_policy_override(source_code, feed_url)
+        or get_source_policy(source_code)
+    )
+
+
+def get_strict_feed_urls(source_code: str) -> list[str]:
+    return [
+        feed.url
+        for feed in FEED_POLICY_REGISTRY.get(source_code, [])
+        if get_effective_source_policy(
+            source_code,
+            feed_url=feed.url,
+            persistence_policy_override=feed.persistence_policy_override,
+        )
+        != POLICY_GENERAL_ALLOWED
+    ]
+
+
 def get_active_symbols(db: Session) -> list[str]:
     rows = db.scalars(select(Ticker.symbol).where(Ticker.active.is_(True)).order_by(Ticker.symbol.asc())).all()
     return [symbol.upper() for symbol in rows]
@@ -194,6 +248,22 @@ def build_yahoo_feed_urls(symbols: list[str], chunk_size: int) -> list[str]:
     return urls
 
 
+def _build_feed_defs(
+    urls: list[str],
+    *,
+    article_source_name: str,
+    persistence_policy_override: str | None = None,
+) -> list[FeedDef]:
+    return [
+        FeedDef(
+            url=url,
+            persistence_policy_override=persistence_policy_override,
+            article_source_name=article_source_name,
+        )
+        for url in urls
+    ]
+
+
 def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
     source_feeds: list[SourceFeed] = []
 
@@ -204,7 +274,10 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 code="yahoo",
                 name="Yahoo Finance",
                 base_url="https://feeds.finance.yahoo.com",
-                feed_urls=build_yahoo_feed_urls(symbols, settings.yahoo_chunk_size),
+                feeds=_build_feed_defs(
+                    build_yahoo_feed_urls(symbols, settings.yahoo_chunk_size),
+                    article_source_name="Yahoo Finance",
+                ),
             )
         )
 
@@ -214,7 +287,10 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 code="prnewswire",
                 name="PR Newswire",
                 base_url="https://www.prnewswire.com",
-                feed_urls=PRNEWSWIRE_FEEDS,
+                feeds=_build_feed_defs(
+                    PRNEWSWIRE_FEEDS,
+                    article_source_name="PR Newswire",
+                ),
             )
         )
 
@@ -224,7 +300,10 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 code="globenewswire",
                 name="GlobeNewswire",
                 base_url="https://rss.globenewswire.com",
-                feed_urls=GLOBENEWSWIRE_FEEDS,
+                feeds=_build_feed_defs(
+                    GLOBENEWSWIRE_FEEDS,
+                    article_source_name="GlobeNewswire",
+                ),
             )
         )
 
@@ -234,7 +313,7 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 code="businesswire",
                 name="Business Wire",
                 base_url="https://feed.businesswire.com",
-                feed_urls=BUSINESSWIRE_FEEDS,
+                feeds=BUSINESSWIRE_FEEDS,
             )
         )
 

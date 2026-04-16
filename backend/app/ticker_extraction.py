@@ -26,6 +26,7 @@ from app.ticker_context import (
     _text_matches_validation_keywords as _text_matches_validation_keywords_impl,
 )
 from app.sources import (
+    get_effective_source_policy,
     POLICY_GENERAL_ALLOWED,
     POLICY_SCOPED_CONTEXT_REQUIRED,
     SourcePageConfig,
@@ -34,7 +35,6 @@ from app.sources import (
     _fetch_source_page_html as _fetch_source_page_html_impl,
     _is_businesswire_article_url as _is_businesswire_article_url_impl,
     _is_source_article_url as _is_source_article_url_impl,
-    get_source_policy,
 )
 from app.utils import extract_article_body, html_to_plain_text, strip_noise_elements
 
@@ -787,7 +787,7 @@ def _verified_ticker_hits(
     source_code: str,
     hits: dict[str, tuple[str, float]],
 ) -> dict[str, tuple[str, float]]:
-    policy = get_source_policy(source_code)
+    policy = get_effective_source_policy(source_code)
     return {
         symbol: hit
         for symbol, hit in hits.items()
@@ -797,9 +797,15 @@ def _verified_ticker_hits(
 
 
 def _should_persist_entry(
-    source_code: str, ticker_hits: dict[str, tuple[str, float]]
+    source_code: str,
+    ticker_hits: dict[str, tuple[str, float]],
+    *,
+    persistence_policy_override: str | None = None,
 ) -> bool:
-    policy = get_source_policy(source_code)
+    policy = get_effective_source_policy(
+        source_code,
+        persistence_policy_override=persistence_policy_override,
+    )
     if policy == POLICY_GENERAL_ALLOWED:
         return True
     if not ticker_hits:

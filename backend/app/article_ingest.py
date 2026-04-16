@@ -35,7 +35,11 @@ from app.raw_feed_items import (
     _preserve_alt_feed_url,
 )
 from app.sse import notify_new_articles
-from app.sources import PAGE_FETCH_CONFIGS
+from app.sources import (
+    PAGE_FETCH_CONFIGS,
+    POLICY_GENERAL_ALLOWED,
+    get_effective_source_policy,
+)
 from app.ticker_context import SymbolKeywordProfile
 from app.ticker_extraction import (
     _canonical_businesswire_article_url,
@@ -313,6 +317,32 @@ class PreparedFeedEntry:
     raw_guid: str | None
 
 
+def _matches_detached_raw_row(
+    row: RawFeedItem | None,
+    *,
+    prepared: PreparedFeedEntry,
+    raw_summary: str | None,
+    entry_source_name: str,
+) -> bool:
+    if row is None or row.article_id is not None:
+        return False
+    payload = row.raw_payload_json or {}
+    row_pub_date = to_utc(row.raw_pub_date) if row.raw_pub_date is not None else None
+    prepared_pub_date = (
+        to_utc(prepared.raw_pub_date)
+        if prepared.raw_pub_date is not None
+        else None
+    )
+    return (
+        row.raw_guid == prepared.raw_guid
+        and row.raw_title == prepared.raw_title
+        and row.raw_link == prepared.raw_link
+        and row_pub_date == prepared_pub_date
+        and payload.get("summary") == raw_summary
+        and payload.get("source") == entry_source_name
+    )
+
+
 def _prepare_feed_entries(
     entries: list,
     now_utc: datetime,
@@ -373,6 +403,7 @@ def _process_single_entry(
     timeout_seconds: int,
     page_config,
     source_page_timeout_seconds: int | None = None,
+    persistence_policy_override: str | None = None,
     recorded_guids: set[str],
     recorded_pairs: set[tuple[str, datetime | None]],
     symbol_keywords: dict[str, SymbolKeywordProfile | frozenset[str]] | None = None,
@@ -446,6 +477,33 @@ def _process_single_entry(
         entry_source_name = _extract_provider(
             prepared.entry, source_name
         )
+        existing_detached_raw = None
+        if persistence_policy_override is not None:
+            existing_detached_raw = _find_existing_raw_feed_item(
+                db,
+                source_id=source.id,
+                raw_guid=prepared.raw_guid,
+                raw_link=prepared.raw_link,
+                published_at=prepared.raw_pub_date,
+                require_attached=False,
+            )
+            if _matches_detached_raw_row(
+                existing_detached_raw,
+                prepared=prepared,
+                raw_summary=raw_summary,
+                entry_source_name=entry_source_name,
+            ):
+                _preserve_alt_feed_url(
+                    db,
+                    source_id=source.id,
+                    prepared=prepared,
+                    feed_url=feed_url,
+                    existing_row=existing_detached_raw,
+                )
+                existing_detached_raw.fetched_at = datetime.now(timezone.utc)
+                result.persisted_raw = True
+                return result
+
         ticker_hits = _extract_entry_tickers(
             prepared.title,
             summary or "",
@@ -479,12 +537,22 @@ def _process_single_entry(
                 _merge_ticker_hits(ticker_hits, fallback_hits)
 
         should_persist_tickers = _should_persist_entry(
-            source.code, ticker_hits
+            source.code,
+            ticker_hits,
+            persistence_policy_override=persistence_policy_override,
+        )
+        is_general_allowed_feed = (
+            get_effective_source_policy(
+                source.code,
+                feed_url=feed_url,
+                persistence_policy_override=persistence_policy_override,
+            )
+            == POLICY_GENERAL_ALLOWED
         )
         allow_existing_exact_url = False
         if (
             not should_persist_tickers
-            and source.code != GENERAL_SOURCE_CODE
+            and not is_general_allowed_feed
             and prepared.is_exact_source_url
         ):
             existing_article_id = db.scalar(
@@ -524,7 +592,7 @@ def _process_single_entry(
                 symbol_to_id,
                 existing_rows=existing_rows,
                 prune_missing=(
-                    source.code != GENERAL_SOURCE_CODE
+                    not is_general_allowed_feed
                     and matched_by_url
                     and prepared.is_exact_source_url
                     and bool(effective_ticker_hits)
@@ -554,6 +622,8 @@ def ingest_feed(
     *,
     source: Source,
     feed_url: str,
+    persistence_policy_override: str | None = None,
+    article_source_name: str | None = None,
     known_symbols: set[str],
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
@@ -625,11 +695,11 @@ def ingest_feed(
             else:
                 parsed = feedparser.parse(response.content)
 
-                source_name = source.name
+                source_name = _clamp_label(article_source_name or source.name)
                 feed_title = (
                     parsed.feed.get("title") if isinstance(parsed.feed, dict) else None
                 )
-                if source.code != "yahoo" and feed_title:
+                if source.code not in {"businesswire", "yahoo"} and feed_title:
                     source_name = _clamp_label(str(feed_title))
 
                 entries = list(getattr(parsed, "entries", []) or [])
@@ -686,6 +756,7 @@ def ingest_feed(
                             timeout_seconds=timeout_seconds,
                             page_config=effective_page_config,
                             source_page_timeout_seconds=source_page_timeout_seconds,
+                            persistence_policy_override=persistence_policy_override,
                             recorded_guids=recorded_guids,
                             recorded_pairs=recorded_pairs,
                             symbol_keywords=symbol_keywords,

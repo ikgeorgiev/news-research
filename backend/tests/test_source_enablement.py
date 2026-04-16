@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database import Base
 from app.ingestion import run_ingestion_cycle, sync_runtime_state
 from app.models import Source
-from app.sources import SourceFeed, seed_sources
+from app.sources import (
+    FeedDef,
+    POLICY_VALIDATED_MAPPING_REQUIRED,
+    SourceFeed,
+    build_source_feeds,
+    seed_sources,
+)
 
 
 def _settings(**overrides):
@@ -59,7 +65,12 @@ def test_seed_sources_preserves_existing_enabled_state(db_session):
                 code="businesswire",
                 name="Business Wire",
                 base_url="https://feed.businesswire.com",
-                feed_urls=["https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg=="],
+                feeds=[
+                    FeedDef(
+                        url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+                        article_source_name="Business Wire",
+                    )
+                ],
             )
         ],
     )
@@ -69,6 +80,20 @@ def test_seed_sources_preserves_existing_enabled_state(db_session):
     assert row.enabled is False
     assert row.name == "Business Wire"
     assert row.base_url == "https://feed.businesswire.com"
+
+
+def test_build_source_feeds_adds_businesswire_finance_as_validated_only(db_session):
+    source_feeds = build_source_feeds(_settings(source_enable_bw=True), db_session)
+
+    businesswire = next(feed for feed in source_feeds if feed.code == "businesswire")
+
+    assert [feed.url for feed in businesswire.feeds] == [
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+    ]
+    assert businesswire.feeds[0].persistence_policy_override is None
+    assert businesswire.feeds[1].persistence_policy_override == POLICY_VALIDATED_MAPPING_REQUIRED
+    assert {feed.article_source_name for feed in businesswire.feeds} == {"Business Wire"}
 
 
 def test_run_ingestion_cycle_skips_sources_disabled_in_db(db_session, monkeypatch):
@@ -206,13 +231,17 @@ def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
             code="businesswire",
             name="Business Wire",
             base_url="https://feed.businesswire.com",
-            feed_urls=["https://example.com/bw/1", "https://example.com/bw/2", "https://example.com/bw/3"],
+            feeds=[
+                FeedDef(url="https://example.com/bw/1", article_source_name="Business Wire"),
+                FeedDef(url="https://example.com/bw/2", article_source_name="Business Wire"),
+                FeedDef(url="https://example.com/bw/3", article_source_name="Business Wire"),
+            ],
         ),
         SourceFeed(
             code="prnewswire",
             name="PR Newswire",
             base_url="https://www.prnewswire.com",
-            feed_urls=["https://example.com/prn/1"],
+            feeds=[FeedDef(url="https://example.com/prn/1", article_source_name="PR Newswire")],
         ),
     ]
 
@@ -299,13 +328,19 @@ def test_run_ingestion_cycle_parallel_mode_allows_yahoo_concurrency_when_enabled
             code="yahoo",
             name="Yahoo Finance",
             base_url="https://feeds.finance.yahoo.com",
-            feed_urls=["https://example.com/yahoo/1", "https://example.com/yahoo/2"],
+            feeds=[
+                FeedDef(url="https://example.com/yahoo/1", article_source_name="Yahoo Finance"),
+                FeedDef(url="https://example.com/yahoo/2", article_source_name="Yahoo Finance"),
+            ],
         ),
         SourceFeed(
             code="businesswire",
             name="Business Wire",
             base_url="https://feed.businesswire.com",
-            feed_urls=["https://example.com/bw/1", "https://example.com/bw/2"],
+            feeds=[
+                FeedDef(url="https://example.com/bw/1", article_source_name="Business Wire"),
+                FeedDef(url="https://example.com/bw/2", article_source_name="Business Wire"),
+            ],
         ),
     ]
 

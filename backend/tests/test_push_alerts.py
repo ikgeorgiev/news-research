@@ -30,7 +30,7 @@ from app.schemas import (
     PushSubscriptionPayload,
     PushUpsertRequest,
 )
-from app.sources import SourceFeed
+from app.sources import FeedDef, SourceFeed
 from app.utils import sha256_str
 from tests.helpers import seed_article
 
@@ -556,7 +556,7 @@ def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session
                 code="businesswire",
                 name="Business Wire",
                 base_url="https://feed.businesswire.com",
-                feed_urls=["https://example.com/bw/1"],
+                feeds=[FeedDef(url="https://example.com/bw/1", article_source_name="Business Wire")],
             )
         ]
 

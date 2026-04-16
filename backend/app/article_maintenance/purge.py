@@ -3,18 +3,20 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TypedDict
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.orm import Session
 
 from app.article_maintenance._common import (
     _apply_revalidation,
     _has_general_allowed_raw_provenance,
+    _has_general_allowed_source_provenance,
     _reextract_purge_article_tickers,
     load_article_maintenance_context,
     stamp_article_ticker_version,
 )
 from app.models import Article, ArticleTicker, RawFeedItem, Source
 from app.query_utils import any_ticker_mapped_exists
+from app.sources import get_strict_feed_urls
 from app.ticker_context import load_ticker_context
 from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.utils import GENERAL_SOURCE_CODE
@@ -78,13 +80,19 @@ def purge_token_only_articles(
     bw_source_id = db.scalar(
         select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
     )
-    bw_exists = (
+    strict_bw_feed_urls = get_strict_feed_urls(GENERAL_SOURCE_CODE)
+    bw_general_exists = (
         select(1)
         .select_from(RawFeedItem)
         .where(
             and_(
                 RawFeedItem.article_id == Article.id,
                 RawFeedItem.source_id == bw_source_id,
+                (
+                    RawFeedItem.feed_url.not_in(strict_bw_feed_urls)
+                    if strict_bw_feed_urls
+                    else true()
+                ),
             )
         )
         .correlate(Article)
@@ -116,8 +124,8 @@ def purge_token_only_articles(
                 )
             )
         )
-        if bw_exists is not None:
-            query = query.where(~bw_exists)
+        if bw_general_exists is not None:
+            query = query.where(~bw_general_exists)
         if cursor_id is not None:
             if cursor_published_at is None:
                 query = query.where(
@@ -154,12 +162,17 @@ def purge_token_only_articles(
             if article.id in seen_ids:
                 continue
             seen_ids.add(article.id)
-            scanned += 1
 
             raw_contexts = raw_contexts_by_article.get(article.id, [])
             if not raw_contexts:
                 continue
+            if _has_general_allowed_source_provenance(
+                raw_contexts,
+                source_code=GENERAL_SOURCE_CODE,
+            ):
+                continue
 
+            scanned += 1
             has_general_provenance = _has_general_allowed_raw_provenance(raw_contexts)
             existing_for_article = existing_rows_by_article.get(article.id)
             has_stale_existing_rows = any(
