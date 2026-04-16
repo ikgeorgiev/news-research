@@ -37,6 +37,15 @@ def stub_feed_io(monkeypatch):
     monkeypatch.setattr(
         "app.http_client.get_http_client", lambda: FakeClient(),
     )
+    monkeypatch.setattr(
+        "app.http_client.get_feed_poll_client", lambda: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "app.http_client.reset_feed_poll_client", lambda _client=None: None,
+    )
+    monkeypatch.setattr(
+        "app.http_client.retire_feed_poll_client", lambda _client=None: None,
+    )
 
     def set_entries(entries, feed_title="Business Wire"):
         monkeypatch.setattr(

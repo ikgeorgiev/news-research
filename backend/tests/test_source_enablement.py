@@ -133,6 +133,58 @@ def test_sync_runtime_state_loads_tickers_before_building_yahoo_feeds(db_session
     assert result["source_feeds"] == []
 
 
+def test_run_ingestion_cycle_splits_scheduler_maintenance_timeouts(
+    db_session, monkeypatch
+):
+    db = db_session
+    observed_remap_timeouts: list[int] = []
+    observed_revalidate_timeouts: list[int] = []
+
+    def fake_load_tickers(_db: Session, _path: str):
+        return {"loaded": 0, "created": 1, "updated": 0, "unchanged": 0}
+
+    monkeypatch.setattr("app.feed_runtime.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.ingestion.build_source_feeds", lambda *_args: [])
+    monkeypatch.setattr(
+        "app.ingestion.remap_source_articles",
+        lambda _db, _settings, *, timeout_seconds, **_kwargs: (
+            observed_remap_timeouts.append(int(timeout_seconds))
+            or {
+                "source_code": "businesswire",
+                "processed": 0,
+                "articles_with_hits": 0,
+                "remapped_articles": 0,
+                "only_unmapped": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "app.ingestion.revalidate_stale_article_tickers",
+        lambda _db, *, timeout_seconds, **_kwargs: (
+            observed_revalidate_timeouts.append(int(timeout_seconds))
+            or {
+                "scanned": 0,
+                "revalidated": 0,
+                "purged": 0,
+                "unchanged": 0,
+            }
+        ),
+    )
+    monkeypatch.setattr("app.ingestion._should_run_raw_feed_prune", lambda _interval: False)
+
+    result = run_ingestion_cycle(
+        db,
+        _settings(
+            request_timeout_seconds=15,
+            ingest_source_page_timeout_seconds=4,
+        ),
+    )
+
+    assert result["total_feeds"] == 0
+    assert observed_remap_timeouts == [15, 15, 15]
+    assert observed_revalidate_timeouts == [15]
+
+
 def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
     db_path = Path(__file__).resolve().parent / ".tmp_ingestion_parallel.db"
     if db_path.exists():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import contextlib
 import random
 import threading
 import time
@@ -46,9 +47,9 @@ def _fetch_feed_with_retries(
         headers.update({str(k): str(v) for k, v in extra_headers.items() if v})
     for attempt in range(1, max_attempts + 1):
         try:
-            response = http_client.get_http_client().get(
-                feed_url,
-                timeout=timeout_seconds,
+            response = _get_feed_with_total_deadline(
+                feed_url=feed_url,
+                timeout_seconds=timeout_seconds,
                 headers=headers,
             )
             status_code = int(getattr(response, "status_code", 200) or 200)
@@ -106,6 +107,76 @@ def _fetch_feed_with_retries(
     if last_error is not None:
         raise last_error
     raise RuntimeError("feed fetch retry loop exited unexpectedly")
+
+
+def _get_feed_with_total_deadline(
+    *,
+    feed_url: str,
+    timeout_seconds: int | float,
+    headers: dict[str, str],
+) -> httpx.Response:
+    if timeout_seconds is None or float(timeout_seconds) <= 0:
+        return http_client.get_http_client().get(
+            feed_url,
+            timeout=timeout_seconds,
+            headers=headers,
+        )
+
+    request = httpx.Request("GET", feed_url, headers=headers)
+    timed_out = threading.Event()
+    worker_done = threading.Event()
+    outcome: dict[str, object] = {}
+    client = http_client.get_feed_poll_client()
+
+    def worker() -> None:
+        try:
+            response = client.get(
+                feed_url,
+                timeout=timeout_seconds,
+                headers=headers,
+            )
+            if timed_out.is_set():
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+                return
+            outcome["response"] = response
+        except Exception as exc:  # pragma: no cover - narrowed by caller
+            if timed_out.is_set():
+                return
+            outcome["error"] = exc
+        finally:
+            # The caller may retire this per-thread poll client after the total
+            # deadline fires. Only the helper thread should close it once the
+            # in-flight request has actually unwound.
+            if timed_out.is_set():
+                with contextlib.suppress(Exception):
+                    client.close()
+            worker_done.set()
+
+    # httpx's timeout budget is per I/O phase, not a true overall deadline.
+    # Run the request in a helper thread so feed polling cannot exceed the
+    # scheduler's wall-clock budget even when the upstream trickles bytes.
+    thread = threading.Thread(target=worker, name="feed-fetch-deadline", daemon=True)
+    thread.start()
+    thread.join(float(timeout_seconds))
+    if thread.is_alive():
+        timed_out.set()
+        retired_client = http_client.retire_feed_poll_client(client)
+        thread.join(0.1)
+        if worker_done.is_set() and retired_client is not None:
+            with contextlib.suppress(Exception):
+                retired_client.close()
+        raise httpx.ReadTimeout(
+            f"Feed request exceeded total deadline of {timeout_seconds}s",
+            request=request,
+        )
+    error = outcome.get("error")
+    if isinstance(error, Exception):
+        raise error
+    if "response" in outcome:
+        return outcome["response"]  # type: ignore[return-value]
+    raise RuntimeError("feed fetch worker exited without a response")
 
 
 def _parse_retry_after_seconds(header_value: str | None) -> float | None:
@@ -199,6 +270,7 @@ def _mark_feed_failure_backoff(
     now_utc: datetime,
     base_seconds: float,
     max_seconds: float,
+    server_hint_seconds: float | None = None,
 ) -> None:
     next_failure_count = max(0, int(feed_state.failure_count or 0)) + 1
     delay_seconds = _compute_feed_failure_backoff_seconds(
@@ -206,6 +278,9 @@ def _mark_feed_failure_backoff(
         base_seconds=base_seconds,
         max_seconds=max_seconds,
     )
+    if server_hint_seconds is not None and server_hint_seconds > 0:
+        # Honor server-provided Retry-After (429) as a floor, capped by max_seconds.
+        delay_seconds = min(max(delay_seconds, server_hint_seconds), max_seconds)
     feed_state.failure_count = next_failure_count
     feed_state.last_failure_at = now_utc
     feed_state.backoff_until = (

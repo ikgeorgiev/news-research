@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://cef:cef@localhost:5433/cef_news"
 
     yahoo_chunk_size: int = Field(default=40, ge=5, le=350)
-    ingest_cooldown_seconds: float = Field(default=5.0, ge=0.0)
+    ingest_cooldown_seconds: float = Field(default=2.0, ge=0.0)
 
     scheduler_enabled: bool = True
     admin_api_key: str | None = None
@@ -40,11 +40,16 @@ class Settings(BaseSettings):
         default=True,
         description="Enable RSS conditional GET (ETag/Last-Modified) to speed up no-op cycles.",
     )
-    feed_fetch_max_attempts: int = Field(default=3, ge=1, le=10)
-    feed_fetch_backoff_seconds: float = Field(default=1.0, ge=0.0, le=30.0)
+    # Single attempt by design: the scheduler cooldown loop is the outer
+    # retry. In-cycle retries compounded 20s timeouts into 50s+ stalls when
+    # upstream was slow (observed on GlobeNewswire). Transient failures are
+    # surfaced via ingestion_cycle_total{status="failed"} and recovered by
+    # feed_failure_backoff_base_seconds on the next cycle.
+    feed_fetch_max_attempts: int = Field(default=1, ge=1, le=10)
+    feed_fetch_backoff_seconds: float = Field(default=0.25, ge=0.0, le=30.0)
     feed_fetch_backoff_jitter_seconds: float = Field(default=0.3, ge=0.0, le=10.0)
     feed_failure_backoff_base_seconds: float = Field(
-        default=30.0,
+        default=10.0,
         ge=0.0,
         le=3600.0,
         description="Base delay for per-feed exponential failure backoff.",
@@ -70,7 +75,31 @@ class Settings(BaseSettings):
     source_enable_gn: bool = True
     source_enable_bw: bool = True
 
-    request_timeout_seconds: int = Field(default=20, ge=5, le=120)
+    # Admin/maintenance body-fetch timeout for article page scrapes
+    # (/admin/revalidate, /admin/purge). Live ingestion uses the shorter
+    # ingest_source_page_timeout_seconds below so slow upstream article pages
+    # do not stretch the scheduler cycle budget.
+    request_timeout_seconds: int = Field(default=15, ge=2, le=120)
+    feed_poll_timeout_seconds: int = Field(
+        default=4,
+        ge=1,
+        le=120,
+        description=(
+            "Per-request timeout for RSS feed polling. Kept short so a slow "
+            "feed cannot stall the ingestion cycle; body-fetch timeouts are "
+            "controlled separately by request_timeout_seconds."
+        ),
+    )
+    ingest_source_page_timeout_seconds: int = Field(
+        default=4,
+        ge=1,
+        le=120,
+        description=(
+            "Per-request timeout for article-page fallback fetches during live "
+            "ingestion. Kept short so a few slow article pages cannot dominate "
+            "end-to-end cycle duration."
+        ),
+    )
     globenewswire_source_page_timeout_seconds: int = Field(
         default=5,
         ge=1,
@@ -78,7 +107,7 @@ class Settings(BaseSettings):
         description="Per-request timeout for GlobeNewswire source-page fallback HTML fetches.",
     )
     globenewswire_source_page_max_fetches_per_feed: int = Field(
-        default=3,
+        default=2,
         ge=0,
         le=50,
         description="Max uncached GlobeNewswire source-page fallback fetches per feed per cycle.",

@@ -34,6 +34,14 @@ def _configure_yahoo_race_io(monkeypatch, feed_entries: dict[str, list[dict]]) -
         lambda: RoutedClient(),
     )
     monkeypatch.setattr(
+        "app.http_client.get_feed_poll_client",
+        lambda: RoutedClient(),
+    )
+    monkeypatch.setattr(
+        "app.http_client.reset_feed_poll_client",
+        lambda _client=None: None,
+    )
+    monkeypatch.setattr(
         "app.article_ingest.feedparser.parse",
         lambda content: SimpleNamespace(
             feed={"title": "Yahoo Finance"},

@@ -32,6 +32,7 @@ def remap_source_articles(
     source_code: str,
     limit: int = 500,
     only_unmapped: bool = True,
+    timeout_seconds: int | None = None,
     globenewswire_source_page_timeout_seconds: int | None = None,
 ) -> SourceRemapStats:
     ticker_context = load_ticker_context(db)
@@ -69,6 +70,12 @@ def remap_source_articles(
     articles_with_hits = 0
     remapped_articles = 0
 
+    page_timeout_seconds = (
+        timeout_seconds
+        if timeout_seconds is not None
+        else settings.request_timeout_seconds
+    )
+
     for row in rows:
         processed += 1
         raw_contexts = raw_contexts_by_article.get(row.id, [])
@@ -76,7 +83,7 @@ def remap_source_articles(
             row,
             raw_contexts,
             ticker_context.known_symbols,
-            settings.request_timeout_seconds,
+            page_timeout_seconds,
             globenewswire_source_page_timeout_seconds=globenewswire_source_page_timeout_seconds,
             symbol_keywords=ticker_context.symbol_keywords,
         )

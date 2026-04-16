@@ -7,6 +7,7 @@ from typing import TypedDict
 from urllib.parse import urlparse
 
 import feedparser
+import httpx
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.feed_runtime import (
     _get_feed_conditional_headers,
     _get_or_create_feed_poll_state,
     _mark_feed_failure_backoff,
+    _parse_retry_after_seconds,
     _reset_feed_failure_backoff,
     _update_feed_http_cache,
 )
@@ -47,6 +49,20 @@ from app.ticker_extraction import (
     _verified_ticker_hits,
 )
 from app.utils import GENERAL_SOURCE_CODE, canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_utc
+
+
+def _extract_retry_after_seconds(exc: BaseException) -> float | None:
+    # Preserve server-provided Retry-After (RFC 7231 §7.1.3) from 429 responses so
+    # per-feed backoff respects upstream rate-limit hints. Without this, max_attempts=1
+    # would drop the header parsed inside _fetch_feed_with_retries on the final attempt.
+    response = getattr(exc, "response", None)
+    if not isinstance(exc, httpx.HTTPStatusError) or response is None:
+        return None
+    if int(getattr(response, "status_code", 0) or 0) != 429:
+        return None
+    headers = getattr(response, "headers", None)
+    header_value = headers.get("Retry-After") if headers is not None else None
+    return _parse_retry_after_seconds(header_value)
 
 
 class IngestFeedResult(TypedDict):
@@ -541,8 +557,10 @@ def ingest_feed(
     known_symbols: set[str],
     symbol_to_id: dict[str, int],
     timeout_seconds: int,
+    feed_poll_timeout_seconds: int | None = None,
+    ingest_source_page_timeout_seconds: int | None = None,
     globenewswire_source_page_timeout_seconds: int = 5,
-    globenewswire_source_page_max_fetches_per_feed: int = 3,
+    globenewswire_source_page_max_fetches_per_feed: int = 2,
     fetch_max_attempts: int = 3,
     fetch_backoff_seconds: float = 1.0,
     fetch_backoff_jitter_seconds: float = 0.3,
@@ -585,9 +603,14 @@ def ingest_feed(
                 if enable_conditional_get
                 else {}
             )
+            feed_fetch_timeout = (
+                feed_poll_timeout_seconds
+                if feed_poll_timeout_seconds is not None
+                else timeout_seconds
+            )
             response = _fetch_feed_with_retries(
                 feed_url=feed_url,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=feed_fetch_timeout,
                 max_attempts=fetch_max_attempts,
                 backoff_seconds=fetch_backoff_seconds,
                 backoff_jitter_seconds=fetch_backoff_jitter_seconds,
@@ -626,7 +649,7 @@ def ingest_feed(
                 source_page_timeout_seconds = (
                     globenewswire_source_page_timeout_seconds
                     if source.code == "globenewswire"
-                    else None
+                    else ingest_source_page_timeout_seconds
                 )
                 page_fetches_remaining = (
                     globenewswire_source_page_max_fetches_per_feed
@@ -709,11 +732,13 @@ def ingest_feed(
         committed_items_inserted = 0
         now_utc = datetime.now(timezone.utc)
         feed_state = _get_or_create_feed_poll_state(db, feed_url)
+        server_hint_seconds = _extract_retry_after_seconds(exc)
         _mark_feed_failure_backoff(
             feed_state,
             now_utc=now_utc,
             base_seconds=failure_backoff_base_seconds,
             max_seconds=failure_backoff_max_seconds,
+            server_hint_seconds=server_hint_seconds,
         )
 
     run.status = status

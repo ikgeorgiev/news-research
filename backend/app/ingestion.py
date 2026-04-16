@@ -136,6 +136,16 @@ def _run_feed_ingestion(
         "known_symbols": ticker_context.known_symbols,
         "symbol_to_id": ticker_context.symbol_to_id,
         "timeout_seconds": settings.request_timeout_seconds,
+        "feed_poll_timeout_seconds": getattr(
+            settings,
+            "feed_poll_timeout_seconds",
+            None,
+        ),
+        "ingest_source_page_timeout_seconds": getattr(
+            settings,
+            "ingest_source_page_timeout_seconds",
+            None,
+        ),
         "globenewswire_source_page_timeout_seconds": getattr(
             settings,
             "globenewswire_source_page_timeout_seconds",
@@ -290,6 +300,7 @@ def _run_post_ingestion_remaps(
                     source_code=code,
                     limit=500,
                     only_unmapped=True,
+                    timeout_seconds=settings.request_timeout_seconds,
                     globenewswire_source_page_timeout_seconds=gn_timeout,
                 )
             )
