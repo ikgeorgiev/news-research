@@ -70,6 +70,16 @@ def test_clamp_label_caps_to_column_width():
 def test_should_persist_entry_keeps_businesswire_without_tickers():
     assert _should_persist_entry("businesswire", {}) is True
 
+def test_should_persist_entry_drops_businesswire_finance_without_tickers():
+    assert (
+        _should_persist_entry(
+            "businesswire",
+            {},
+            persistence_policy_override="validated_mapping_required",
+        )
+        is False
+    )
+
 def test_should_persist_entry_drops_non_bw_without_tickers():
     assert _should_persist_entry("prnewswire", {}) is False
     assert _should_persist_entry("globenewswire", {}) is False
@@ -94,6 +104,17 @@ def test_should_persist_entry_rejects_subthreshold_paren_hits():
 def test_should_persist_entry_keeps_exchange_hits():
     hits = {"CGO": ("exchange", 0.88)}
     assert _should_persist_entry("globenewswire", hits) is True
+
+def test_should_persist_entry_keeps_businesswire_finance_validated_hits():
+    hits = {"CGO": ("exchange", 0.88)}
+    assert (
+        _should_persist_entry(
+            "businesswire",
+            hits,
+            persistence_policy_override="validated_mapping_required",
+        )
+        is True
+    )
 
 def test_extract_entry_tickers_can_disable_token_scan():
     known = {"DSM"}

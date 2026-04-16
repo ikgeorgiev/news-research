@@ -8,7 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Article, ArticleTicker, RawFeedItem, Source
-from app.sources import PAGE_FETCH_CONFIGS, POLICY_GENERAL_ALLOWED, get_source_policy
+from app.sources import (
+    PAGE_FETCH_CONFIGS,
+    POLICY_GENERAL_ALLOWED,
+    get_effective_source_policy,
+)
 from app.constants import EXTRACTION_VERSION, MIN_PERSIST_CONFIDENCE, NO_KEYWORDS_CONFIDENCE
 from app.ticker_context import SymbolKeywordProfile
 from app.ticker_extraction import (
@@ -27,8 +31,22 @@ def _has_general_allowed_raw_provenance(
     raw_contexts: list[RawContext],
 ) -> bool:
     return any(
-        get_source_policy(source_code) == POLICY_GENERAL_ALLOWED
-        for source_code, _, _ in raw_contexts
+        get_effective_source_policy(source_code, feed_url=feed_url)
+        == POLICY_GENERAL_ALLOWED
+        for source_code, _, feed_url in raw_contexts
+    )
+
+
+def _has_general_allowed_source_provenance(
+    raw_contexts: list[RawContext],
+    *,
+    source_code: str,
+) -> bool:
+    return any(
+        raw_source_code == source_code
+        and get_effective_source_policy(raw_source_code, feed_url=feed_url)
+        == POLICY_GENERAL_ALLOWED
+        for raw_source_code, _, feed_url in raw_contexts
     )
 
 

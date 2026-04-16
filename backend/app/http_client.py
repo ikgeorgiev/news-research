@@ -10,15 +10,24 @@ _feed_poll_client_lock = threading.Lock()
 _feed_poll_clients: dict[threading.Thread, httpx.Client] = {}
 
 
-def create_http_client() -> httpx.Client:
+def _create_client(*, http2: bool) -> httpx.Client:
     return httpx.Client(
         follow_redirects=True,
-        http2=True,
+        http2=http2,
     )
 
 
+def create_http_client() -> httpx.Client:
+    # Source-page fallback fetches are mostly single-request HTML loads rather
+    # than multiplexed feed polling. Business Wire frequently resets HTTP/2
+    # streams for these article-page requests, which leaves otherwise mappable
+    # stories stuck as generic/unmapped. Use HTTP/1.1 for the shared page-fetch
+    # client while keeping feed polling on HTTP/2.
+    return _create_client(http2=False)
+
+
 def create_feed_poll_client() -> httpx.Client:
-    return create_http_client()
+    return _create_client(http2=True)
 
 
 def get_http_client() -> httpx.Client:

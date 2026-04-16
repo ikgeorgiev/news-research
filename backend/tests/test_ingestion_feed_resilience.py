@@ -755,6 +755,282 @@ def test_ingest_feed_rejected_strict_source_entry_persists_detached_raw_row(
     assert len(raw_rows) == 1
     assert raw_rows[0].article_id is None
 
+
+def test_ingest_feed_businesswire_finance_persists_detached_raw_row(
+    db_session,
+    stub_feed_io,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+
+    entry = {
+        "id": "bw-finance-detached",
+        "guid": "bw-finance-detached",
+        "title": "Redfin expands brokerage footprint",
+        "link": "https://www.businesswire.com/news/home/20260301000011/en/Redfin-Expands-Brokerage-Footprint",
+        "summary": "No fund ticker appears in the release copy.",
+        "published": "2026-03-01T00:15:00Z",
+    }
+    stub_feed_io([entry], "Business Wire Professional Services: Finance News")
+    monkeypatch.setattr(
+        "app.article_ingest._extract_source_fallback_tickers",
+        lambda *_args, **_kwargs: {},
+    )
+
+    result = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+    )
+
+    articles = db.scalars(select(Article)).all()
+    raw_rows = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.raw_guid == "bw-finance-detached")
+    ).all()
+
+    assert result["status"] == "success"
+    assert result["items_inserted"] == 0
+    assert articles == []
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id is None
+    assert raw_rows[0].raw_payload_json["source"] == "Business Wire"
+
+
+def test_ingest_feed_businesswire_finance_keeps_businesswire_source_name(
+    db_session,
+    stub_feed_io,
+):
+    db = db_session
+    source = seed_source(db)
+    ticker = seed_ticker(db, symbol="UTF")
+
+    entry = {
+        "id": "bw-finance-source-name",
+        "guid": "bw-finance-source-name",
+        "title": "ACME distribution update NYSE: UTF",
+        "link": "https://www.businesswire.com/news/home/20260301000012/en/ACME-Distribution-Update",
+        "summary": "Finance feed title should not replace the provider label.",
+        "published": "2026-03-01T00:20:00Z",
+    }
+    stub_feed_io([entry], "Business Wire Professional Services: Finance News")
+
+    result = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+    )
+
+    article = db.scalar(select(Article).where(Article.canonical_url == entry["link"]))
+
+    assert result["status"] == "success"
+    assert result["items_inserted"] == 1
+    assert article is not None
+    assert article.source_name == "Business Wire"
+    assert article.provider_name == "Business Wire"
+
+
+def test_ingest_feed_businesswire_finance_exact_url_transient_miss_refreshes_article(
+    db_session,
+    stub_feed_io,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    article_url = (
+        "https://www.businesswire.com/news/home/20260301000014/en/"
+        "Acme-Distribution-Update"
+    )
+    article = seed_article(
+        db,
+        canonical_url=article_url,
+        title="Old finance title",
+        summary="Old finance summary",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+    ticker = seed_ticker(db, symbol="UTF")
+    db.add(
+        ArticleTicker(
+            article_id=article.id,
+            ticker_id=ticker.id,
+            match_type="exchange",
+            confidence=0.88,
+        )
+    )
+    db.commit()
+
+    entry = {
+        "id": "bw-finance-refresh-existing",
+        "guid": "bw-finance-refresh-existing",
+        "title": "Updated finance title without symbol",
+        "link": article_url,
+        "summary": "Updated finance summary",
+        "published": "2026-03-01T00:25:00Z",
+    }
+    stub_feed_io([entry], "Business Wire Professional Services: Finance News")
+    monkeypatch.setattr(
+        "app.article_ingest._extract_source_fallback_tickers",
+        lambda *_args, **_kwargs: {},
+    )
+
+    result = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
+    )
+
+    article_after = db.scalar(select(Article).where(Article.id == article.id))
+    ticker_rows_after = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+    raw_rows_after = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.article_id == article.id)
+    ).all()
+
+    assert result["status"] == "success"
+    assert result["items_inserted"] == 0
+    assert article_after is not None
+    assert article_after.title == "Updated finance title without symbol"
+    assert article_after.summary == "Updated finance summary"
+    assert len(ticker_rows_after) == 1
+    assert ticker_rows_after[0].ticker_id == ticker.id
+    assert len(raw_rows_after) == 1
+    assert raw_rows_after[0].raw_guid == "bw-finance-refresh-existing"
+
+
+def test_ingest_feed_businesswire_finance_exact_url_prunes_missing_tickers(
+    db_session,
+    stub_feed_io,
+):
+    db = db_session
+    source = seed_source(db)
+    published = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    article_url = (
+        "https://www.businesswire.com/news/home/20260301000015/en/"
+        "Acme-Distribution-Update"
+    )
+    article = seed_article(
+        db,
+        canonical_url=article_url,
+        title="Old finance title",
+        summary="Old finance summary",
+        published_at=published,
+        source_name="Business Wire",
+        provider_name="Business Wire",
+    )
+    old_ticker = seed_ticker(db, symbol="UTF")
+    new_ticker = seed_ticker(db, symbol="GOF")
+    db.add(
+        ArticleTicker(
+            article_id=article.id,
+            ticker_id=old_ticker.id,
+            match_type="exchange",
+            confidence=0.88,
+        )
+    )
+    db.commit()
+
+    entry = {
+        "id": "bw-finance-prune-existing",
+        "guid": "bw-finance-prune-existing",
+        "title": "NYSE: GOF distribution update",
+        "link": article_url,
+        "summary": "Updated finance summary",
+        "published": "2026-03-01T00:30:00Z",
+    }
+    stub_feed_io([entry], "Business Wire Professional Services: Finance News")
+
+    result = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+        known_symbols={"UTF", "GOF"},
+        symbol_to_id={"UTF": old_ticker.id, "GOF": new_ticker.id},
+    )
+
+    article_after = db.scalar(select(Article).where(Article.id == article.id))
+    ticker_rows_after = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+
+    assert result["status"] == "success"
+    assert article_after is not None
+    assert article_after.title == "NYSE: GOF distribution update"
+    assert article_after.summary == "Updated finance summary"
+    assert len(ticker_rows_after) == 1
+    assert ticker_rows_after[0].ticker_id == new_ticker.id
+
+
+def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fallback(
+    db_session,
+    stub_feed_io,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+    entry = {
+        "id": "bw-finance-repeat",
+        "guid": "bw-finance-repeat",
+        "title": "Redfin expands brokerage footprint",
+        "link": "https://www.businesswire.com/news/home/20260301000013/en/Redfin-Expands-Brokerage-Footprint",
+        "summary": "No fund ticker appears in the release copy.",
+        "published": "2026-03-01T00:15:00Z",
+    }
+    stub_feed_io([entry], "Business Wire Professional Services: Finance News")
+
+    fallback_calls = {"count": 0}
+
+    def fake_fallback(*_args, **_kwargs):
+        fallback_calls["count"] += 1
+        return {}
+
+    monkeypatch.setattr(
+        "app.article_ingest._extract_source_fallback_tickers",
+        fake_fallback,
+    )
+
+    first = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+    )
+    second = call_ingest(
+        db,
+        source,
+        "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        persistence_policy_override="validated_mapping_required",
+        article_source_name="Business Wire",
+    )
+
+    raw_rows = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.raw_guid == "bw-finance-repeat")
+    ).all()
+
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert first["items_inserted"] == 0
+    assert second["items_inserted"] == 0
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id is None
+    assert fallback_calls["count"] == 1
+
 def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
     db_session,
     stub_feed_io,

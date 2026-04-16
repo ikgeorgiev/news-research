@@ -124,6 +124,172 @@ def test_purge_token_only_articles_skips_unknown_provenance_articles(db_session)
     assert remaining_article is not None
     assert len(remaining_tickers) == 1
 
+
+def test_purge_token_only_articles_treats_businesswire_finance_as_strict(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+    article, ticker = seed_article_with_raw(
+        db,
+        source,
+        ticker_kwargs=dict(
+            symbol="CGO",
+            fund_name="Calamos Global Total Return Fund",
+            sponsor="Calamos",
+        ),
+        article_kwargs=dict(
+            canonical_url="https://www.businesswire.com/news/home/20260301000021/en/Redfin-Expands-Brokerage-Footprint",
+            title="Redfin Expands Brokerage Footprint",
+            summary="New CGO appointment announced",
+            published_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            source_name="Business Wire",
+            provider_name="Business Wire",
+        ),
+        match_type="token",
+        confidence=0.62,
+        raw_guid="bw-finance-purge",
+        feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+    )
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html", lambda *_args: ""
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 1
+    assert result["purged_articles"] == 1
+    assert result["deleted_article_tickers"] == 1
+    assert result["deleted_raw_feed_items"] == 1
+    assert db.scalar(select(Article).where(Article.id == article.id)) is None
+    assert (
+        db.scalars(
+            select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+        ).all()
+        == []
+    )
+    raw_rows = db.scalars(
+        select(RawFeedItem).where(RawFeedItem.raw_guid == "bw-finance-purge")
+    ).all()
+    assert len(raw_rows) == 1
+    assert raw_rows[0].article_id is None
+
+
+def test_purge_token_only_articles_still_skips_general_businesswire_feed(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+    article, ticker = seed_article_with_raw(
+        db,
+        source,
+        ticker_kwargs=dict(
+            symbol="CGO",
+            fund_name="Calamos Global Total Return Fund",
+            sponsor="Calamos",
+        ),
+        article_kwargs=dict(
+            canonical_url="https://www.businesswire.com/news/home/20260301000022/en/Generic-Cef-Story",
+            title="Generic CEF story",
+            summary="New CGO appointment announced",
+            published_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            source_name="Business Wire",
+            provider_name="Business Wire",
+        ),
+        match_type="token",
+        confidence=0.62,
+        raw_guid="bw-cef-skip",
+        feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+    )
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("general Business Wire rows should stay out of purge")
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 0
+    assert result["purged_articles"] == 0
+    assert db.scalar(select(Article).where(Article.id == article.id)) is not None
+    assert len(
+        db.scalars(
+            select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+        ).all()
+    ) == 1
+
+
+def test_purge_token_only_articles_skips_finance_rows_with_general_alt_feed_url(
+    db_session,
+    monkeypatch,
+):
+    db = db_session
+    source = seed_source(db)
+    article, ticker = seed_article_with_raw(
+        db,
+        source,
+        ticker_kwargs=dict(
+            symbol="CGO",
+            fund_name="Calamos Global Total Return Fund",
+            sponsor="Calamos",
+        ),
+        article_kwargs=dict(
+            canonical_url="https://www.businesswire.com/news/home/20260301000023/en/Mixed-Provenance-Story",
+            title="Mixed provenance story",
+            summary="New CGO appointment announced",
+            published_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            source_name="Business Wire",
+            provider_name="Business Wire",
+        ),
+        match_type="token",
+        confidence=0.62,
+        raw_guid="bw-finance-alt-general",
+        feed_url="https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
+        raw_payload_json={
+            "_alt_feed_urls": [
+                "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg=="
+            ]
+        },
+    )
+
+    monkeypatch.setattr(
+        "app.ticker_extraction._fetch_source_page_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("mixed Business Wire general provenance should stay out of purge")
+        ),
+    )
+
+    result = purge_token_only_articles(
+        db,
+        dry_run=False,
+        limit=10,
+        timeout_seconds=5,
+    )
+
+    assert result["scanned_articles"] == 0
+    assert result["purged_articles"] == 0
+    assert db.scalar(select(Article).where(Article.id == article.id)) is not None
+    assert len(
+        db.scalars(
+            select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+        ).all()
+    ) == 1
+
 @pytest.mark.parametrize(
     "source_kwargs, article_kwargs, ticker_kwargs, match_type, confidence, raw_guid, feed_url",
     [

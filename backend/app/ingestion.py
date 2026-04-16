@@ -33,6 +33,7 @@ from app.models import (
 from app.push_alerts import check_and_send_alerts_locked, push_dispatcher_is_active
 from app.sources import (
     PAGE_FETCH_CONFIGS,
+    FeedDef,
     SourceFeed,
     build_source_feeds,
     seed_sources,
@@ -174,13 +175,13 @@ def _run_feed_ingestion(
         # SQLite in-memory tests must remain single-threaded; additional sessions may attach to a different DB.
         max_workers = 1
 
-    tasks: list[tuple[int, str, str]] = []
+    tasks: list[tuple[int, str, FeedDef]] = []
     for source_item in source_feeds:
         source_row = source_map.get(source_item.code)
         if source_row is None:
             continue
-        for feed_url in source_item.feed_urls:
-            tasks.append((source_row.id, source_row.code, feed_url))
+        for feed_def in source_item.feeds:
+            tasks.append((source_row.id, source_row.code, feed_def))
     source_task_locks = {source_id: threading.Lock() for source_id, _, _ in tasks}
 
     def _serialize_source(source_code: str) -> bool:
@@ -192,17 +193,19 @@ def _run_feed_ingestion(
     def _ingest_with_source(
         task_db: Session,
         source_row: Source,
-        feed_url: str,
+        feed_def: FeedDef,
     ) -> IngestFeedResult:
         return ingest_feed(
             task_db,
             source=source_row,
-            feed_url=feed_url,
+            feed_url=feed_def.url,
+            persistence_policy_override=feed_def.persistence_policy_override,
+            article_source_name=feed_def.article_source_name,
             **feed_ingest_kwargs,
         )
 
     def _ingest_task(
-        source_id: int, source_code: str, feed_url: str
+        source_id: int, source_code: str, feed_def: FeedDef
     ) -> IngestFeedResult:
         source_task_lock = source_task_locks[source_id]
         lock_context = (
@@ -218,10 +221,10 @@ def _run_feed_ingestion(
                 if source_row is None:
                     return _failed_feed_result(
                         source_code,
-                        feed_url,
+                        feed_def.url,
                         "Source row missing (unexpected)",
                     )
-                return _ingest_with_source(db, source_row, feed_url)
+                return _ingest_with_source(db, source_row, feed_def)
 
             # Parallel workers: each task uses its own DB session.
             if bind is None:
@@ -236,23 +239,23 @@ def _run_feed_ingestion(
                 if source_row is None:
                     return _failed_feed_result(
                         source_code,
-                        feed_url,
+                        feed_def.url,
                         f"Source id {source_id} not found",
                     )
-                return _ingest_with_source(worker_db, source_row, feed_url)
+                return _ingest_with_source(worker_db, source_row, feed_def)
 
     results: list[IngestFeedResult] = []
     if max_workers <= 1:
-        for source_id, source_code, feed_url in tasks:
-            results.append(_ingest_task(source_id, source_code, feed_url))
+        for source_id, source_code, feed_def in tasks:
+            results.append(_ingest_task(source_id, source_code, feed_def))
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {
-                executor.submit(_ingest_task, source_id, source_code, feed_url): (
+                executor.submit(_ingest_task, source_id, source_code, feed_def): (
                     source_code,
-                    feed_url,
+                    feed_def.url,
                 )
-                for source_id, source_code, feed_url in tasks
+                for source_id, source_code, feed_def in tasks
             }
             for future in as_completed(future_to_task):
                 source_code, feed_url = future_to_task[future]
