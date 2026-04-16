@@ -85,6 +85,20 @@ def _canonical_businesswire_article_url(url: str) -> str:
     return _canonical_source_article_url(url)
 
 
+def _normalized_businesswire_fetch_url(url: str) -> str:
+    parsed = urlparse(url)
+    # Business Wire article slugs occasionally include percent-encoded
+    # trademark/registered-mark characters from the feed copy
+    # (for example `Liberty-All-Star%C2%AE-...`). Those variants can resolve to
+    # a Business Wire error page, while the plain slug without the mark returns
+    # the actual article. Normalize only the fetch URL so persistence keys stay
+    # stable and existing rows do not split across old/new canonical forms.
+    path = parsed.path
+    for token in ("%C2%AE", "%c2%ae", "%E2%84%A2", "%e2%84%a2", "®", "™"):
+        path = path.replace(token, "")
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+
 def _is_businesswire_article_url(url: str) -> bool:
     return _is_source_article_url(url, "businesswire.com")
 
@@ -119,6 +133,8 @@ def _fetch_source_page_html(
     now_fn=time.time,
 ) -> str | None:
     fetch_url = _canonical_source_article_url(url)
+    if config.source_code == "businesswire":
+        fetch_url = _normalized_businesswire_fetch_url(fetch_url)
     if not _is_source_article_url(fetch_url, config.hostname_suffix):
         return None
 

@@ -96,6 +96,60 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
     assert second == "<html>ok</html>"
     assert calls["count"] == 2
 
+def test_businesswire_fetch_normalizes_registered_mark_slug_for_request(monkeypatch, clean_page_cache):
+    observed_urls: list[str] = []
+
+    class FakeResponse:
+        is_success = True
+        text = "<html>ok</html>"
+
+    def fake_get(url: str, timeout: int, headers: dict[str, str]):  # noqa: ARG001
+        observed_urls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
+
+    result = _fetch_source_page_html(
+        "http://www.businesswire.com/news/home/20260414872914/en/Liberty-All-Star%C2%AE-Equity-Fund-March-2026-Monthly-Update?feedref=abc",
+        5,
+        PAGE_FETCH_CONFIGS["businesswire"],
+    )
+
+    assert result == "<html>ok</html>"
+    assert observed_urls == [
+        "http://www.businesswire.com/news/home/20260414872914/en/Liberty-All-Star-Equity-Fund-March-2026-Monthly-Update"
+    ]
+
+def test_businesswire_fetch_preserves_other_percent_escapes(monkeypatch, clean_page_cache):
+    observed_urls: list[str] = []
+
+    class FakeResponse:
+        is_success = True
+        text = "<html>ok</html>"
+
+    def fake_get(url: str, timeout: int, headers: dict[str, str]):  # noqa: ARG001
+        observed_urls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
+
+    result = _fetch_source_page_html(
+        "http://www.businesswire.com/news/home/20260414872914/en/Fund%C2%AE-Update%2FSeries%231?feedref=abc",
+        5,
+        PAGE_FETCH_CONFIGS["businesswire"],
+    )
+
+    assert result == "<html>ok</html>"
+    assert observed_urls == [
+        "http://www.businesswire.com/news/home/20260414872914/en/Fund-Update%2FSeries%231"
+    ]
+
 def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page_cache):
     calls = {"count": 0}
 
