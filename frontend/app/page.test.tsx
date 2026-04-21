@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import Page from "./page"
 import * as api from "@/lib/api"
+import * as localStorageApi from "@/lib/local-storage"
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>()
@@ -37,6 +38,7 @@ vi.mock("@/lib/local-storage", async (importOriginal) => {
 })
 
 const mockedApi = vi.mocked(api)
+const mockedLocalStorage = vi.mocked(localStorageApi)
 
 describe("Page refresh requests", () => {
   beforeEach(() => {
@@ -181,6 +183,30 @@ describe("Page refresh requests", () => {
     )
   })
 
+  it("keeps seeded read preferences from being overwritten on mount", async () => {
+    localStorage.setItem("readNewsKeys", JSON.stringify(["seed-read-key"]))
+    localStorage.setItem("newsViewMode", "full")
+    localStorage.setItem(
+      "customWatchlists",
+      JSON.stringify([
+        {
+          id: "seed-watchlist",
+          name: "Seed Watchlist",
+          provider: "Business Wire",
+          q: "rights offering",
+          tickers: [],
+        },
+      ])
+    )
+
+    render(<Page />)
+
+    await waitFor(() => expect(screen.getByTitle("Refresh Data")).toBeInTheDocument())
+
+    expect(mockedLocalStorage.persistJson).not.toHaveBeenCalledWith("readNewsKeys", [])
+    expect(mockedLocalStorage.persistValue).not.toHaveBeenCalledWith("newsViewMode", "list")
+  })
+
   it("lets the main provider control clear a saved watchlist provider", async () => {
     localStorage.setItem(
       "customWatchlists",
@@ -227,6 +253,29 @@ describe("Page refresh requests", () => {
       )
     )
     expect(mockedApi.fetchNews.mock.lastCall?.[0].provider).toBeUndefined()
+  })
+
+  it("keeps seeded custom watchlists from being overwritten on mount", async () => {
+    localStorage.setItem("readNewsKeys", JSON.stringify(["seed-read-key"]))
+    localStorage.setItem("newsViewMode", "full")
+    localStorage.setItem(
+      "customWatchlists",
+      JSON.stringify([
+        {
+          id: "seed-watchlist",
+          name: "Seed Watchlist",
+          provider: "Business Wire",
+          q: "rights offering",
+          tickers: [],
+        },
+      ])
+    )
+
+    render(<Page />)
+
+    await waitFor(() => expect(screen.getByText("Seed Watchlist")).toBeInTheDocument())
+
+    expect(mockedLocalStorage.persistJson).not.toHaveBeenCalledWith("customWatchlists", [])
   })
 
   it("lets the main search control clear a saved watchlist query", async () => {

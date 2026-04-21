@@ -390,7 +390,10 @@ def prune_raw_feed_items(
     for _ in range(max_batches):
         stale_ids = db.scalars(
             select(RawFeedItem.id)
-            .where(RawFeedItem.fetched_at < cutoff)
+            .where(
+                RawFeedItem.fetched_at < cutoff,
+                RawFeedItem.article_id.is_(None),
+            )
             .order_by(RawFeedItem.id.asc())
             .limit(batch_size)
         ).all()

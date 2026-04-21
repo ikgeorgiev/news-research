@@ -125,6 +125,12 @@ def test_load_tickers_from_csv_if_changed_retries_after_transient_loader_failure
 def test_prune_raw_feed_items_respects_retention_window(db_session):
     db = db_session
     source = seed_source(db)
+    attached_article = seed_article(
+        db,
+        canonical_url="https://example.com/attached",
+        title="Attached",
+        summary="Attached summary",
+    )
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
     old_row = RawFeedItem(
@@ -134,6 +140,17 @@ def test_prune_raw_feed_items_respects_retention_window(db_session):
         raw_guid="old-guid",
         raw_title="Old",
         raw_link="https://example.com/old",
+        raw_pub_date=now - timedelta(days=40),
+        raw_payload_json={},
+        fetched_at=now - timedelta(days=40),
+    )
+    attached_old_row = RawFeedItem(
+        source_id=source.id,
+        article_id=attached_article.id,
+        feed_url="https://example.com/feed.xml",
+        raw_guid="attached-old-guid",
+        raw_title="Attached Old",
+        raw_link="https://example.com/attached",
         raw_pub_date=now - timedelta(days=40),
         raw_payload_json={},
         fetched_at=now - timedelta(days=40),
@@ -149,7 +166,7 @@ def test_prune_raw_feed_items_respects_retention_window(db_session):
         raw_payload_json={},
         fetched_at=now - timedelta(days=2),
     )
-    db.add_all([old_row, fresh_row])
+    db.add_all([old_row, attached_old_row, fresh_row])
     db.commit()
 
     deleted = prune_raw_feed_items(
@@ -163,6 +180,10 @@ def test_prune_raw_feed_items_respects_retention_window(db_session):
         row.raw_guid
         for row in db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
     }
+    attached_after = db.scalar(
+        select(RawFeedItem).where(RawFeedItem.id == attached_old_row.id)
+    )
 
     assert deleted == 1
-    assert remaining_guids == {"fresh-guid"}
+    assert remaining_guids == {"attached-old-guid", "fresh-guid"}
+    assert attached_after is not None

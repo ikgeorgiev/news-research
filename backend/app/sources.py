@@ -175,6 +175,7 @@ def _fetch_source_page_html(
             fetch_url,
             timeout=timeout_seconds,
             headers=headers,
+            follow_redirects=False,
         )
         if response.is_success and response.text:
             html_text = response.text

@@ -64,6 +64,7 @@ export function useWatchlists({
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [renamingWatchlistId, setRenamingWatchlistId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const [hydrated, setHydrated] = useState(false)
 
   const activeWatchlist = useMemo(() => {
     return DEFAULT_WATCHLISTS.find((watchlist) => watchlist.id === activeWatchlistId) ||
@@ -76,12 +77,15 @@ export function useWatchlists({
     } catch (error) {
       console.error("Failed to parse stored watchlists", error)
       setCustomWatchlists([])
+    } finally {
+      setHydrated(true)
     }
   }, [])
 
   useEffect(() => {
+    if (!hydrated) return
     persistJson("customWatchlists", customWatchlists)
-  }, [customWatchlists])
+  }, [customWatchlists, hydrated])
 
   useEffect(() => {
     if (!contextMenu) return

@@ -1,6 +1,7 @@
 import sys
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.article_ingest import _clamp_label
@@ -63,9 +64,13 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
     calls = {"count": 0}
 
     def fake_get(
-        _url: str, timeout: int, headers: dict[str, str]
+        _url: str,
+        timeout: int,
+        headers: dict[str, str],
+        follow_redirects: bool = True,
     ) -> FakeResponse:  # noqa: ARG001
         calls["count"] += 1
+        assert follow_redirects is False
         if calls["count"] == 1:
             return FakeResponse(is_success=False, text="")
         return FakeResponse(is_success=True, text="<html>ok</html>")
@@ -103,8 +108,14 @@ def test_businesswire_fetch_normalizes_registered_mark_slug_for_request(monkeypa
         is_success = True
         text = "<html>ok</html>"
 
-    def fake_get(url: str, timeout: int, headers: dict[str, str]):  # noqa: ARG001
+    def fake_get(
+        url: str,
+        timeout: int,
+        headers: dict[str, str],
+        follow_redirects: bool = True,
+    ):  # noqa: ARG001
         observed_urls.append(url)
+        assert follow_redirects is False
         return FakeResponse()
 
     monkeypatch.setattr(
@@ -130,8 +141,14 @@ def test_businesswire_fetch_preserves_other_percent_escapes(monkeypatch, clean_p
         is_success = True
         text = "<html>ok</html>"
 
-    def fake_get(url: str, timeout: int, headers: dict[str, str]):  # noqa: ARG001
+    def fake_get(
+        url: str,
+        timeout: int,
+        headers: dict[str, str],
+        follow_redirects: bool = True,
+    ):  # noqa: ARG001
         observed_urls.append(url)
+        assert follow_redirects is False
         return FakeResponse()
 
     monkeypatch.setattr(
@@ -166,6 +183,43 @@ def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page
 
     assert result is None
     assert calls["count"] == 0
+
+
+def test_businesswire_fetch_does_not_follow_redirects_to_untrusted_hosts(
+    monkeypatch, clean_page_cache
+):
+    requested_urls: list[str] = []
+
+    def fake_get(
+        url: str,
+        timeout: int,  # noqa: ARG001
+        headers: dict[str, str],  # noqa: ARG001
+        follow_redirects: bool = True,
+    ):
+        requested_urls.append(url)
+        assert follow_redirects is False
+        assert url == "https://www.businesswire.com/news/home/abc"
+        return httpx.Response(
+            302,
+            headers={"Location": "https://evil.example.com/redirected"},
+            content=b"<html>redirect body</html>",
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
+
+    result = _fetch_source_page_html(
+        "https://www.businesswire.com/news/home/abc",
+        5,
+        PAGE_FETCH_CONFIGS["businesswire"],
+    )
+
+    assert result is None
+    assert requested_urls == ["https://www.businesswire.com/news/home/abc"]
+    assert _source_page_cache["https://www.businesswire.com/news/home/abc"][1] is None
 
 def test_prnewswire_fallback_extracts_table_symbols(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]

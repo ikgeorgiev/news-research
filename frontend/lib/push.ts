@@ -189,6 +189,7 @@ export async function enablePushNotifications(scopes: PushAlertScopes): Promise<
 
   const registration = await ensureServiceWorkerRegistration()
   let subscription = await registration.pushManager.getSubscription()
+  const createdSubscription = !subscription
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
@@ -196,8 +197,20 @@ export async function enablePushNotifications(scopes: PushAlertScopes): Promise<
     })
   }
 
-  await upsertBackendSubscription({ subscription, scopes })
-  return { permissionGranted: true, pushActive: true }
+  try {
+    await upsertBackendSubscription({ subscription, scopes })
+    return { permissionGranted: true, pushActive: true }
+  } catch (error) {
+    if (createdSubscription) {
+      try {
+        await subscription.unsubscribe()
+      } catch {
+        // The browser created the subscription, so best-effort cleanup should
+        // never hide the original backend failure.
+      }
+    }
+    throw error
+  }
 }
 
 export async function disablePushNotifications(): Promise<void> {

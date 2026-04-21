@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import db_health_check, get_session_factory
 from app.ingestion import sync_runtime_state
-from migrate import run_migrations
 from app.monitoring import observe_http_request, render_metrics
 from app.push_alerts import PushAlertDispatcher
 from app.routes.admin import admin_router
@@ -38,7 +37,6 @@ async def lifespan(app: FastAPI):
             "BEHIND_PROXY is enabled but TRUSTED_PROXY_IPS is empty; "
             "forwarded client IP headers will be ignored."
         )
-    run_migrations(settings.database_url)
 
     with get_session_factory()() as db:
         runtime_sync = sync_runtime_state(

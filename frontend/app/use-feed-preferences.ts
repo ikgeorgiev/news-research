@@ -53,12 +53,14 @@ export function useFeedPreferences({
   }, [])
 
   useEffect(() => {
+    if (!mounted) return
     persistJson("readNewsKeys", Array.from(readKeys))
-  }, [readKeys])
+  }, [mounted, readKeys])
 
   useEffect(() => {
+    if (!mounted) return
     persistValue("newsViewMode", viewMode)
-  }, [viewMode])
+  }, [mounted, viewMode])
 
   const trackedUnreadItems = useMemo(
     () => mergeUniqueNewsItems(items, pendingNewItems),
