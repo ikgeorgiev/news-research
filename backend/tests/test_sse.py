@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from ipaddress import ip_network
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -133,7 +134,23 @@ def test_client_ip_ignores_forwarded_headers_when_trust_proxy_is_false():
     assert _client_ip(request, trust_proxy=False) == "127.0.0.1"
 
 
-def test_client_ip_uses_forwarded_for_when_trust_proxy_is_true():
+def test_client_ip_ignores_spoofed_forwarded_headers_from_untrusted_peer():
+    request = SimpleNamespace(
+        headers={
+            "x-forwarded-for": "203.0.113.10, 198.51.100.1",
+            "x-real-ip": "203.0.113.20",
+        },
+        client=SimpleNamespace(host="203.0.113.20"),
+    )
+
+    assert _client_ip(
+        request,
+        trust_proxy=True,
+        trusted_proxy_networks=(ip_network("127.0.0.0/8"),),
+    ) == "203.0.113.20"
+
+
+def test_client_ip_uses_trusted_proxy_chain_right_to_left():
     request = SimpleNamespace(
         headers={
             "x-forwarded-for": "203.0.113.10, 198.51.100.1",
@@ -142,7 +159,14 @@ def test_client_ip_uses_forwarded_for_when_trust_proxy_is_true():
         client=SimpleNamespace(host="127.0.0.1"),
     )
 
-    assert _client_ip(request, trust_proxy=True) == "203.0.113.10"
+    assert _client_ip(
+        request,
+        trust_proxy=True,
+        trusted_proxy_networks=(
+            ip_network("127.0.0.0/8"),
+            ip_network("198.51.100.1/32"),
+        ),
+    ) == "203.0.113.10"
 
 
 def test_client_ip_falls_back_to_real_ip_when_no_forwarded_for():
@@ -153,7 +177,11 @@ def test_client_ip_falls_back_to_real_ip_when_no_forwarded_for():
         client=SimpleNamespace(host="127.0.0.1"),
     )
 
-    assert _client_ip(request, trust_proxy=True) == "203.0.113.20"
+    assert _client_ip(
+        request,
+        trust_proxy=True,
+        trusted_proxy_networks=(ip_network("127.0.0.0/8"),),
+    ) == "203.0.113.20"
 
 
 def test_sse_route_rejects_connections_over_the_per_ip_cap():

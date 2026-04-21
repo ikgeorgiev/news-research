@@ -191,10 +191,10 @@ export function usePushSubscription({
       setPushError(null)
       try {
         await disablePushNotifications()
+        setPushSubscribed(false)
       } catch {
         setPushError("Failed to disable push notifications")
       }
-      setPushSubscribed(false)
       return
     }
 

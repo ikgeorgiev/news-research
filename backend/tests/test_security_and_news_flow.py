@@ -400,6 +400,60 @@ def test_list_news_uses_single_statement_for_enriched_rows(db_session: Session):
     assert response.items[0].tickers == ["GOF", "UTF"]
 
 
+def test_list_news_returns_tickers_in_sorted_stable_order(db_session: Session):
+    db = db_session
+    businesswire = Source(
+        code="businesswire",
+        name="Business Wire",
+        base_url="https://feed.businesswire.com",
+        enabled=True,
+    )
+    utf = Ticker(symbol="UTF", active=True)
+    gof = Ticker(symbol="GOF", active=True)
+    db.add_all([businesswire, utf, gof])
+    db.commit()
+    db.refresh(businesswire)
+    db.refresh(utf)
+    db.refresh(gof)
+
+    article = seed_article(
+        db,
+        slug="stable-ticker-order",
+        published_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        canonical_url="https://www.businesswire.com/news/home/20260301000003/en",
+    )
+    db.add_all(
+        [
+            ArticleTicker(article_id=article.id, ticker_id=utf.id),
+            ArticleTicker(article_id=article.id, ticker_id=gof.id),
+            RawFeedItem(
+                source_id=businesswire.id,
+                article_id=article.id,
+                feed_url="https://feed.businesswire.com/rss/home/",
+                raw_guid="bw-stable-1",
+                raw_link=article.canonical_url,
+                raw_pub_date=article.published_at,
+                raw_payload_json={},
+            ),
+        ]
+    )
+    db.commit()
+
+    response = list_news(
+        include_unmapped=True,
+        include_unmapped_from_provider=None,
+        include_global_summary=False,
+        from_=None,
+        to=None,
+        limit=10,
+        cursor=None,
+        db=db,
+    )
+
+    assert [item.id for item in response.items] == [article.id]
+    assert response.items[0].tickers == ["GOF", "UTF"]
+
+
 def test_get_news_item_uses_single_statement_for_enriched_row(db_session: Session):
     db = db_session
     businesswire = Source(

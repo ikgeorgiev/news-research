@@ -5,12 +5,13 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 from app import models  # noqa: F401
 from app.config import get_settings
 from app.database import Base
+from app.pg_utils import is_postgresql_url
 
 # The revision that matches the schema produced by _bootstrap_legacy_schema().
 # Legacy databases are stamped here so that any later migrations still run via upgrade().
@@ -29,21 +30,21 @@ def _app_table_names() -> set[str]:
     return set(Base.metadata.tables)
 
 
-def _bootstrap_legacy_schema(engine: Engine) -> None:
+def _bootstrap_legacy_schema(connection: Connection) -> None:
     """Patch a pre-Alembic database so it matches the baseline revision.
 
     Only adds missing columns/constraints to existing tables — does NOT call
     create_all(), because that would use the current ORM metadata and
     pre-create objects that later migrations are supposed to add.
     """
-    _ensure_article_audit_columns(engine)
-    _ensure_ticker_columns(engine)
-    _ensure_article_ticker_columns(engine)
-    _ensure_article_ticker_constraints(engine)
+    _ensure_article_audit_columns(connection)
+    _ensure_ticker_columns(connection)
+    _ensure_article_ticker_columns(connection)
+    _ensure_article_ticker_constraints(connection)
 
 
-def _ensure_article_audit_columns(engine: Engine) -> None:
-    with engine.begin() as connection:
+def _ensure_article_audit_columns(connection: Connection) -> None:
+    with connection.begin():
         inspector = inspect(connection)
         existing_cols = {col["name"] for col in inspector.get_columns("articles")}
         dialect = connection.dialect.name
@@ -88,8 +89,8 @@ def _ensure_article_audit_columns(engine: Engine) -> None:
         )
 
 
-def _ensure_ticker_columns(engine: Engine) -> None:
-    with engine.begin() as connection:
+def _ensure_ticker_columns(connection: Connection) -> None:
+    with connection.begin():
         inspector = inspect(connection)
         existing_cols = {col["name"] for col in inspector.get_columns("tickers")}
         _add_column_if_missing(
@@ -101,8 +102,8 @@ def _ensure_ticker_columns(engine: Engine) -> None:
         )
 
 
-def _ensure_article_ticker_columns(engine: Engine) -> None:
-    with engine.begin() as connection:
+def _ensure_article_ticker_columns(connection: Connection) -> None:
+    with connection.begin():
         inspector = inspect(connection)
         existing_cols = {col["name"] for col in inspector.get_columns("article_tickers")}
         _add_column_if_missing(
@@ -114,8 +115,8 @@ def _ensure_article_ticker_columns(engine: Engine) -> None:
         )
 
 
-def _ensure_article_ticker_constraints(engine: Engine) -> None:
-    with engine.begin() as connection:
+def _ensure_article_ticker_constraints(connection: Connection) -> None:
+    with connection.begin():
         inspector = inspect(connection)
         existing_uniques = inspector.get_unique_constraints("article_tickers")
         has_uq = any(
@@ -176,19 +177,46 @@ def run_migrations(database_url: str | None = None) -> None:
 
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
-        inspector = inspect(engine)
-        existing_tables = set(inspector.get_table_names())
-        has_existing_app_schema = bool(existing_tables & _app_table_names())
-        has_version_table = "alembic_version" in existing_tables
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
 
-        if has_existing_app_schema and not has_version_table:
-            print("Existing app schema detected without alembic_version; bootstrapping legacy schema.")
-            _bootstrap_legacy_schema(engine)
-            command.stamp(config, BASELINE_REVISION)
+            if is_postgresql_url(database_url):
+                lock_key = get_settings().migration_advisory_lock_key
+                with connection.begin():
+                    connection.execute(
+                        text("SELECT pg_advisory_lock(:lock_key)"),
+                        {"lock_key": lock_key},
+                    )
+                locked = True
+            else:
+                locked = False
+
+            try:
+                inspector = inspect(connection)
+                existing_tables = set(inspector.get_table_names())
+                has_existing_app_schema = bool(existing_tables & _app_table_names())
+                has_version_table = "alembic_version" in existing_tables
+
+                # Alembic and the bootstrap helpers both need a clean transaction
+                # boundary here; schema inspection may have autobegun one already.
+                if connection.in_transaction():
+                    connection.rollback()
+
+                if has_existing_app_schema and not has_version_table:
+                    print("Existing app schema detected without alembic_version; bootstrapping legacy schema.")
+                    _bootstrap_legacy_schema(connection)
+                    command.stamp(config, BASELINE_REVISION)
+
+                command.upgrade(config, "head")
+            finally:
+                if locked:
+                    with connection.begin():
+                        connection.execute(
+                            text("SELECT pg_advisory_unlock(:lock_key)"),
+                            {"lock_key": lock_key},
+                        )
     finally:
         engine.dispose()
-
-    command.upgrade(config, "head")
 
 
 if __name__ == "__main__":

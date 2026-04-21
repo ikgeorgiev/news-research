@@ -1,4 +1,5 @@
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from pathlib import Path
 
 from pydantic import Field
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     admin_api_key: str | None = None
     ingestion_advisory_lock_key: int = 1_715_171_517
+    migration_advisory_lock_key: int = 1_715_171_519
     ingestion_stale_run_timeout_seconds: int = Field(default=3600, ge=60, le=172800)
     ingestion_max_workers: int = Field(
         default=4,
@@ -114,6 +116,13 @@ class Settings(BaseSettings):
     )
     sse_max_connections_per_ip: int = Field(default=5, ge=1, le=100)
     behind_proxy: bool = False
+    trusted_proxy_ips: str = Field(
+        default="",
+        description=(
+            "Comma-separated trusted proxy IPs or CIDRs used to validate "
+            "forwarded headers."
+        ),
+    )
     push_send_timeout_seconds: int = Field(default=10, ge=1, le=120)
     push_max_per_cycle: int = Field(default=25, ge=1, le=500)
     push_max_consecutive_failures: int = Field(default=20, ge=1, le=1000)
@@ -133,6 +142,14 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def trusted_proxy_networks(self) -> tuple[IPv4Network | IPv6Network, ...]:
+        return tuple(
+            ip_network(value, strict=False)
+            for value in (part.strip() for part in self.trusted_proxy_ips.split(","))
+            if value
+        )
 
 
 @lru_cache(maxsize=1)

@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    if settings.behind_proxy and not settings.trusted_proxy_networks:
+        logger.warning(
+            "BEHIND_PROXY is enabled but TRUSTED_PROXY_IPS is empty; "
+            "forwarded client IP headers will be ignored."
+        )
     run_migrations(settings.database_url)
 
     with get_session_factory()() as db:

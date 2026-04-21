@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -169,11 +170,14 @@ def _build_ticker_agg_subquery(db: Session, news_page):
         .join(Ticker, Ticker.id == ArticleTicker.ticker_id)
         .where(Ticker.active.is_(True))
         .distinct()
+        .order_by(news_page.c.id.asc(), Ticker.symbol.asc())
         .subquery("ticker_rows")
     )
     dialect_name = db.get_bind().dialect.name if db.get_bind() is not None else ""
     if dialect_name == "postgresql":
-        ticker_agg = func.array_agg(ticker_rows.c.symbol).label("tickers")
+        ticker_agg = func.array_agg(
+            aggregate_order_by(ticker_rows.c.symbol, ticker_rows.c.symbol.asc())
+        ).label("tickers")
     else:
         ticker_agg = func.group_concat(ticker_rows.c.symbol, ",").label("tickers")
     return (

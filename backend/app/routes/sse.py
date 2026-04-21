@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from ipaddress import IPv4Network, IPv6Network, ip_address
 import time
+from typing import Sequence
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -13,18 +15,79 @@ from app.sse import SSEBroadcaster, SSEConnectionLimiter
 sse_router = APIRouter(tags=["sse"])
 
 
-def _client_ip(request: Request, *, trust_proxy: bool = False) -> str:
-    if trust_proxy:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip.strip()
+def _client_ip(
+    request: Request,
+    *,
+    trust_proxy: bool = False,
+    trusted_proxy_networks: Sequence[IPv4Network | IPv6Network] = (),
+) -> str:
     client = request.client
     if client is None or not client.host:
         return "unknown"
-    return client.host
+    client_host = client.host.strip()
+
+    try:
+        ip_address(client_host)
+    except ValueError:
+        return client_host
+
+    if not trust_proxy or not trusted_proxy_networks:
+        return client_host
+
+    if not _is_trusted_proxy(client_host, trusted_proxy_networks):
+        return client_host
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return _client_ip_from_forwarded_chain(
+            client_host,
+            forwarded_for,
+            trusted_proxy_networks=trusted_proxy_networks,
+        )
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        real_ip = real_ip.strip()
+        try:
+            ip_address(real_ip)
+        except ValueError:
+            return client_host
+        return real_ip
+
+    return client_host
+
+
+def _is_trusted_proxy(
+    host: str, trusted_proxy_networks: Sequence[IPv4Network | IPv6Network]
+) -> bool:
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+
+    return any(address in network for network in trusted_proxy_networks)
+
+
+def _client_ip_from_forwarded_chain(
+    remote_host: str,
+    forwarded_for: str,
+    *,
+    trusted_proxy_networks: Sequence[IPv4Network | IPv6Network],
+) -> str:
+    candidate = remote_host
+
+    for forwarded_host in reversed(
+        [value.strip() for value in forwarded_for.split(",") if value.strip()]
+    ):
+        if not _is_trusted_proxy(candidate, trusted_proxy_networks):
+            return candidate
+        try:
+            ip_address(forwarded_host)
+        except ValueError:
+            return candidate
+        candidate = forwarded_host
+
+    return candidate
 
 
 async def _stream_news_events(request: Request, broadcaster: SSEBroadcaster):
@@ -67,7 +130,12 @@ async def _stream_news_events(request: Request, broadcaster: SSEBroadcaster):
 async def news_event_stream(request: Request):
     broadcaster: SSEBroadcaster = request.app.state.sse_broadcaster
     connection_limiter: SSEConnectionLimiter = request.app.state.sse_connection_limiter
-    client_ip = _client_ip(request, trust_proxy=get_settings().behind_proxy)
+    settings = get_settings()
+    client_ip = _client_ip(
+        request,
+        trust_proxy=settings.behind_proxy,
+        trusted_proxy_networks=settings.trusted_proxy_networks,
+    )
 
     if not connection_limiter.try_acquire(client_ip):
         raise HTTPException(

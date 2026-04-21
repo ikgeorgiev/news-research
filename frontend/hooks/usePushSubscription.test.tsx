@@ -82,7 +82,7 @@ describe("usePushSubscription", () => {
     expect(result.current.pushError).toBe("Browser notification permission denied")
   })
 
-  it("clears local push state even when backend delete fails", async () => {
+  it("keeps local push state when backend delete fails", async () => {
     mockedPushApi.isPushSupported.mockReturnValue(true)
     mockedPushApi.getPushStatus.mockResolvedValue({
       supported: true,
@@ -104,7 +104,7 @@ describe("usePushSubscription", () => {
     })
 
     expect(mockedPushApi.disablePushNotifications).toHaveBeenCalledTimes(1)
-    expect(result.current.pushSubscribed).toBe(false)
+    expect(result.current.pushSubscribed).toBe(true)
     expect(result.current.pushError).toBe("Failed to disable push notifications")
   })
 

@@ -104,12 +104,25 @@ cp .env.example .env
 docker compose up --build
 ```
 
-This starts only `db`, `backend`, and `frontend`. `NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://localhost:8001`).
+This starts only `db`, `backend`, and `frontend`. `NEXT_PUBLIC_API_BASE` is a build-time input for the frontend image. The provided `.env.example` already sets the local Docker value (`http://127.0.0.1:8001`).
+
+The published compose ports are bound to `127.0.0.1` by default so they are only reachable from the local machine. That keeps the stack usable for development without exposing Postgres, the API, the UI, or monitoring services on the network interface.
+
+Before using this stack for anything beyond a single local machine, override these values in `.env`:
+
+- `POSTGRES_PASSWORD`
+- `GRAFANA_PASSWORD`
+- `ADMIN_API_KEY` if you use admin endpoints
+- any `*_PORT` values if you need different host ports
+
+If you intentionally want network exposure, remove the `127.0.0.1:` prefix from the relevant published ports and place the stack behind your own firewall or reverse proxy.
+
+If the backend is behind a reverse proxy and you need forwarded client IPs for SSE connection limiting, set `BEHIND_PROXY=true` and set `TRUSTED_PROXY_IPS` to the proxy IPs or CIDRs that are allowed to supply `X-Forwarded-For` / `X-Real-IP`. Do not enable forwarded headers without a trusted proxy allowlist.
 
 3. Open:
 
-- UI: http://localhost:3005
-- API docs: http://localhost:8001/docs
+- UI: http://127.0.0.1:3005
+- API docs: http://127.0.0.1:8001/docs
 
 Default frontend host port is `3005` (`FRONTEND_PORT` in `.env`).
 
@@ -144,7 +157,8 @@ docker compose --profile monitoring up --build
 
 - Prometheus: http://127.0.0.1:9090
 - Grafana: http://127.0.0.1:3006
-  - default login: `admin` / `admin`
+  - login uses `GRAFANA_USER` / `GRAFANA_PASSWORD` from `.env` when set
+  - the example file ships with a placeholder password, so replace it before sharing or deploying the stack
 
 Grafana auto-loads dashboard:
 

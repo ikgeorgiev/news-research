@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import uuid
 
 from alembic import command
@@ -8,9 +9,125 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
+import pytest
+
 from app.raw_feed_items import _upsert_raw_feed_item
 from app.models import RawFeedItem, Source
+import migrate
 from migrate import run_migrations
+
+
+class _RecordingConnection:
+    def __init__(self, dialect_name: str, events: list[object]):
+        self.dialect = SimpleNamespace(name=dialect_name)
+        self.events = events
+
+    def begin(self):
+        return self
+
+    def begin_nested(self):
+        return self
+
+    def in_transaction(self):
+        return False
+
+    def rollback(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = getattr(statement, "text", str(statement))
+        if "pg_advisory_lock" in sql:
+            self.events.append("lock")
+        elif "pg_advisory_unlock" in sql:
+            self.events.append("unlock")
+        else:
+            self.events.append(sql)
+        return SimpleNamespace()
+
+
+class _RecordingEngine:
+    def __init__(self, connection: _RecordingConnection):
+        self.connection = connection
+        self.disposed = False
+
+    def connect(self):
+        return self
+
+    def __enter__(self):
+        return self.connection
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def dispose(self):
+        self.disposed = True
+
+
+def test_run_migrations_uses_postgresql_advisory_lock_around_upgrade(monkeypatch):
+    events: list[object] = []
+    connection = _RecordingConnection("postgresql", events)
+    engine = _RecordingEngine(connection)
+    inspector = SimpleNamespace(
+        get_table_names=lambda: [],
+        get_unique_constraints=lambda _table: [],
+    )
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(
+        migrate.command,
+        "upgrade",
+        lambda config, revision: events.append(
+            ("upgrade", revision, config.attributes["connection"] is connection)
+        ),
+    )
+    monkeypatch.setattr(migrate.command, "stamp", lambda *_args, **_kwargs: pytest.fail("stamp should not run"))
+    monkeypatch.setattr(
+        migrate,
+        "get_settings",
+        lambda: SimpleNamespace(migration_advisory_lock_key=987654321),
+    )
+
+    run_migrations(database_url="postgresql+psycopg://example/db")
+
+    assert events == [
+        "lock",
+        ("upgrade", "head", True),
+        "unlock",
+    ]
+    assert engine.disposed is True
+
+
+def test_run_migrations_skips_advisory_lock_for_sqlite(monkeypatch):
+    events: list[object] = []
+    connection = _RecordingConnection("sqlite", events)
+    engine = _RecordingEngine(connection)
+    inspector = SimpleNamespace(
+        get_table_names=lambda: [],
+        get_unique_constraints=lambda _table: [],
+    )
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(
+        migrate.command,
+        "upgrade",
+        lambda config, revision: events.append(
+            ("upgrade", revision, config.attributes["connection"] is connection)
+        ),
+    )
+    monkeypatch.setattr(migrate.command, "stamp", lambda *_args, **_kwargs: pytest.fail("stamp should not run"))
+
+    run_migrations(database_url="sqlite:///:memory:")
+
+    assert events == [("upgrade", "head", True)]
+    assert engine.disposed is True
 
 
 def test_alembic_upgrade_head_creates_expected_schema():
