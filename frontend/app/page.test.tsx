@@ -305,6 +305,27 @@ describe("Page refresh requests", () => {
     expect(mockedLocalStorage.persistValue).not.toHaveBeenCalledWith("newsViewMode", "list")
   })
 
+  it("keeps a corrupt readNewsKeys entry from blocking a valid newsViewMode", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    localStorage.setItem("readNewsKeys", "{")
+    localStorage.setItem("newsViewMode", "full")
+
+    try {
+      render(<Page />)
+
+      await waitFor(() => expect(screen.getByTitle("Refresh Data")).toBeInTheDocument())
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to parse readNewsKeys from local storage",
+        expect.any(SyntaxError),
+      )
+      expect(mockedLocalStorage.persistValue).toHaveBeenCalledWith("newsViewMode", "full")
+      expect(mockedLocalStorage.persistValue).not.toHaveBeenCalledWith("newsViewMode", "list")
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
   it("lets the main provider control clear a saved watchlist provider", async () => {
     localStorage.setItem(
       "customWatchlists",
@@ -374,6 +395,21 @@ describe("Page refresh requests", () => {
     await waitFor(() => expect(screen.getByText("Seed Watchlist")).toBeInTheDocument())
 
     expect(mockedLocalStorage.persistJson).not.toHaveBeenCalledWith("customWatchlists", [])
+  })
+
+  it("keeps a corrupt customWatchlists entry from crashing the page", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    localStorage.setItem("customWatchlists", "{")
+
+    try {
+      render(<Page />)
+
+      await waitFor(() => expect(screen.getByTitle("Refresh Data")).toBeInTheDocument())
+      expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to parse stored watchlists", expect.any(SyntaxError))
+      expect(mockedLocalStorage.persistJson).toHaveBeenCalledWith("customWatchlists", [])
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it("lets the main search control clear a saved watchlist query", async () => {

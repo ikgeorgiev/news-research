@@ -40,16 +40,20 @@ export function useFeedPreferences({
       if (storedReadKeys) {
         setReadKeys(trimSet(new Set(storedReadKeys), MAX_PERSISTED_READ_KEYS))
       }
+    } catch (error) {
+      console.error("Failed to parse readNewsKeys from local storage", error)
+    }
 
+    try {
       const storedViewMode = readEnumValue("newsViewMode", VIEW_MODES)
       if (storedViewMode) {
         setViewMode(storedViewMode)
       }
     } catch (error) {
-      console.error("Failed to parse local storage", error)
-    } finally {
-      setMounted(true)
+      console.error("Failed to parse newsViewMode from local storage", error)
     }
+
+    setMounted(true)
   }, [])
 
   useEffect(() => {

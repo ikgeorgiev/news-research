@@ -26,12 +26,19 @@ export default function Page() {
             <button className="primary" type="submit">Search</button>
           </form>
 
-          <select value={filters.ticker} onChange={(event) => filters.setTicker(event.target.value)}>
-            <option value="">All symbols</option>
-            {newsFeed.tickers.map((item) => (
-              <option key={item.symbol} value={item.symbol}>{item.symbol}</option>
-            ))}
-          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+            <select value={filters.ticker} onChange={(event) => filters.setTicker(event.target.value)}>
+              <option value="">All symbols</option>
+              {newsFeed.tickers.map((item) => (
+                <option key={item.symbol} value={item.symbol}>{item.symbol}</option>
+              ))}
+            </select>
+            {newsFeed.tickerError && (
+              <span style={{ color: "#F23645", fontSize: "0.75rem", whiteSpace: "nowrap" }} title={newsFeed.tickerError}>
+                Ticker list unavailable
+              </span>
+            )}
+          </div>
 
           <select value={filters.provider} onChange={(event) => filters.setProvider(event.target.value)}>
             <option value="">All sources</option>

@@ -43,6 +43,7 @@ export function useNewsFeed({
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tickerError, setTickerError] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
   const [runtimeReady, setRuntimeReady] = useState(false)
 
@@ -91,10 +92,14 @@ export function useNewsFeed({
   useEffect(() => {
     const controller = new AbortController()
     fetchTickers(controller.signal)
-      .then((data) => setTickers(data.items))
+      .then((data) => {
+        setTickers(data.items)
+        setTickerError(null)
+      })
       .catch((error: unknown) => {
         if (isAbortError(error)) return
         setTickers([])
+        setTickerError(getErrorMessage(error, "Failed to load ticker list"))
       })
 
     return () => controller.abort()
@@ -350,6 +355,7 @@ export function useNewsFeed({
     loadingMore,
     nextCursor,
     pendingNewItems,
+    tickerError,
     tickers,
     totalCount,
     triggerRefresh,
