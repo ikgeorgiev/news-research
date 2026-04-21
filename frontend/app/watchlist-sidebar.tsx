@@ -40,7 +40,7 @@ export function WatchlistSidebar({
     newWatchlistProvider,
     newWatchlistQuery,
     providerOptions,
-    readIds,
+    readKeys,
     renameValue,
     renamingWatchlistId,
     selectWatchlist,
@@ -73,7 +73,7 @@ export function WatchlistSidebar({
     }
 
     for (const item of trackedUnreadItems) {
-      if (readIds.has(item.id)) {
+      if (readKeys.has(item.read_key)) {
         continue
       }
       for (const watchlist of customWatchlists) {
@@ -84,7 +84,7 @@ export function WatchlistSidebar({
     }
 
     return counts
-  }, [customWatchlists, readIds, trackedUnreadItems])
+  }, [customWatchlists, readKeys, trackedUnreadItems])
 
   return (
     <aside className="sidebar">

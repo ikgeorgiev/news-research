@@ -7,42 +7,42 @@ export type ReadQueryParams = NewsFilterParams
 
 type FetchNewsIdsPage = (params: NewsIdsRequestParams) => Promise<NewsIdsResponse>
 
-type SetReadIds = (updater: (previous: Set<number>) => Set<number>) => void
+type SetReadKeys = (updater: (previous: Set<string>) => Set<string>) => void
 
 
-export function trimIdSet(input: Set<number>, maxSize: number): Set<number> {
+export function trimSet<T>(input: Set<T>, maxSize: number): Set<T> {
   if (input.size <= maxSize) return input
   const trimmed = Array.from(input).slice(input.size - maxSize)
   return new Set(trimmed)
 }
 
 
-export async function markReadIdsByQuery({
+export async function markReadKeysByQuery({
   params,
   fetchIds,
-  setReadIds,
+  setReadKeys,
   pageSize,
-  maxPersistedIds,
+  maxPersistedKeys,
 }: {
   params: ReadQueryParams
   fetchIds: FetchNewsIdsPage
-  setReadIds: SetReadIds
+  setReadKeys: SetReadKeys
   pageSize: number
-  maxPersistedIds: number
+  maxPersistedKeys: number
 }): Promise<void> {
   let cursor: string | undefined
-  const collectedIds = new Set<number>()
-  const applyCollectedIds = (): void => {
-    if (collectedIds.size === 0) {
+  const collectedKeys = new Set<string>()
+  const applyCollectedKeys = (): void => {
+    if (collectedKeys.size === 0) {
       return
     }
 
-    setReadIds((previous) => {
+    setReadKeys((previous) => {
       const next = new Set(previous)
-      for (const id of collectedIds) {
-        next.add(id)
+      for (const key of collectedKeys) {
+        next.add(key)
       }
-      return trimIdSet(next, maxPersistedIds)
+      return trimSet(next, maxPersistedKeys)
     })
   }
 
@@ -52,8 +52,8 @@ export async function markReadIdsByQuery({
         limit: pageSize,
         cursor,
       }))
-      for (const id of data.ids) {
-        collectedIds.add(id)
+      for (const key of data.read_keys) {
+        collectedKeys.add(key)
       }
       if (!data.next_cursor || data.ids.length === 0) {
         break
@@ -61,9 +61,9 @@ export async function markReadIdsByQuery({
       cursor = data.next_cursor
     }
   } catch (error) {
-    applyCollectedIds()
+    applyCollectedKeys()
     throw error
   }
 
-  applyCollectedIds()
+  applyCollectedKeys()
 }

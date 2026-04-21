@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class NewsItem(BaseModel):
     id: int
+    read_key: str
     title: str
     url: str
     source: str
@@ -22,6 +23,7 @@ class NewsItem(BaseModel):
 class NewsGlobalSummary(BaseModel):
     total: int
     tracked_ids: list[int]
+    tracked_read_keys: list[str]
     tracked_limit: int
 
 
@@ -33,6 +35,7 @@ class NewsListResponse(BaseModel):
 
 class NewsIdsResponse(BaseModel):
     ids: list[int]
+    read_keys: list[str]
     next_cursor: str | None = None
 
 

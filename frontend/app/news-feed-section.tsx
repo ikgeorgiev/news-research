@@ -18,8 +18,8 @@ type NewsFeedSectionProps = {
   markAsReadAndOpen: (item: NewsItem, event: MouseEvent) => void
   nextCursor: string | null
   pendingNewItems: NewsItem[]
-  readIds: Set<number>
-  toggleRead: (id: number, event?: MouseEvent) => void
+  readKeys: Set<string>
+  toggleRead: (item: NewsItem, event?: MouseEvent) => void
   toggleSummary: (item: NewsItem) => void
   viewMode: "list" | "full"
 }
@@ -35,7 +35,7 @@ export function NewsFeedSection({
   markAsReadAndOpen,
   nextCursor,
   pendingNewItems,
-  readIds,
+  readKeys,
   toggleRead,
   toggleSummary,
   viewMode,
@@ -57,7 +57,7 @@ export function NewsFeedSection({
         </div>
       )}
       {items.map((item) => {
-        const isRead = readIds.has(item.id)
+        const isRead = readKeys.has(item.read_key)
         const isExpanded = viewMode === "full" || expandedIds.has(item.id)
         const safeItemUrl = toSafeExternalUrl(item.url)
 
@@ -103,7 +103,7 @@ export function NewsFeedSection({
                 <button
                   className="icon-button"
                   title={isRead ? "Mark as unread" : "Mark as read"}
-                  onClick={(event) => toggleRead(item.id, event)}
+                  onClick={(event) => toggleRead(item, event)}
                 >
                   <CheckIcon />
                 </button>

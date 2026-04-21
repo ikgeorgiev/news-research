@@ -134,7 +134,7 @@ export default function Page() {
           markAsReadAndOpen={preferences.markAsReadAndOpen}
           nextCursor={newsFeed.nextCursor}
           pendingNewItems={newsFeed.pendingNewItems}
-          readIds={preferences.readIds}
+          readKeys={preferences.readKeys}
           toggleRead={preferences.toggleRead}
           toggleSummary={preferences.toggleSummary}
           viewMode={preferences.viewMode}

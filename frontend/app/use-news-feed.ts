@@ -35,7 +35,7 @@ export function useNewsFeed({
   ticker: string
 }) {
   const [tickers, setTickers] = useState<TickerItem[]>([])
-  const [globalTrackedIds, setGlobalTrackedIds] = useState<number[]>([])
+  const [globalTrackedReadKeys, setGlobalTrackedReadKeys] = useState<string[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [items, setItems] = useState<NewsItem[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -217,7 +217,7 @@ export function useNewsFeed({
           if (bgGeneration !== feedGenerationRef.current) return
           backgroundRefreshErrorLoggedRef.current = false
           if (data.global_summary) {
-            setGlobalTrackedIds(data.global_summary.tracked_ids)
+            setGlobalTrackedReadKeys(data.global_summary.tracked_read_keys)
             setTotalCount(data.global_summary.total)
           }
           const fetchedItems = data.items
@@ -263,7 +263,7 @@ export function useNewsFeed({
       .then((data) => {
         if (requestGeneration !== feedGenerationRef.current) return
         if (data.global_summary) {
-          setGlobalTrackedIds(data.global_summary.tracked_ids)
+          setGlobalTrackedReadKeys(data.global_summary.tracked_read_keys)
           setTotalCount(data.global_summary.total)
         }
         const fetchedItems = data.items
@@ -342,7 +342,7 @@ export function useNewsFeed({
   return {
     error,
     feedContainerRef,
-    globalTrackedIds,
+    globalTrackedReadKeys,
     items,
     loadMore,
     loadPendingArticles,

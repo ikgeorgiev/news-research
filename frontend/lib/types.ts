@@ -1,5 +1,6 @@
 export type NewsItem = {
   id: number
+  read_key: string
   title: string
   url: string
   source: string
@@ -15,6 +16,7 @@ export type NewsItem = {
 export type GlobalNewsSummary = {
   total: number
   tracked_ids: number[]
+  tracked_read_keys: string[]
   tracked_limit: number
 }
 
@@ -31,6 +33,7 @@ export type NewsResponse = {
 
 export type NewsIdsResponse = {
   ids: number[]
+  read_keys: string[]
   next_cursor: string | null
 }
 

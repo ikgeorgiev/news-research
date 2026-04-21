@@ -123,6 +123,7 @@ def _build_news_page_subquery(
         query = query.where(Article.id == article_id)
     query = query.with_only_columns(
         Article.id.label("id"),
+        Article.canonical_url_hash.label("read_key"),
         Article.title.label("title"),
         Article.canonical_url.label("url"),
         Article.source_name.label("source"),
@@ -143,6 +144,7 @@ def _build_news_page_subquery(
 def _serialize_news_item(row: object) -> NewsItem:
     return NewsItem(
         id=row.id,
+        read_key=row.read_key,
         title=row.title,
         url=row.url,
         source=row.source,
@@ -189,6 +191,7 @@ def _build_enriched_news_select(db: Session, news_page):
     return (
         select(
             news_page.c.id,
+            news_page.c.read_key,
             news_page.c.title,
             news_page.c.url,
             news_page.c.source,
@@ -223,16 +226,19 @@ def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
     rows = db.execute(
         base_query.with_only_columns(
             Article.id.label("id"),
+            Article.canonical_url_hash.label("read_key"),
             func.count().over().label("total"),
         )
         .order_by(sort_key.desc(), Article.id.desc())
         .limit(GLOBAL_NEWS_TRACKED_LIMIT)
     ).all()
     tracked_ids = [int(row.id) for row in rows]
+    tracked_read_keys = [str(row.read_key) for row in rows]
     total = int(rows[0].total or 0) if rows else 0
     return NewsGlobalSummary(
         total=total,
         tracked_ids=tracked_ids,
+        tracked_read_keys=tracked_read_keys,
         tracked_limit=GLOBAL_NEWS_TRACKED_LIMIT,
     )
 
@@ -303,19 +309,24 @@ def list_news_ids(
     query, sort_key = _apply_news_cursor(query, cursor=cursor)
 
     id_query = (
-        query.with_only_columns(Article.id, sort_key.label("sort_ts"))
+        query.with_only_columns(
+            Article.id,
+            Article.canonical_url_hash.label("read_key"),
+            sort_key.label("sort_ts"),
+        )
         .order_by(sort_key.desc(), Article.id.desc())
         .limit(limit + 1)
     )
     rows = db.execute(id_query).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    ids = [article_id for article_id, _sort_ts in rows]
+    ids = [article_id for article_id, _read_key, _sort_ts in rows]
+    read_keys = [read_key for _article_id, read_key, _sort_ts in rows]
     next_cursor = None
     if has_more and rows:
-        last_id, last_sort_ts = rows[-1]
+        last_id, _last_read_key, last_sort_ts = rows[-1]
         next_cursor = encode_cursor(last_sort_ts or EPOCH_UTC, last_id)
-    return NewsIdsResponse(ids=ids, next_cursor=next_cursor)
+    return NewsIdsResponse(ids=ids, read_keys=read_keys, next_cursor=next_cursor)
 
 
 @news_router.get("/news", response_model=NewsListResponse)

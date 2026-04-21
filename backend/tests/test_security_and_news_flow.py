@@ -534,6 +534,10 @@ def test_list_news_with_global_summary_uses_two_statements_and_keeps_global_scop
     assert response.global_summary is not None
     assert response.global_summary.total == 2
     assert response.global_summary.tracked_ids == [mapped_article.id, bw_general_article.id]
+    assert response.global_summary.tracked_read_keys == [
+        mapped_article.canonical_url_hash,
+        bw_general_article.canonical_url_hash,
+    ]
     assert response.global_summary.tracked_limit == 100
 
 
@@ -645,6 +649,7 @@ def test_list_news_ids_supports_cursor_pagination(db_session: Session):
         db=db,
     )
     assert page_one.ids == [first.id, second.id]
+    assert page_one.read_keys == [first.canonical_url_hash, second.canonical_url_hash]
     assert page_one.next_cursor is not None
 
     page_two = list_news_ids(
@@ -657,6 +662,7 @@ def test_list_news_ids_supports_cursor_pagination(db_session: Session):
         db=db,
     )
     assert page_two.ids == [third.id]
+    assert page_two.read_keys == [third.canonical_url_hash]
     assert page_two.next_cursor is None
 
 

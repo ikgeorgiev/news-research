@@ -67,9 +67,9 @@ export function mergeUniqueNewsItems(...groups: NewsItem[][]): NewsItem[] {
   return merged
 }
 
-export function mergeUniqueIds(...groups: number[][]): number[] {
-  const merged: number[] = []
-  const seen = new Set<number>()
+export function mergeUniqueIds<T>(...groups: T[][]): T[] {
+  const merged: T[] = []
+  const seen = new Set<T>()
   for (const group of groups) {
     for (const id of group) {
       if (seen.has(id)) continue

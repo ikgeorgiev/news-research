@@ -34,7 +34,7 @@ export type WatchlistSidebarModel = {
   newWatchlistProvider: string
   newWatchlistQuery: string
   providerOptions: string[]
-  readIds: Set<number>
+  readKeys: Set<string>
   renameValue: string
   renamingWatchlistId: string | null
   selectWatchlist: (watchlistId: string, watchlist?: Watchlist) => void
@@ -80,7 +80,7 @@ export function usePageController() {
   })
 
   const preferences = useFeedPreferences({
-    globalTrackedIds: newsFeed.globalTrackedIds,
+    globalTrackedReadKeys: newsFeed.globalTrackedReadKeys,
     items: newsFeed.items,
     pendingNewItems: newsFeed.pendingNewItems,
     totalCount: newsFeed.totalCount,
@@ -108,7 +108,7 @@ export function usePageController() {
     if (watchlistId === "all") {
       preferences.markReadByQuery({ includeUnmappedFromProvider: GENERAL_NEWS_PROVIDER })
         .catch(() => {
-          preferences.addReadIds(preferences.trackedUnreadItems.map((item) => item.id))
+          preferences.addReadKeys(preferences.trackedUnreadItems.map((item) => item.read_key))
         })
       return
     }
@@ -121,10 +121,10 @@ export function usePageController() {
 
     preferences.markReadByQuery(params)
       .catch(() => {
-        const matchingIds = preferences.trackedUnreadItems
+        const matchingKeys = preferences.trackedUnreadItems
           .filter((item) => watchlistMatchesItem(item, watchlist))
-          .map((item) => item.id)
-        preferences.addReadIds(matchingIds)
+          .map((item) => item.read_key)
+        preferences.addReadKeys(matchingKeys)
       })
   }
 
@@ -147,7 +147,7 @@ export function usePageController() {
     newWatchlistProvider: watchlists.newWatchlistProvider,
     newWatchlistQuery: watchlists.newWatchlistQuery,
     providerOptions: STATIC_PROVIDER_OPTIONS,
-    readIds: preferences.readIds,
+    readKeys: preferences.readKeys,
     renameValue: watchlists.renameValue,
     renamingWatchlistId: watchlists.renamingWatchlistId,
     selectWatchlist: watchlists.selectWatchlist,

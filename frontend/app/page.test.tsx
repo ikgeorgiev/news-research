@@ -63,11 +63,13 @@ describe("Page refresh requests", () => {
       global_summary: {
         total: 2,
         tracked_ids: [101, 102],
+        tracked_read_keys: ["key-101", "key-102"],
         tracked_limit: 100,
       },
     })
     mockedApi.fetchNewsIds.mockResolvedValue({
       ids: [],
+      read_keys: [],
       next_cursor: null,
     })
 
@@ -93,6 +95,58 @@ describe("Page refresh requests", () => {
     fireEvent.click(screen.getByTitle("Refresh Data"))
 
     await waitFor(() => expect(mockedApi.fetchNews).toHaveBeenCalledTimes(2))
+  })
+
+  it("does not mark a row read when only expanding its summary", async () => {
+    mockedApi.fetchNews.mockResolvedValue({
+      items: [
+        {
+          id: 201,
+          read_key: "fresh-article-key",
+          title: "Fresh article",
+          url: "https://example.com/fresh",
+          source: "Example",
+          provider: "Business Wire",
+          summary: "Inline summary",
+          published_at: "2026-04-21T06:00:00Z",
+          first_seen_at: "2026-04-21T06:01:00Z",
+          alert_sent_at: null,
+          tickers: [],
+          dedupe_group: "fresh-group",
+        },
+      ],
+      next_cursor: null,
+      meta: {
+        count: 1,
+        limit: 40,
+        sort: "latest",
+      },
+      global_summary: {
+        total: 1,
+        tracked_ids: [201],
+        tracked_read_keys: ["fresh-article-key"],
+        tracked_limit: 100,
+      },
+    })
+
+    render(<Page />)
+
+    const link = await screen.findByRole("link", { name: "Fresh article" })
+    const row = link.closest(".feed-row")
+    const article = link.closest("article")
+
+    expect(row).not.toBeNull()
+    expect(article).not.toBeNull()
+    expect(article).toHaveClass("unread")
+
+    fireEvent.click(row as HTMLElement)
+
+    expect(await screen.findByText("Inline summary")).toBeInTheDocument()
+    expect(article).toHaveClass("unread")
+
+    fireEvent.click(link)
+
+    await waitFor(() => expect(article).toHaveClass("read"))
   })
 
   it("hydrates legacy provider/query watchlists without dropping their filters", async () => {

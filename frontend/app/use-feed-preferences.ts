@@ -4,41 +4,41 @@ import { MouseEvent, useEffect, useMemo, useState } from "react"
 
 import { fetchNewsIds } from "@/lib/api"
 import { persistJson, persistValue, readEnumValue, readJson } from "@/lib/local-storage"
-import { markReadIdsByQuery, ReadQueryParams, trimIdSet } from "@/lib/read-state"
+import { markReadKeysByQuery, ReadQueryParams, trimSet } from "@/lib/read-state"
 import { NewsItem } from "@/lib/types"
 
 import { mergeUniqueIds, mergeUniqueNewsItems, toSafeExternalUrl } from "./page-helpers"
 
-const MAX_PERSISTED_READ_IDS = 20_000
+const MAX_PERSISTED_READ_KEYS = 20_000
 const NEWS_IDS_PAGE_SIZE = 1000
 const VIEW_MODES = ["list", "full"] as const
 
-function parseStoredReadIds(value: unknown): number[] | null {
+function parseStoredReadKeys(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
-  return value.filter((id): id is number => Number.isInteger(id))
+  return value.filter((key): key is string => typeof key === "string" && key.length > 0)
 }
 
 export function useFeedPreferences({
   items,
   pendingNewItems,
   totalCount,
-  globalTrackedIds,
+  globalTrackedReadKeys,
 }: {
   items: NewsItem[]
   pendingNewItems: NewsItem[]
   totalCount: number
-  globalTrackedIds: number[]
+  globalTrackedReadKeys: string[]
 }) {
-  const [readIds, setReadIds] = useState<Set<number>>(new Set())
+  const [readKeys, setReadKeys] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<"list" | "full">("list")
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     try {
-      const storedReadIds = readJson("readNewsIds", parseStoredReadIds)
-      if (storedReadIds) {
-        setReadIds(trimIdSet(new Set(storedReadIds), MAX_PERSISTED_READ_IDS))
+      const storedReadKeys = readJson("readNewsKeys", parseStoredReadKeys)
+      if (storedReadKeys) {
+        setReadKeys(trimSet(new Set(storedReadKeys), MAX_PERSISTED_READ_KEYS))
       }
 
       const storedViewMode = readEnumValue("newsViewMode", VIEW_MODES)
@@ -53,8 +53,8 @@ export function useFeedPreferences({
   }, [])
 
   useEffect(() => {
-    persistJson("readNewsIds", Array.from(readIds))
-  }, [readIds])
+    persistJson("readNewsKeys", Array.from(readKeys))
+  }, [readKeys])
 
   useEffect(() => {
     persistValue("newsViewMode", viewMode)
@@ -65,50 +65,50 @@ export function useFeedPreferences({
     [items, pendingNewItems]
   )
 
-  const trackedUnreadIds = useMemo(
+  const trackedUnreadKeys = useMemo(
     () => mergeUniqueIds(
-      items.map((item) => item.id),
-      pendingNewItems.map((item) => item.id),
-      globalTrackedIds
+      items.map((item) => item.read_key),
+      pendingNewItems.map((item) => item.read_key),
+      globalTrackedReadKeys
     ),
-    [items, pendingNewItems, globalTrackedIds]
+    [items, pendingNewItems, globalTrackedReadKeys]
   )
 
   const unreadCount = useMemo(() => {
     let validReadCount = 0
-    for (const id of trackedUnreadIds) {
-      if (readIds.has(id)) validReadCount++
+    for (const key of trackedUnreadKeys) {
+      if (readKeys.has(key)) validReadCount++
     }
     if (totalCount > 0) {
-      const untrackedReads = readIds.size - validReadCount
-      const untrackedArticles = Math.max(0, totalCount - trackedUnreadIds.length)
+      const untrackedReads = readKeys.size - validReadCount
+      const untrackedArticles = Math.max(0, totalCount - trackedUnreadKeys.length)
       const totalReads = validReadCount + Math.min(untrackedReads, untrackedArticles)
       return Math.max(0, totalCount - totalReads)
     }
-    return trackedUnreadIds.length - validReadCount
-  }, [trackedUnreadIds, readIds, totalCount])
+    return trackedUnreadKeys.length - validReadCount
+  }, [trackedUnreadKeys, readKeys, totalCount])
 
-  const addReadIds = (ids: Iterable<number>) => {
-    setReadIds((previous) => {
+  const addReadKeys = (keys: Iterable<string>) => {
+    setReadKeys((previous) => {
       const next = new Set(previous)
-      for (const id of ids) {
-        next.add(id)
+      for (const key of keys) {
+        next.add(key)
       }
-      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
+      return trimSet(next, MAX_PERSISTED_READ_KEYS)
     })
   }
 
-  const toggleRead = (id: number, event?: MouseEvent) => {
+  const toggleRead = (item: NewsItem, event?: MouseEvent) => {
     if (event) {
       event.stopPropagation()
       event.preventDefault()
     }
 
-    setReadIds((previous) => {
+    setReadKeys((previous) => {
       const next = new Set(previous)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return trimIdSet(next, MAX_PERSISTED_READ_IDS)
+      if (next.has(item.read_key)) next.delete(item.read_key)
+      else next.add(item.read_key)
+      return trimSet(next, MAX_PERSISTED_READ_KEYS)
     })
   }
 
@@ -119,12 +119,10 @@ export function useFeedPreferences({
       event.preventDefault()
       return
     }
-    addReadIds([item.id])
+    addReadKeys([item.read_key])
   }
 
   const toggleSummary = (item: NewsItem) => {
-    addReadIds([item.id])
-
     if (viewMode === "full") return
 
     setExpandedIds((previous) => {
@@ -136,22 +134,22 @@ export function useFeedPreferences({
   }
 
   const markReadByQuery = async (params: ReadQueryParams) => {
-    await markReadIdsByQuery({
+    await markReadKeysByQuery({
       params,
       fetchIds: fetchNewsIds,
-      setReadIds,
+      setReadKeys,
       pageSize: NEWS_IDS_PAGE_SIZE,
-      maxPersistedIds: MAX_PERSISTED_READ_IDS,
+      maxPersistedKeys: MAX_PERSISTED_READ_KEYS,
     })
   }
 
   return {
-    addReadIds,
+    addReadKeys,
     expandedIds,
     markAsReadAndOpen,
     markReadByQuery,
     mounted,
-    readIds,
+    readKeys,
     setViewMode,
     toggleRead,
     toggleSummary,
