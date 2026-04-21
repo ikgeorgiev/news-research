@@ -57,13 +57,15 @@ TABLE_CELL_SYMBOL_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 TIME_CONTEXT_BEFORE_PATTERN = re.compile(
-    r"\b\d{1,2}(?::\d{2})\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:\(|\[)?\s*$"
+    r"\b\d{1,2}(?:(?::|\.)\d{2})\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:\(|\[)?\s*$"
     r"|"
-    r"\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\s*(?:\(|\[)?\s*$",
+    r"\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\s*(?:\(|\[)?\s*$"
+    r"|"
+    r"\b(?:midnight|noon)\s*(?:\(|\[)?\s*$",
     re.IGNORECASE,
 )
 TIME_CONTEXT_AFTER_PATTERN = re.compile(
-    r"(?i)^\s*(?:[|/,;\-]\s*)?\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b"
+    r"(?i)^\s*(?:[|/,;\-]\s*)?\d{1,2}(?:(?::|\.)\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b"
 )
 STOPWORDS = {
     "A",

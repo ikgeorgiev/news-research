@@ -1118,6 +1118,46 @@ def test_globenewswire_timezone_token_not_validated_from_slug_only(monkeypatch):
 
     assert "BST" not in hits
 
+
+def test_globenewswire_cenergy_cet_notice_does_not_match_central_securities(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>CENERGY HOLDINGS SA</p>
+            <p>The Meeting is to be held on Tuesday, 26 May 2026 at 10.00 a.m. CET
+            at its registered offices.</p>
+            <p>The Company must receive the confirmation by Wednesday, 20 May 2026
+            at 5.00 p.m. (CET) at the latest.</p>
+            <p>Shareholders must record the shares by Tuesday, 12 May 2026,
+            at midnight (CET) (the Record Date).</p>
+            <p>Owners of dematerialised shares must request their financial institution
+            or central securities depositary to issue a certificate.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "CET", "Central Securities Corporation", "Central Securities Corp")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "CONVENING NOTICE TO ATTEND THE ANNUAL ORDINARY SHAREHOLDERS' MEETING TO BE HELD ON 26 MAY 2026",
+        "The board of directors of Cenergy Holdings SA invites shareholders to participate in its AGM.",
+        "https://www.globenewswire.com/news-release/2026/04/21/3278232/0/en/example.html",
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"CET"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "CET" not in hits
+
+
 def test_real_world_pcf_page_false_positive_stays_subthreshold(monkeypatch):
     config = PAGE_FETCH_CONFIGS["prnewswire"]
 
