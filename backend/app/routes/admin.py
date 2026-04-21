@@ -196,6 +196,10 @@ def admin_reload_tickers(
         default=True,
         description="Run source remaps after loading ticker CSV",
     ),
+    remap_only_unmapped: bool = Query(
+        default=True,
+        description="When remapping, restrict the pass to unmapped articles only",
+    ),
     remap_limit: int = Query(default=500, ge=1, le=5000),
     db: Session = Depends(get_db),
 ):
@@ -213,7 +217,7 @@ def admin_reload_tickers(
                 settings,
                 source_code=code,
                 limit=remap_limit,
-                only_unmapped=True,
+                only_unmapped=remap_only_unmapped,
                 globenewswire_source_page_timeout_seconds=gn_timeout,
             )
             source_remap_payloads.append(_source_remap_response_payload(result))

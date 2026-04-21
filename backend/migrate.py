@@ -4,13 +4,14 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 from app import models  # noqa: F401
 from app.config import get_settings
-from app.database import Base
+from app.database import Base, get_engine_kwargs
 from app.pg_utils import is_postgresql_url
 
 # The revision that matches the schema produced by _bootstrap_legacy_schema().
@@ -28,6 +29,46 @@ def _build_alembic_config(database_url: str) -> Config:
 
 def _app_table_names() -> set[str]:
     return set(Base.metadata.tables)
+
+
+def _get_alembic_head_revision(database_url: str) -> str:
+    config = _build_alembic_config(database_url)
+    script = ScriptDirectory.from_config(config)
+    head_revision = script.get_current_head()
+    if head_revision is None:
+        raise RuntimeError("Unable to determine Alembic head revision.")
+    return head_revision
+
+
+def assert_schema_at_head(database_url: str | None = None) -> None:
+    if database_url is None:
+        database_url = get_settings().database_url
+
+    if not is_postgresql_url(database_url):
+        return
+
+    head_revision = _get_alembic_head_revision(database_url)
+
+    engine = create_engine(database_url, **get_engine_kwargs(database_url))
+    try:
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            if "alembic_version" not in inspector.get_table_names():
+                raise RuntimeError(
+                    "Database schema is not initialized; run backend/migrate.py before starting the app."
+                )
+
+            current_revision = connection.execute(
+                text("SELECT version_num FROM alembic_version LIMIT 1")
+            ).scalar_one_or_none()
+            if current_revision != head_revision:
+                raise RuntimeError(
+                    "Database schema revision is not at Alembic head "
+                    f"({current_revision!r} != {head_revision!r}); "
+                    "run backend/migrate.py before starting the app."
+                )
+    finally:
+        engine.dispose()
 
 
 def _bootstrap_legacy_schema(connection: Connection) -> None:
@@ -175,7 +216,7 @@ def run_migrations(database_url: str | None = None) -> None:
         database_url = get_settings().database_url
     config = _build_alembic_config(database_url)
 
-    engine = create_engine(database_url, pool_pre_ping=True)
+    engine = create_engine(database_url, **get_engine_kwargs(database_url))
     try:
         with engine.connect() as connection:
             config.attributes["connection"] = connection

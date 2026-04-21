@@ -24,6 +24,7 @@ from app.models import (
 from app.constants import EXTRACTION_VERSION
 from app.utils import parse_datetime, sha256_str
 from tests.helpers import (
+    build_raw_feed_item,
     call_ingest,
     seed_article,
     seed_article_with_raw,
@@ -78,6 +79,197 @@ def test_ingest_feed_dedupes_undated_guidless_raw_rows(db_session, stub_feed_io)
     assert len(raw_rows) == 1
     assert raw_rows[0].raw_guid is None
     assert raw_rows[0].raw_pub_date is None
+
+
+def test_ingest_feed_updates_guidless_undated_raw_row_when_richer_copy_arrives(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(db)
+    feed_url = "https://example.com/feed.xml"
+    first_entry = {
+        "title": "Fund update without metadata",
+        "link": "https://example.com/updated-story",
+        "summary": "Original summary text",
+    }
+    second_entry = {
+        "id": "guid-1",
+        "guid": "guid-1",
+        "title": "Fund update with metadata",
+        "link": "https://example.com/updated-story",
+        "summary": "Updated summary text",
+        "published": "2026-01-01T00:00:00Z",
+    }
+
+    stub_feed_io([first_entry])
+    first = call_ingest(
+        db,
+        source,
+        feed_url,
+        persistence_policy_override="validated_mapping_required",
+    )
+    first_row = db.scalar(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+    )
+
+    stub_feed_io([second_entry])
+    second = call_ingest(
+        db,
+        source,
+        feed_url,
+        persistence_policy_override="validated_mapping_required",
+    )
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert first_row is not None
+    assert len(raw_rows) == 1
+    assert raw_rows[0].id == first_row.id
+    assert raw_rows[0].raw_guid == "guid-1"
+    refreshed_pub_date = raw_rows[0].raw_pub_date
+    if refreshed_pub_date is not None and refreshed_pub_date.tzinfo is None:
+        refreshed_pub_date = refreshed_pub_date.replace(tzinfo=timezone.utc)
+    assert refreshed_pub_date == parse_datetime("2026-01-01T00:00:00Z")
+    assert raw_rows[0].raw_payload_json["title"] == "Fund update with metadata"
+    assert raw_rows[0].raw_payload_json["summary"] == "Updated summary text"
+
+
+def test_ingest_feed_updates_attached_guidless_undated_raw_row_when_richer_copy_arrives(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(db)
+    feed_url = "https://example.com/feed.xml"
+    story_url = "https://example.com/attached-updated-story"
+    article = seed_article(
+        db,
+        canonical_url=story_url,
+        title="Attached fund update without metadata",
+        summary="Original summary text",
+        source_name=source.name,
+        provider_name=source.name,
+    )
+    db.add(
+        build_raw_feed_item(
+            source=source,
+            article=article,
+            feed_url=feed_url,
+            raw_guid=None,
+            raw_link=story_url,
+            raw_pub_date=None,
+            raw_title="Attached fund update without metadata",
+            raw_payload_json={"title": "Attached fund update without metadata"},
+        )
+    )
+    db.commit()
+    first_row = db.scalar(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+    )
+    richer_entry = {
+        "id": "attached-guid-1",
+        "guid": "attached-guid-1",
+        "title": "Attached fund update with metadata",
+        "link": story_url,
+        "summary": "Updated attached summary text",
+        "published": "2026-01-02T00:00:00Z",
+    }
+
+    stub_feed_io([richer_entry])
+    result = call_ingest(db, source, feed_url)
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert result["status"] == "success"
+    assert first_row is not None
+    assert len(raw_rows) == 1
+    assert raw_rows[0].id == first_row.id
+    assert raw_rows[0].article_id == article.id
+    assert raw_rows[0].raw_guid == "attached-guid-1"
+    refreshed_pub_date = raw_rows[0].raw_pub_date
+    if refreshed_pub_date is not None and refreshed_pub_date.tzinfo is None:
+        refreshed_pub_date = refreshed_pub_date.replace(tzinfo=timezone.utc)
+    assert refreshed_pub_date == parse_datetime("2026-01-02T00:00:00Z")
+    assert raw_rows[0].raw_payload_json["title"] == "Attached fund update with metadata"
+    assert raw_rows[0].raw_payload_json["summary"] == "Updated attached summary text"
+
+
+def test_ingest_feed_updates_exact_dated_raw_row_before_legacy_same_link_row(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(db)
+    feed_url = "https://example.com/feed.xml"
+    story_url = "https://example.com/exact-dated-story"
+    published = parse_datetime("2026-01-03T00:00:00Z")
+    assert published is not None
+    db.add_all(
+        [
+            build_raw_feed_item(
+                source=source,
+                article=None,
+                feed_url=feed_url,
+                raw_guid=None,
+                raw_link=story_url,
+                raw_pub_date=None,
+                raw_title="Legacy undated copy",
+                raw_payload_json={"title": "Legacy undated copy"},
+            ),
+            build_raw_feed_item(
+                source=source,
+                article=None,
+                feed_url=feed_url,
+                raw_guid=None,
+                raw_link=story_url,
+                raw_pub_date=published,
+                raw_title="Exact dated copy",
+                raw_payload_json={"title": "Exact dated copy"},
+            ),
+        ]
+    )
+    db.commit()
+    legacy_row, exact_row = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    entry = {
+        "title": "Updated exact dated copy",
+        "link": story_url,
+        "summary": "Updated dated summary",
+        "published": "2026-01-03T00:00:00Z",
+    }
+
+    stub_feed_io([entry])
+    result = call_ingest(db, source, feed_url)
+
+    raw_rows = db.scalars(
+        select(RawFeedItem)
+        .where(RawFeedItem.source_id == source.id)
+        .order_by(RawFeedItem.id.asc())
+    ).all()
+    assert result["status"] == "success"
+    assert len(raw_rows) == 2
+    assert raw_rows[0].id == legacy_row.id
+    assert raw_rows[0].raw_guid is None
+    assert raw_rows[0].raw_pub_date is None
+    assert raw_rows[0].raw_payload_json["title"] == "Legacy undated copy"
+    assert raw_rows[1].id == exact_row.id
+    assert raw_rows[1].raw_payload_json["title"] == "Updated exact dated copy"
+    assert raw_rows[1].raw_payload_json["summary"] == "Updated dated summary"
 
 
 def test_ingest_feed_refreshes_undated_guidless_exact_url_rows(db_session, stub_feed_io):

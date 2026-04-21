@@ -21,12 +21,27 @@ from app.routes.sse import sse_router
 from app.scheduler import IngestionScheduler, set_scheduler
 from app.sse import SSEBroadcaster, SSEConnectionLimiter
 from app.ticker_loader import load_tickers_from_csv
+from migrate import assert_schema_at_head
 
 logging.basicConfig(level=logging.INFO)
 # Keep third-party transport chatter out of normal app logs.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+
+def _warn_if_ingestion_pool_capacity_low(settings) -> None:  # noqa: ANN001
+    pool_capacity = settings.database_pool_size + settings.database_max_overflow
+    if settings.ingestion_max_workers <= pool_capacity:
+        return
+
+    logger.warning(
+        "INGESTION_MAX_WORKERS (%s) exceeds configured DB pool capacity "
+        "(DATABASE_POOL_SIZE + DATABASE_MAX_OVERFLOW = %s); ingestion workers "
+        "may wait for database connections.",
+        settings.ingestion_max_workers,
+        pool_capacity,
+    )
 
 
 @asynccontextmanager
@@ -37,6 +52,10 @@ async def lifespan(app: FastAPI):
             "BEHIND_PROXY is enabled but TRUSTED_PROXY_IPS is empty; "
             "forwarded client IP headers will be ignored."
         )
+
+    _warn_if_ingestion_pool_capacity_low(settings)
+
+    assert_schema_at_head(settings.database_url)
 
     with get_session_factory()() as db:
         runtime_sync = sync_runtime_state(

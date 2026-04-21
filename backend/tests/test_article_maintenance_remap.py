@@ -249,6 +249,77 @@ def test_remap_source_articles_full_remap_partial_hits_stay_additive(
     assert {row.ticker_id for row in ticker_rows} == {gof.id, pdi.id}
 
 
+def test_remap_source_articles_full_remap_updates_already_mapped_article_when_requested(
+    db_session, monkeypatch
+):
+    db = db_session
+    source = seed_source(
+        db,
+        code="prnewswire",
+        name="PR Newswire",
+        base_url="https://www.prnewswire.com",
+    )
+    published = datetime(2026, 3, 2, tzinfo=timezone.utc)
+    article_url = (
+        "https://www.prnewswire.com/news-releases/"
+        "calamos-distribution-update-301000003.html"
+    )
+    article, old_ticker = seed_article_with_raw(
+        db,
+        source,
+        ticker_kwargs=dict(
+            symbol="PDI",
+            fund_name="PIMCO Dynamic Income Fund",
+            sponsor="PIMCO",
+        ),
+        article_kwargs=dict(
+            canonical_url=article_url,
+            title="Distribution update without explicit ticker text",
+            summary="Stored copy without a ticker symbol.",
+            published_at=published,
+            source_name="PR Newswire",
+            provider_name="PR Newswire",
+        ),
+        match_type="context",
+        confidence=0.91,
+        raw_guid="prn-guid-remap-existing",
+        feed_url="https://www.prnewswire.com/rss/news-releases-list.rss",
+    )
+    new_ticker = seed_ticker(
+        db,
+        symbol="GOF",
+        fund_name="Guggenheim Strategic Opportunities Fund",
+        sponsor="Guggenheim",
+    )
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <p>Guggenheim Strategic Opportunities Fund monthly update.</p>
+          <table><tr><td>GOF</td></tr></table>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    result = remap_source_articles(
+        db,
+        _remap_settings(),
+        source_code="prnewswire",
+        limit=10,
+        only_unmapped=False,
+    )
+
+    ticker_rows = db.scalars(
+        select(ArticleTicker).where(ArticleTicker.article_id == article.id)
+    ).all()
+
+    assert result["processed"] == 1
+    assert result["articles_with_hits"] == 1
+    assert result["remapped_articles"] == 1
+    assert {row.ticker_id for row in ticker_rows} == {old_ticker.id, new_ticker.id}
+
+
 def test_remap_source_articles_uses_verified_fallback_after_low_confidence_tokens(
     db_session, monkeypatch
 ):

@@ -117,12 +117,33 @@ def _find_existing_raw_feed_item(
                 .limit(1)
             )
 
-    return db.scalar(
+    exact_dated_row = db.scalar(
         select(RawFeedItem)
         .where(and_(*pair_filters, RawFeedItem.raw_pub_date == published_at))
         .order_by(*order_by)
         .limit(1)
     )
+    if exact_dated_row is not None:
+        return exact_dated_row
+
+    if require_attached is not True:
+        legacy_guidless_row = db.scalar(
+            select(RawFeedItem)
+            .where(
+                and_(
+                    *base_filters,
+                    RawFeedItem.raw_link == raw_link,
+                    RawFeedItem.raw_guid.is_(None),
+                    RawFeedItem.raw_pub_date.is_(None),
+                )
+            )
+            .order_by(*order_by)
+            .limit(1)
+        )
+        if legacy_guidless_row is not None:
+            return legacy_guidless_row
+
+    return None
 
 
 def _prefetch_recorded_raw_keys(

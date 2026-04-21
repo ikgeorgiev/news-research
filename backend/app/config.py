@@ -19,6 +19,24 @@ class Settings(BaseSettings):
 
     # Local-first default. Docker compose overrides this with the container hostname (`db`).
     database_url: str = "postgresql+psycopg://cef:cef@localhost:5433/cef_news"
+    database_pool_size: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="QueuePool size for non-SQLite databases.",
+    )
+    database_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=1000,
+        description="Extra QueuePool connections allowed above the base pool size.",
+    )
+    database_pool_timeout: float = Field(
+        default=30.0,
+        ge=1.0,
+        le=300.0,
+        description="Seconds to wait for a pooled connection before timing out.",
+    )
 
     yahoo_chunk_size: int = Field(default=40, ge=5, le=350)
     ingest_cooldown_seconds: float = Field(default=2.0, ge=0.0)

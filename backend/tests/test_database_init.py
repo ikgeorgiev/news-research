@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -11,6 +13,8 @@ from sqlalchemy.orm import sessionmaker
 
 import pytest
 
+from app import database
+import app.main as app_main
 from app.raw_feed_items import _upsert_raw_feed_item
 from app.models import RawFeedItem, Source
 import migrate
@@ -67,6 +71,146 @@ class _RecordingEngine:
 
     def dispose(self):
         self.disposed = True
+
+
+class _SchemaCheckResult:
+    def __init__(self, revision: str | None):
+        self.revision = revision
+
+    def scalar_one_or_none(self):
+        return self.revision
+
+
+class _SchemaCheckConnection:
+    def __init__(self, revision: str | None):
+        self.revision = revision
+        self.disposed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement):
+        return _SchemaCheckResult(self.revision)
+
+
+class _SchemaCheckEngine:
+    def __init__(self, connection: _SchemaCheckConnection):
+        self.connection = connection
+        self.disposed = False
+
+    def connect(self):
+        return self.connection
+
+    def dispose(self):
+        self.disposed = True
+
+
+def test_get_engine_kwargs_adds_pool_settings_for_postgresql(monkeypatch):
+    monkeypatch.setattr(
+        database,
+        "get_settings",
+        lambda: SimpleNamespace(
+            database_pool_size=12,
+            database_max_overflow=34,
+            database_pool_timeout=56.0,
+        ),
+    )
+
+    assert database.get_engine_kwargs("postgresql+psycopg://example/db") == {
+        "pool_pre_ping": True,
+        "pool_size": 12,
+        "max_overflow": 34,
+        "pool_timeout": 56.0,
+    }
+
+
+def test_get_engine_kwargs_skips_pool_settings_for_sqlite(monkeypatch):
+    monkeypatch.setattr(
+        database,
+        "get_settings",
+        lambda: SimpleNamespace(
+            database_pool_size=12,
+            database_max_overflow=34,
+            database_pool_timeout=56.0,
+        ),
+    )
+
+    assert database.get_engine_kwargs("sqlite:///example.db") == {"pool_pre_ping": True}
+
+
+def test_assert_schema_at_head_skips_sqlite(monkeypatch):
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("SQLite startup should not hit the schema gate")
+
+    monkeypatch.setattr(migrate, "create_engine", fail_if_called)
+    monkeypatch.setattr(migrate, "_get_alembic_head_revision", fail_if_called)
+
+    migrate.assert_schema_at_head("sqlite:///example.db")
+
+
+def test_assert_schema_at_head_refuses_stale_postgresql_schema(monkeypatch):
+    connection = _SchemaCheckConnection(revision="20260319_0001")
+    engine = _SchemaCheckEngine(connection)
+    inspector = SimpleNamespace(get_table_names=lambda: ["alembic_version"])
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "_get_alembic_head_revision", lambda _url: "20260421_0001")
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+
+    with pytest.raises(RuntimeError, match="not at Alembic head"):
+        migrate.assert_schema_at_head("postgresql+psycopg://example/db")
+
+    assert engine.disposed is True
+
+
+def test_startup_warns_when_ingestion_workers_exceed_pool_capacity(caplog):
+    settings = SimpleNamespace(
+        database_pool_size=2,
+        database_max_overflow=1,
+        ingestion_max_workers=4,
+    )
+
+    with caplog.at_level(logging.WARNING, logger=app_main.__name__):
+        app_main._warn_if_ingestion_pool_capacity_low(settings)
+
+    assert "exceeds configured DB pool capacity" in caplog.text
+
+
+def test_lifespan_stops_before_runtime_bootstrap_on_schema_failure(monkeypatch):
+    monkeypatch.setattr(
+        app_main,
+        "get_settings",
+        lambda: SimpleNamespace(
+            database_url="postgresql+psycopg://example/db",
+            behind_proxy=False,
+            trusted_proxy_networks=(),
+            cors_origins_list=[],
+            api_prefix="/api/v1",
+            sse_max_connections_per_ip=5,
+            database_pool_size=10,
+            database_max_overflow=10,
+            ingestion_max_workers=4,
+        ),
+    )
+    def fail_schema_check(*_args, **_kwargs):
+        raise RuntimeError("stale schema")
+
+    def fail_runtime_bootstrap(*_args, **_kwargs):
+        pytest.fail("runtime bootstrap should not start")
+
+    monkeypatch.setattr(app_main, "assert_schema_at_head", fail_schema_check)
+    monkeypatch.setattr(app_main, "get_session_factory", lambda: fail_runtime_bootstrap)
+    monkeypatch.setattr(app_main, "sync_runtime_state", fail_runtime_bootstrap)
+
+    async def _run():
+        with pytest.raises(RuntimeError, match="stale schema"):
+            async with app_main.lifespan(app_main.app):
+                pytest.fail("lifespan should not reach startup yield")
+
+    asyncio.run(_run())
 
 
 def test_run_migrations_uses_postgresql_advisory_lock_around_upgrade(monkeypatch):

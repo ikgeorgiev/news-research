@@ -44,6 +44,7 @@ def test_admin_reload_tickers_returns_source_remaps(monkeypatch, db_session):
 
     response = admin_reload_tickers(
         remap_unmapped=True,
+        remap_only_unmapped=True,
         remap_limit=321,
         db=db_session,
     )
@@ -83,6 +84,39 @@ def test_admin_reload_tickers_can_skip_remap(monkeypatch, db_session):
     assert response.loaded == 10
     assert response.source_remaps is None
     assert calls["remap_called"] == 0
+
+
+def test_admin_reload_tickers_can_remap_already_mapped_articles(monkeypatch, db_session):
+    calls: dict[str, bool] = {}
+
+    def fake_load_tickers(_db: Session, _path: str) -> dict[str, int]:
+        return {"loaded": 10, "created": 0, "updated": 0, "unchanged": 10}
+
+    def fake_remap(
+        _db: Session, _settings, *, source_code: str, limit: int, only_unmapped: bool, **_kw,  # noqa: ANN001,ANN003
+    ):
+        calls["only_unmapped"] = only_unmapped
+        return {
+            "source_code": source_code,
+            "processed": 1,
+            "articles_with_hits": 1,
+            "remapped_articles": 1,
+            "only_unmapped": only_unmapped,
+        }
+
+    monkeypatch.setattr("app.routes.admin.load_tickers_from_csv", fake_load_tickers)
+    monkeypatch.setattr("app.routes.admin.remap_source_articles", fake_remap)
+
+    response = admin_reload_tickers(
+        remap_unmapped=True,
+        remap_only_unmapped=False,
+        remap_limit=500,
+        db=db_session,
+    )
+
+    assert response.source_remaps is not None
+    assert calls["only_unmapped"] is False
+    assert response.source_remaps[0].only_unmapped is False
 
 
 def test_admin_dedupe_businesswire_url_variants_response_contract(monkeypatch, db_session):
