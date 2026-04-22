@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from app.constants import (
     CONFIDENCE_CONTEXT,
     CONFIDENCE_EXCHANGE,
+    CONFIDENCE_FUND_NAME,
     CONFIDENCE_PAREN,
     CONFIDENCE_TABLE_VALIDATED,
     CONFIDENCE_UNVALIDATED,
@@ -22,6 +23,7 @@ from app.ticker_context import (
     _build_symbol_keywords as _build_symbol_keywords_impl,
     _coerce_symbol_keyword_profile as _coerce_symbol_keyword_profile_impl,
     _matching_validation_keywords as _matching_validation_keywords_impl,
+    _normalize_fund_title_phrase as _normalize_fund_title_phrase_impl,
     SymbolKeywordProfile,
     _text_matches_validation_keywords as _text_matches_validation_keywords_impl,
 )
@@ -181,6 +183,10 @@ def _coerce_symbol_keyword_profile(
     keywords: SymbolKeywordProfile | frozenset[str] | None,
 ) -> SymbolKeywordProfile:
     return _coerce_symbol_keyword_profile_impl(keywords)
+
+
+def _normalize_fund_title_phrase(raw_value: str | None) -> str:
+    return _normalize_fund_title_phrase_impl(raw_value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -753,6 +759,41 @@ def _extract_entry_tickers(
         if symbol_keywords is not None
         else ""
     )
+    if symbol_keywords is not None:
+        title_text_normalized = f" {_normalize_fund_title_phrase(title)} "
+        fund_name_matches: list[tuple[str, str]] = []
+        for symbol, raw_profile in symbol_keywords.items():
+            upper = symbol.upper()
+            if upper not in known_symbols or _symbol_class(upper) != SYMBOL_CLASS_NORMAL:
+                continue
+            profile = _coerce_symbol_keyword_profile(raw_profile)
+            matched_phrases = [
+                phrase
+                for phrase in profile.fund_title_phrases
+                if f" {phrase} " in title_text_normalized
+            ]
+            if matched_phrases:
+                fund_name_matches.append(
+                    (upper, max(matched_phrases, key=lambda phrase: (len(phrase.split()), len(phrase))))
+                )
+
+        for symbol, phrase in fund_name_matches:
+            same_phrase_symbols = {
+                matched_symbol
+                for matched_symbol, matched_phrase in fund_name_matches
+                if matched_phrase == phrase
+            }
+            if len(same_phrase_symbols) > 1:
+                continue
+            if any(
+                other_symbol != symbol
+                and other_phrase != phrase
+                and other_phrase.startswith(f"{phrase} ")
+                for other_symbol, other_phrase in fund_name_matches
+            ):
+                continue
+            add(symbol, "fund_name", CONFIDENCE_FUND_NAME)
+
     segment_hits = _collect_segment_hits(
         [
             (title, EVIDENCE_CHANNEL_TITLE_SUMMARY_TOKEN),

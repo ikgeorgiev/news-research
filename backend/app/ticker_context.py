@@ -95,6 +95,7 @@ class SymbolKeywordProfile:
     sponsor_terms: frozenset[str] = frozenset()
     fund_phrases: frozenset[str] = frozenset()
     sponsor_phrases: frozenset[str] = frozenset()
+    fund_title_phrases: frozenset[str] = frozenset()
     all_terms: frozenset[str] = frozenset()
     all_phrases: frozenset[str] = frozenset()
     all_keywords: frozenset[str] = frozenset()
@@ -120,6 +121,7 @@ class SymbolKeywordProfile:
                 and self.sponsor_terms == other.sponsor_terms
                 and self.fund_phrases == other.fund_phrases
                 and self.sponsor_phrases == other.sponsor_phrases
+                and self.fund_title_phrases == other.fund_title_phrases
                 and self.all_terms == other.all_terms
                 and self.all_phrases == other.all_phrases
                 and self.all_keywords == other.all_keywords
@@ -157,12 +159,15 @@ def _profile_from_keyword_groups(
     sponsor_terms: AbstractSet[str] | None = None,
     fund_phrases: AbstractSet[str] | None = None,
     sponsor_phrases: AbstractSet[str] | None = None,
+    fund_title_phrases: AbstractSet[str] | None = None,
     override_keywords: AbstractSet[str] | None = None,
 ) -> SymbolKeywordProfile:
+    fund_title_phrases_frozen = frozenset(fund_title_phrases or ())
     if override_keywords is not None:
         override = frozenset(override_keywords)
         override_terms, override_phrases = _split_override_keywords(override)
         return SymbolKeywordProfile(
+            fund_title_phrases=fund_title_phrases_frozen,
             all_terms=override_terms,
             all_phrases=override_phrases,
             all_keywords=override,
@@ -181,6 +186,7 @@ def _profile_from_keyword_groups(
         sponsor_terms=sponsor_terms_frozen,
         fund_phrases=fund_phrases_frozen,
         sponsor_phrases=sponsor_phrases_frozen,
+        fund_title_phrases=fund_title_phrases_frozen,
         all_terms=all_terms,
         all_phrases=all_phrases,
         all_keywords=all_terms | all_phrases,
@@ -259,6 +265,49 @@ def _normalize_validation_keywords(raw_value: str | None) -> frozenset[str]:
     )
 
 
+_FUND_TITLE_WORD_REPLACEMENTS = {
+    "fd": "fund",
+    "grd": "grade",
+    "invstm": "investment",
+    "opps": "opportunities",
+    "opp": "opportunity",
+    "tr": "trust",
+}
+_FUND_TITLE_CORPORATE_SUFFIXES = frozenset({"inc", "llc", "ltd", "plc"})
+_FUND_TITLE_GENERIC_TRAILING_WORDS = frozenset({"fund", "trust"})
+
+
+def _normalize_fund_title_phrase(raw_value: str | None) -> str:
+    if not raw_value:
+        return ""
+    words = re.findall(r"[a-z0-9]+", raw_value.lower())
+    expanded = [_FUND_TITLE_WORD_REPLACEMENTS.get(word, word) for word in words]
+    return " ".join(expanded).strip()
+
+
+def _fund_title_phrase_variants(fund_name: str | None) -> frozenset[str]:
+    normalized = _normalize_fund_title_phrase(fund_name)
+    if not normalized:
+        return frozenset()
+
+    variants = {normalized}
+    words = normalized.split()
+    while words and words[-1] in _FUND_TITLE_CORPORATE_SUFFIXES:
+        words = words[:-1]
+        if words:
+            variants.add(" ".join(words))
+    while words and words[-1] in _FUND_TITLE_GENERIC_TRAILING_WORDS:
+        words = words[:-1]
+        if words:
+            variants.add(" ".join(words))
+
+    return frozenset(
+        phrase
+        for phrase in variants
+        if len(phrase.split()) >= 3
+    )
+
+
 def _build_symbol_keywords(
     ticker_rows: list,
 ) -> dict[str, SymbolKeywordProfile]:
@@ -273,6 +322,7 @@ def _build_symbol_keywords(
         override_keywords = _normalize_validation_keywords(validation_kw_raw)
         if override_keywords:
             result[symbol.upper()] = _profile_from_keyword_groups(
+                fund_title_phrases=_fund_title_phrase_variants(fund_name),
                 override_keywords=override_keywords
             )
             continue
@@ -353,6 +403,7 @@ def _build_symbol_keywords(
             sponsor_terms=sponsor_terms,
             fund_phrases=fund_phrases,
             sponsor_phrases=sponsor_phrases,
+            fund_title_phrases=_fund_title_phrase_variants(fund_name),
         )
     return result
 

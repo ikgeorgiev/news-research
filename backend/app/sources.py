@@ -115,7 +115,10 @@ def _normalized_businesswire_fetch_url(url: str) -> str:
     path = parsed.path
     for token in ("%C2%AE", "%c2%ae", "%E2%84%A2", "%e2%84%a2", "®", "™"):
         path = path.replace(token, "")
-    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+    # Business Wire RSS links are often `http://...`, but article pages redirect
+    # to HTTPS. Page fetches deliberately do not follow redirects, so normalize
+    # the fetch URL to HTTPS up front while leaving persisted article URLs alone.
+    return urlunparse(("https", parsed.netloc, path, "", "", ""))
 
 
 def _is_businesswire_article_url(url: str) -> bool:

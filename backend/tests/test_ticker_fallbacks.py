@@ -131,7 +131,40 @@ def test_businesswire_fetch_normalizes_registered_mark_slug_for_request(monkeypa
 
     assert result == "<html>ok</html>"
     assert observed_urls == [
-        "http://www.businesswire.com/news/home/20260414872914/en/Liberty-All-Star-Equity-Fund-March-2026-Monthly-Update"
+        "https://www.businesswire.com/news/home/20260414872914/en/Liberty-All-Star-Equity-Fund-March-2026-Monthly-Update"
+    ]
+
+def test_businesswire_fetch_upgrades_http_feed_link_to_https(monkeypatch, clean_page_cache):
+    observed_urls: list[str] = []
+
+    class FakeResponse:
+        is_success = True
+        text = "<html>ok</html>"
+
+    def fake_get(
+        url: str,
+        timeout: int,
+        headers: dict[str, str],
+        follow_redirects: bool = True,
+    ):  # noqa: ARG001
+        observed_urls.append(url)
+        assert follow_redirects is False
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.http_client.get_http_client",
+        lambda: SimpleNamespace(get=fake_get),
+    )
+
+    result = _fetch_source_page_html(
+        "http://www.businesswire.com/news/home/20260422567496/en/Western-Asset-Global-High-Income-Fund-Inc.-Announces-Financial-Position-as-of-February-28-2026?feedref=JjAwJuNHiystnCo",
+        5,
+        PAGE_FETCH_CONFIGS["businesswire"],
+    )
+
+    assert result == "<html>ok</html>"
+    assert observed_urls == [
+        "https://www.businesswire.com/news/home/20260422567496/en/Western-Asset-Global-High-Income-Fund-Inc.-Announces-Financial-Position-as-of-February-28-2026"
     ]
 
 def test_businesswire_fetch_preserves_other_percent_escapes(monkeypatch, clean_page_cache):
@@ -164,7 +197,7 @@ def test_businesswire_fetch_preserves_other_percent_escapes(monkeypatch, clean_p
 
     assert result == "<html>ok</html>"
     assert observed_urls == [
-        "http://www.businesswire.com/news/home/20260414872914/en/Fund-Update%2FSeries%231"
+        "https://www.businesswire.com/news/home/20260414872914/en/Fund-Update%2FSeries%231"
     ]
 
 def test_businesswire_fetch_skips_non_businesswire_hosts(monkeypatch, clean_page_cache):

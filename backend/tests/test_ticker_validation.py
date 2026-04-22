@@ -492,6 +492,71 @@ def test_real_cef_article_persists_end_to_end():
     assert hits["CGO"][1] >= MIN_PERSIST_CONFIDENCE
     assert _should_persist_entry("prnewswire", hits) is True
 
+@pytest.mark.parametrize(
+    ("symbol", "fund_name", "sponsor", "title"),
+    [
+        (
+            "EHI",
+            "Western Asset Global High Income",
+            "Franklin Templeton Investments",
+            "Western Asset Global High Income Fund Inc. Announces Financial Position as of February 28, 2026",
+        ),
+        (
+            "MMU",
+            "Western Asset Managed Municipals",
+            "Franklin Templeton Investments",
+            "Western Asset Managed Municipals Fund Inc. Announces Financial Position as of February 28, 2026",
+        ),
+        (
+            "HYI",
+            "Western Asset High Yield Opp Fund",
+            "Franklin Templeton Fund Adviser, LLC",
+            "Western Asset High Yield Opportunity Fund Inc. Announces Financial Position as of February 28, 2026",
+        ),
+        (
+            "IGI",
+            "Western Asset Invstm Grd Opp Tr Inc",
+            "Franklin Templeton Fund Adviser, LLC",
+            "Western Asset Investment Grade Opportunity Trust Inc. Announces Financial Position as of February 28, 2026",
+        ),
+    ],
+)
+def test_businesswire_fund_name_headlines_map_without_page_fetch(
+    symbol, fund_name, sponsor, title
+):
+    sym_kws = _build_symbol_keywords([(1, symbol, fund_name, sponsor)])
+
+    hits = _extract_entry_tickers(
+        title,
+        "",
+        "http://www.businesswire.com/news/home/example",
+        "",
+        {symbol},
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits[symbol] == ("fund_name", 0.66)
+
+def test_fund_name_headline_uses_longest_unique_match():
+    known = {"BME", "BMEZ"}
+    sym_kws = _build_symbol_keywords(
+        [
+            (1, "BME", "BlackRock Health Sciences", "BlackRock"),
+            (2, "BMEZ", "BlackRock Health Sciences Term Trust", "BlackRock"),
+        ]
+    )
+
+    hits = _extract_entry_tickers(
+        "BlackRock Health Sciences Term Trust Announces Financial Position",
+        "",
+        "http://www.businesswire.com/news/home/example",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits == {"BMEZ": ("fund_name", 0.66)}
+
 def test_paren_stopword_ticker_blocked_without_fund_name():
     """(USA) in an Occidental press release should NOT match."""
     known = {"USA"}
