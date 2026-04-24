@@ -434,6 +434,71 @@ def test_false_positive_articles_filtered_end_to_end():
             ), f"False positive: {sym} in '{title}' has confidence {confidence} ({match_type})"
 
 @pytest.mark.parametrize(
+    "regional_phrase",
+    [
+        "Central and Eastern European",
+        "Central and Eastern Europe",
+    ],
+)
+def test_cee_regional_deal_award_headline_stays_subthreshold(regional_phrase):
+    """CEE as a region should not validate as The Central and Eastern Europe Fund."""
+    known = {"CEE"}
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "CEE",
+                "The Central and Eastern Europe Fund",
+                "DWS",
+                "dws,central and eastern europe fund",
+            )
+        ]
+    )
+    hits = _extract_entry_tickers(
+        "Horizon Capital Wins Real Deals Private Equity Awards 2026 CEE Deal of the Year for Datagroup-Volia-Lifecell Transaction",
+        (
+            "KYIV, Ukraine, April 24, 2026 /PRNewswire/ -- Horizon Capital, "
+            "a leading private equity firm in Emerging Europe with $1.8 billion "
+            "assets under management, is honored to win the Real Deals Private "
+            f"Equity Award 2026 {regional_phrase} Deal of the Year."
+        ),
+        "https://www.prnewswire.com/news-releases/horizon-capital-302739999.html",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits == {"CEE": ("token", 0.62)}
+    assert _should_persist_entry("prnewswire", hits) is False
+
+def test_cee_fund_name_headline_still_persists():
+    known = {"CEE"}
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "CEE",
+                "The Central and Eastern Europe Fund",
+                "DWS",
+                "dws,central and eastern europe fund",
+            )
+        ]
+    )
+
+    hits = _extract_entry_tickers(
+        "The Central and Eastern Europe Fund, Inc. Announces Distribution",
+        "",
+        "https://www.prnewswire.com/news-releases/cee-302740000.html",
+        "",
+        known,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["CEE"][0] == "fund_name"
+    assert hits["CEE"][1] >= MIN_PERSIST_CONFIDENCE
+    assert _should_persist_entry("prnewswire", hits) is True
+
+@pytest.mark.parametrize(
     ("row", "title", "summary"),
     [
         (
