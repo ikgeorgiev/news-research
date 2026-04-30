@@ -534,6 +534,99 @@ def test_prnewswire_fallback_aktia_emd_false_positive_stays_subthreshold(monkeyp
     assert "EMD" not in hits
 
 
+def test_prnewswire_fallback_bramshill_emd_asset_class_false_positive_stays_subthreshold(
+    monkeypatch,
+):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Arif Joshi is the lead portfolio manager for Bramshill's Emerging
+            Market strategies. He previously co-headed emerging market debt at
+            Lazard and grew the EMD platform across long-only and total return
+            strategies.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "EMD",
+                "Western Asset Emerging Markets Debt",
+                "Franklin Templeton Fund Adviser, LLC",
+            )
+        ]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Bramshill Investments' Portfolio Manager, Arif Joshi, featured on Bloomberg Intelligence FICC Focus",
+        (
+            "EM Lens: Investors Aren't Packing Their EM Bags Just Yet NEW YORK, "
+            "April 29, 2026 /PRNewswire/ -- Despite the war-induced increase in "
+            "macroeconomic uncertainty, investors are returning to emerging "
+            "market fixed income as the universe of investible alpha "
+            "opportunities continues to expand."
+        ),
+        "https://www.prnewswire.com/news-releases/bramshill-investments-portfolio-manager-arif-joshi-featured-on-bloomberg-intelligence-ficc-focus-302757885.html",
+        "",
+        {"EMD"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "EMD" not in hits
+
+
+def test_prnewswire_fallback_emd_override_keeps_true_fund_release(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["prnewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>Western Asset Emerging Markets Debt Fund Inc. (NYSE: EMD)
+            announced its monthly distribution. The Fund is managed by
+            Franklin Templeton Fund Adviser, LLC.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [
+            (
+                1,
+                "EMD",
+                "Western Asset Emerging Markets Debt",
+                "Franklin Templeton Fund Adviser, LLC",
+                (
+                    "western asset,western asset emerging markets debt,"
+                    "franklin templeton,franklin templeton fund adviser"
+                ),
+            )
+        ]
+    )
+    hits = _extract_source_fallback_tickers(
+        "Western Asset Emerging Markets Debt Fund Inc. announces monthly distribution",
+        "",
+        "https://www.prnewswire.com/news-releases/emd-distribution-302757999.html",
+        "",
+        {"EMD"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert hits["EMD"][1] >= MIN_PERSIST_CONFIDENCE
+
+
 def test_prnewswire_fallback_does_not_upgrade_title_token_from_generic_body_keywords(
     monkeypatch,
 ):
