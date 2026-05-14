@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 from typing import TypedDict
 from urllib.parse import urlparse
 
@@ -315,6 +316,51 @@ class PreparedFeedEntry:
     raw_pub_date: datetime | None
     published_at: datetime
     raw_guid: str | None
+    language: str | None = None
+
+
+LANGUAGE_SEGMENT_PATTERN = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$", re.IGNORECASE)
+
+
+def _primary_language(value: object) -> str | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    return re.split(r"[-_]", text, maxsplit=1)[0] or None
+
+
+def _extract_entry_language(entry: dict, raw_link: str) -> str | None:
+    language = _primary_language(entry.get("language") or entry.get("dc_language"))
+    if language:
+        return language
+
+    title_detail = entry.get("title_detail")
+    if isinstance(title_detail, dict):
+        language = _primary_language(title_detail.get("language"))
+        if language:
+            return language
+
+    parsed = urlparse(raw_link)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if path_parts and LANGUAGE_SEGMENT_PATTERN.match(path_parts[0]):
+        return _primary_language(path_parts[0])
+
+    for index, part in enumerate(path_parts):
+        if part.lower() != "news-release":
+            continue
+        for candidate in path_parts[index + 1 :]:
+            if LANGUAGE_SEGMENT_PATTERN.match(candidate):
+                return _primary_language(candidate)
+        break
+
+    return None
+
+
+def _should_skip_entry_language(source_code: str | None, language: str | None) -> bool:
+    # GlobeNewswire often publishes the same release in multiple languages with
+    # different URLs/titles.  Keep English when the feed gives us a language
+    # signal; keep unknown-language entries so older/stubbed feeds are not lost.
+    return source_code == "globenewswire" and language is not None and language != "en"
 
 
 def _matches_detached_raw_row(
@@ -346,6 +392,8 @@ def _matches_detached_raw_row(
 def _prepare_feed_entries(
     entries: list,
     now_utc: datetime,
+    *,
+    source_code: str | None = None,
 ) -> list[PreparedFeedEntry]:
     prepared: list[PreparedFeedEntry] = []
     for entry in entries:
@@ -354,6 +402,9 @@ def _prepare_feed_entries(
         raw_link_input = str(entry.get("link") or "").strip()
         raw_link = canonicalize_url(raw_link_input)
         if not title or not raw_link:
+            continue
+        language = _extract_entry_language(entry, raw_link)
+        if _should_skip_entry_language(source_code, language):
             continue
 
         parsed_input = urlparse(raw_link_input)
@@ -385,6 +436,7 @@ def _prepare_feed_entries(
                 raw_pub_date=raw_pub_date,
                 published_at=published_at,
                 raw_guid=raw_guid,
+                language=language,
             )
         )
     return prepared
@@ -706,7 +758,11 @@ def ingest_feed(
                 items_seen = len(entries)
 
                 now_utc = datetime.now(timezone.utc)
-                prepared_entries = _prepare_feed_entries(entries, now_utc)
+                prepared_entries = _prepare_feed_entries(
+                    entries,
+                    now_utc,
+                    source_code=source.code,
+                )
 
                 recorded_guids, recorded_pairs = _prefetch_recorded_raw_keys(
                     db,

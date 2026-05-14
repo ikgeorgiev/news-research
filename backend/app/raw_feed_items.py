@@ -380,6 +380,7 @@ def _persist_raw_feed_item(
         or prepared.entry.get("updated"),
         "summary": raw_summary,
         "source": entry_source_name,
+        "language": prepared.language,
     }
     row = existing_row or _find_existing_raw_feed_item(
         db,

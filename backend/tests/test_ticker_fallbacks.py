@@ -1237,6 +1237,40 @@ def test_globenewswire_timezone_token_does_not_validate_from_body_keywords(monke
 
     assert "BST" not in hits
 
+
+def test_globenewswire_body_paren_requires_local_fund_context(monkeypatch):
+    config = PAGE_FETCH_CONFIGS["globenewswire"]
+
+    def fake_fetch(_url, _timeout, _config):
+        return """
+        <html><body>
+          <article>
+            <p>AB Science announced a clinical trial financing insurance policy
+            from Medical &amp; Commercial International Ltd. (MCI), Lloyd's Syndicate 1902.</p>
+            <p>The annual report also discusses corporate information and investors.</p>
+          </article>
+        </body></html>
+        """
+
+    monkeypatch.setattr("app.ticker_extraction._fetch_source_page_html", fake_fetch)
+
+    sym_kws = _build_symbol_keywords(
+        [(1, "MCI", "Barings Corporate Investors", "Barings LLC")]
+    )
+    hits = _extract_source_fallback_tickers(
+        "AB Science reports its revenues for the year 2025 and provides an update on its activities",
+        "PRESS RELEASE",
+        "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/en/example.html",
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        {"MCI"},
+        timeout_seconds=5,
+        config=config,
+        symbol_keywords=sym_kws,
+    )
+
+    assert "MCI" not in hits
+
+
 def test_globenewswire_timezone_token_can_validate_from_entry_keywords(monkeypatch):
     config = PAGE_FETCH_CONFIGS["globenewswire"]
 

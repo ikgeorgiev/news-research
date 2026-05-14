@@ -106,6 +106,7 @@ SYMBOL_CLASS_COMMON_NOUN = "common_noun"
 EVIDENCE_CHANNEL_CONTEXT = "context"
 EVIDENCE_CHANNEL_EXCHANGE = "exchange"
 EVIDENCE_CHANNEL_PAREN = "paren"
+EVIDENCE_CHANNEL_BODY_PAREN = "body_paren"
 EVIDENCE_CHANNEL_TITLE_SUMMARY_TOKEN = "title_summary_token"
 EVIDENCE_CHANNEL_BODY_TOKEN = "body_token"
 EVIDENCE_CHANNEL_SLUG_TOKEN = "slug_token"
@@ -195,6 +196,7 @@ class CandidateEvidence:
     channel: str
     timezone_context: bool = False
     table_context_text_lower: str = ""
+    local_context_text_lower: str = ""
 
 
 def _parse_context_symbols(feed_url: str) -> list[str]:
@@ -486,6 +488,11 @@ def _accept_candidate(
         if candidate.table_context_text_lower
         else frozenset()
     )
+    local_context_matches = (
+        _matching_validation_keywords(candidate.local_context_text_lower, profile)
+        if candidate.local_context_text_lower
+        else frozenset()
+    )
     combined_matches = title_summary_matches | body_matches
     combined_text = _combined_text_lower(title_summary_text_lower, body_text_lower)
 
@@ -501,6 +508,14 @@ def _accept_candidate(
         if not profile:
             return ("paren", NO_KEYWORDS_CONFIDENCE)
         if _standard_keyword_support(combined_matches):
+            return ("paren", CONFIDENCE_PAREN)
+        return ("paren", CONFIDENCE_UNVALIDATED)
+    if candidate.channel == EVIDENCE_CHANNEL_BODY_PAREN:
+        if candidate.symbol in STOPWORDS and not _standard_keyword_support(local_context_matches):
+            return None
+        if not profiles_available or not profile:
+            return ("paren", CONFIDENCE_UNVALIDATED)
+        if _standard_keyword_support(local_context_matches):
             return ("paren", CONFIDENCE_PAREN)
         return ("paren", CONFIDENCE_UNVALIDATED)
 
@@ -665,6 +680,25 @@ def _collect_segment_hits(
 ) -> dict[str, tuple[str, float]]:
     hits: dict[str, tuple[str, float]] = {}
 
+    def local_sentence_context(segment: str, start: int, end: int) -> str:
+        before_candidates = [
+            segment.rfind(marker, 0, start)
+            for marker in (".", "!", "?", "\n")
+        ]
+        after_candidates = [
+            position
+            for position in (
+                segment.find(marker, end)
+                for marker in (".", "!", "?", "\n")
+            )
+            if position != -1
+        ]
+        context_start = max(before_candidates) + 1 if before_candidates else 0
+        context_end = min(after_candidates) + 1 if after_candidates else len(segment)
+        context_start = max(context_start, start - 100)
+        context_end = min(context_end, end + 100)
+        return segment[context_start:context_end].lower()
+
     def add(symbol: str, match_type: str, confidence: float) -> None:
         if symbol not in known_symbols:
             return
@@ -693,8 +727,21 @@ def _collect_segment_hits(
             upper = match.group(1).upper()
             if _is_timezone_token_in_time_context(segment, match.start(1), match.end(1)):
                 continue
+            paren_channel = (
+                EVIDENCE_CHANNEL_BODY_PAREN
+                if token_channel == EVIDENCE_CHANNEL_BODY_TOKEN
+                else EVIDENCE_CHANNEL_PAREN
+            )
             decision = _accept_candidate(
-                CandidateEvidence(symbol=upper, channel=EVIDENCE_CHANNEL_PAREN),
+                CandidateEvidence(
+                    symbol=upper,
+                    channel=paren_channel,
+                    local_context_text_lower=local_sentence_context(
+                        segment,
+                        match.start(),
+                        match.end(),
+                    ),
+                ),
                 profile=_coerce_symbol_keyword_profile(
                     symbol_keywords.get(upper) if symbol_keywords is not None else None
                 ),

@@ -1501,6 +1501,61 @@ def test_ingest_feed_globenewswire_cap_does_not_apply_to_prnewswire(
     assert seen_page_configs == ["prnewswire", "prnewswire", "prnewswire", "prnewswire"]
 
 
+def test_ingest_feed_globenewswire_skips_non_english_language_variant(
+    db_session, stub_feed_io
+):
+    db = db_session
+    source = seed_source(
+        db,
+        code="globenewswire",
+        name="GlobeNewswire",
+        base_url="https://rss.globenewswire.com",
+    )
+    ticker = seed_ticker(db, symbol="CGO")
+    entries = [
+        {
+            "id": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/fr/example.html",
+            "guid": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/fr/example.html",
+            "title": "AB Science annonce ses resultats financiers annuels",
+            "link": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/fr/example.html",
+            "summary": "NYSE: CGO",
+            "published": "2026-05-13T17:36:00Z",
+            "language": "fr",
+        },
+        {
+            "id": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/en/example.html",
+            "guid": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/en/example.html",
+            "title": "AB Science reports its revenues for the year 2025",
+            "link": "https://www.globenewswire.com/news-release/2026/05/13/3294338/0/en/example.html",
+            "summary": "NYSE: CGO",
+            "published": "2026-05-13T17:36:00Z",
+            "language": "en",
+        },
+    ]
+    stub_feed_io(entries, "GlobeNewswire")
+
+    result = call_ingest(
+        db,
+        source,
+        "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+        known_symbols={"CGO"},
+        symbol_to_id={"CGO": ticker.id},
+        symbol_keywords={"CGO": frozenset({"calamos"})},
+    )
+
+    articles = db.scalars(select(Article).order_by(Article.id.asc())).all()
+    raw_rows = db.scalars(select(RawFeedItem).order_by(RawFeedItem.id.asc())).all()
+
+    assert result["status"] == "success"
+    assert result["items_seen"] == 2
+    assert result["items_inserted"] == 1
+    assert [article.title for article in articles] == [
+        "AB Science reports its revenues for the year 2025"
+    ]
+    assert len(raw_rows) == 1
+    assert raw_rows[0].raw_payload_json["language"] == "en"
+
+
 def test_ingest_feed_globenewswire_budget_ignores_cached_or_skipped_fallbacks(
     db_session, stub_feed_io, monkeypatch
 ):
