@@ -1168,13 +1168,14 @@ def test_ingest_feed_businesswire_finance_exact_url_prunes_missing_tickers(
     assert ticker_rows_after[0].ticker_id == new_ticker.id
 
 
-def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fallback(
+def test_ingest_feed_businesswire_finance_retries_detached_raw_fallback(
     db_session,
     stub_feed_io,
     monkeypatch,
 ):
     db = db_session
     source = seed_source(db)
+    ticker = seed_ticker(db, symbol="UTF")
     entry = {
         "id": "bw-finance-repeat",
         "guid": "bw-finance-repeat",
@@ -1189,7 +1190,9 @@ def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fal
 
     def fake_fallback(*_args, **_kwargs):
         fallback_calls["count"] += 1
-        return {}
+        if fallback_calls["count"] == 1:
+            return {}
+        return {"UTF": ("bw_table", 0.84)}
 
     monkeypatch.setattr(
         "app.article_ingest._extract_source_fallback_tickers",
@@ -1202,6 +1205,8 @@ def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fal
         "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
         persistence_policy_override="validated_mapping_required",
         article_source_name="Business Wire",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
     )
     second = call_ingest(
         db,
@@ -1209,8 +1214,11 @@ def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fal
         "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNTXg==",
         persistence_policy_override="validated_mapping_required",
         article_source_name="Business Wire",
+        known_symbols={"UTF"},
+        symbol_to_id={"UTF": ticker.id},
     )
 
+    articles = db.scalars(select(Article)).all()
     raw_rows = db.scalars(
         select(RawFeedItem).where(RawFeedItem.raw_guid == "bw-finance-repeat")
     ).all()
@@ -1218,10 +1226,11 @@ def test_ingest_feed_businesswire_finance_repeated_detached_raw_skips_repeat_fal
     assert first["status"] == "success"
     assert second["status"] == "success"
     assert first["items_inserted"] == 0
-    assert second["items_inserted"] == 0
+    assert second["items_inserted"] == 1
+    assert len(articles) == 1
     assert len(raw_rows) == 1
-    assert raw_rows[0].article_id is None
-    assert fallback_calls["count"] == 1
+    assert raw_rows[0].article_id == articles[0].id
+    assert fallback_calls["count"] == 2
 
 def test_ingest_feed_detached_raw_row_does_not_block_later_valid_ingest(
     db_session,

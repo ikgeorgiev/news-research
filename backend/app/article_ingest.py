@@ -539,22 +539,17 @@ def _process_single_entry(
                 published_at=prepared.raw_pub_date,
                 require_attached=False,
             )
-            if _matches_detached_raw_row(
+            # Strict feeds can legitimately see an item before page fallback
+            # extraction is able to validate it. Keep the detached raw row for
+            # dedupe, but still re-run extraction so later polls can recover
+            # and attach the row once validation succeeds.
+            if existing_detached_raw is not None and not _matches_detached_raw_row(
                 existing_detached_raw,
                 prepared=prepared,
                 raw_summary=raw_summary,
                 entry_source_name=entry_source_name,
             ):
-                _preserve_alt_feed_url(
-                    db,
-                    source_id=source.id,
-                    prepared=prepared,
-                    feed_url=feed_url,
-                    existing_row=existing_detached_raw,
-                )
-                existing_detached_raw.fetched_at = datetime.now(timezone.utc)
-                result.persisted_raw = True
-                return result
+                existing_detached_raw = None
 
         ticker_hits = _extract_entry_tickers(
             prepared.title,
