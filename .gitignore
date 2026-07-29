@@ -4,8 +4,15 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 **/.pytest_cache/
+.ruff_cache/
+**/.ruff_cache/
 .venv/
 **/.venv/
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+coverage.xml
 
 # Node
 node_modules/

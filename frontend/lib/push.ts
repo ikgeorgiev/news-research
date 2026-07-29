@@ -9,6 +9,7 @@ import {
 } from "./types"
 import { buildApiUrl } from "./api-base"
 const PUSH_MANAGE_TOKEN_KEY = "pushManageToken"
+const PUSH_DISABLE_CLEANUP_PENDING_KEY = "pushDisableCleanupPending"
 
 export type PushStatus = {
   supported: boolean
@@ -47,6 +48,22 @@ function setStoredManageToken(token: string | null): void {
     return
   }
   localStorage.removeItem(PUSH_MANAGE_TOKEN_KEY)
+}
+
+function isDisableCleanupPending(): boolean {
+  return (
+    isWindowAvailable()
+    && localStorage.getItem(PUSH_DISABLE_CLEANUP_PENDING_KEY) === "true"
+  )
+}
+
+function setDisableCleanupPending(pending: boolean): void {
+  if (!isWindowAvailable()) return
+  if (pending) {
+    localStorage.setItem(PUSH_DISABLE_CLEANUP_PENDING_KEY, "true")
+    return
+  }
+  localStorage.removeItem(PUSH_DISABLE_CLEANUP_PENDING_KEY)
 }
 
 function urlBase64ToUint8Array(value: string): Uint8Array {
@@ -159,6 +176,19 @@ export async function getPushStatus(): Promise<PushStatus> {
     return { supported: true, subscribed: false }
   }
   const subscription = await registration.pushManager.getSubscription()
+  if (isDisableCleanupPending()) {
+    if (subscription) {
+      try {
+        const unsubscribed = await subscription.unsubscribe()
+        setDisableCleanupPending(!unsubscribed)
+      } catch {
+        // Keep reporting push as off and retry local cleanup next time.
+      }
+    } else {
+      setDisableCleanupPending(false)
+    }
+    return { supported: true, subscribed: false }
+  }
   return {
     supported: true,
     subscribed: subscription !== null,
@@ -199,6 +229,7 @@ export async function enablePushNotifications(scopes: PushAlertScopes): Promise<
 
   try {
     await upsertBackendSubscription({ subscription, scopes })
+    setDisableCleanupPending(false)
     return { permissionGranted: true, pushActive: true }
   } catch (error) {
     if (createdSubscription) {
@@ -216,31 +247,42 @@ export async function enablePushNotifications(scopes: PushAlertScopes): Promise<
 export async function disablePushNotifications(): Promise<void> {
   if (!isPushSupported()) {
     setStoredManageToken(null)
+    setDisableCleanupPending(false)
     return
   }
   const registration = await getKnownServiceWorkerRegistration()
   if (!registration) {
     setStoredManageToken(null)
+    setDisableCleanupPending(false)
     return
   }
   const subscription = await registration.pushManager.getSubscription()
   if (!subscription) {
     setStoredManageToken(null)
+    setDisableCleanupPending(false)
     return
   }
+
+  // Keep the local subscription and its token intact when the authenticated
+  // backend delete fails. The caller can then show the failure and safely
+  // resume scope synchronization instead of claiming push is off while the
+  // server may still send notifications.
+  await deleteBackendSubscription(subscription.endpoint)
   try {
-    await deleteBackendSubscription(subscription.endpoint)
+    const unsubscribed = await subscription.unsubscribe()
+    setDisableCleanupPending(!unsubscribed)
+  } catch {
+    // The backend row is already gone, which is the authoritative disable.
+    // Local browser cleanup is best-effort and must not cause the caller to
+    // recreate the row by treating the overall disable as failed.
+    setDisableCleanupPending(true)
   } finally {
-    try {
-      await subscription.unsubscribe()
-    } finally {
-      setStoredManageToken(null)
-    }
+    setStoredManageToken(null)
   }
 }
 
 export async function syncPushScopes(scopes: PushAlertScopes): Promise<boolean> {
-  if (!isPushSupported()) {
+  if (!isPushSupported() || isDisableCleanupPending()) {
     return false
   }
   const registration = await getKnownServiceWorkerRegistration()

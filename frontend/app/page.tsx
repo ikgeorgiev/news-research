@@ -85,9 +85,27 @@ export default function Page() {
                 <BellIcon active={push.pushSubscribed} />
                 {push.pushSubscribed ? "Push On" : push.pushError ? "Push Failed" : "Push"}
               </button>
-              {push.pushError && !push.pushSubscribed && (
+              {push.pushError && (
                 <span style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "200px" }} title={push.pushError}>
                   {push.pushError}
+                </span>
+              )}
+              {push.pushScopeSelectionError && (
+                <span
+                  role="alert"
+                  style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "240px" }}
+                  title={push.pushScopeSelectionError}
+                >
+                  {push.pushScopeSelectionError}
+                </span>
+              )}
+              {push.pushScopeSyncError && (
+                <span
+                  role="alert"
+                  style={{ fontSize: "0.75rem", color: "#F23645", maxWidth: "240px" }}
+                  title={push.pushScopeSyncError}
+                >
+                  {push.pushScopeSyncError}
                 </span>
               )}
               <span

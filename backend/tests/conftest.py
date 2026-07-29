@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
@@ -11,11 +14,23 @@ from tests.helpers import FakeRssResponse
 
 
 @pytest.fixture()
-def db_session() -> Session:
+def scratch_dir() -> Iterator[Path]:
+    """Provide an isolated temp directory without leaving files in the repository."""
+    with TemporaryDirectory(prefix="cef-news-tests-") as temp_dir:
+        yield Path(temp_dir)
+
+
+@pytest.fixture()
+def db_session() -> Iterator[Session]:
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-    return session_factory()
+    session = session_factory()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture()

@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 import pytest
 from fastapi import HTTPException
@@ -14,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.article_filters import build_article_query
 from app.config import get_settings
 from app.deps import require_admin_api_key
-from app.main import app, health
+from app.main import health
 from app.routes.news import (
     EPOCH_UTC,
     _first_seen_at_for_response,
@@ -23,6 +22,7 @@ from app.routes.news import (
     list_news,
     list_news_ids,
     mark_news_alerts_sent,
+    news_router,
 )
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.schemas import MarkAlertsSentRequest
@@ -55,9 +55,9 @@ def test_require_admin_api_key_accepts_valid_key(monkeypatch: pytest.MonkeyPatch
 def test_mark_news_alerts_sent_route_requires_admin_api_key():
     route = next(
         route
-        for route in app.routes
+        for route in news_router.routes
         if isinstance(route, APIRoute)
-        and route.path == f"{settings.api_prefix}/news/alerts/sent"
+        and route.path == "/news/alerts/sent"
         and "POST" in route.methods
     )
 
@@ -69,9 +69,9 @@ def test_news_count_route_is_not_registered():
     assert all(
         not (
             isinstance(route, APIRoute)
-            and route.path == f"{settings.api_prefix}/news/count"
+            and route.path == "/news/count"
         )
-        for route in app.routes
+        for route in news_router.routes
     )
 
 
@@ -720,11 +720,12 @@ def test_list_news_ids_supports_cursor_pagination(db_session: Session):
     assert page_two.next_cursor is None
 
 
-def test_ticker_loader_accepts_case_insensitive_header(db_session: Session):
+def test_ticker_loader_accepts_case_insensitive_header(
+    db_session: Session,
+    scratch_dir: Path,
+):
     db = db_session
-    temp_dir = Path("backend/tests/.tmp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = temp_dir / f"tickers-{uuid.uuid4().hex}.csv"
+    csv_path = scratch_dir / "tickers.csv"
     csv_path.write_text("Ticker,fund_name,sponsor,active\nAAA,Fund A,Sponsor A,true\n", encoding="utf-8")
 
     try:
@@ -740,11 +741,12 @@ def test_ticker_loader_accepts_case_insensitive_header(db_session: Session):
             csv_path.unlink()
 
 
-def test_ticker_loader_handles_more_than_sqlite_parameter_limit(db_session: Session):
+def test_ticker_loader_handles_more_than_sqlite_parameter_limit(
+    db_session: Session,
+    scratch_dir: Path,
+):
     db = db_session
-    temp_dir = Path("backend/tests/.tmp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = temp_dir / f"tickers-bulk-{uuid.uuid4().hex}.csv"
+    csv_path = scratch_dir / "tickers-bulk.csv"
     rows = ["ticker,fund_name,sponsor,active"]
     rows.extend(
         f"T{index:04d},Fund {index},Sponsor {index},true"

@@ -20,6 +20,7 @@ from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.monitoring import record_push_delivery, record_push_delivery_duration, set_push_active_subscriptions
 from app.pg_utils import is_postgresql_url, to_psycopg_conninfo
 from app.query_utils import iter_chunks
+from app.schemas import validate_push_subscription_endpoint
 from app.utils import sha256_str
 
 logger = logging.getLogger(__name__)
@@ -409,6 +410,13 @@ def _send_push_notification(
     subscription: PushSubscription,
     payload: dict[str, Any],
 ) -> tuple[str, str | None]:
+    try:
+        endpoint = validate_push_subscription_endpoint(subscription.endpoint)
+    except ValueError as exc:
+        # Legacy rows may predate request validation. Treat an unsafe endpoint
+        # as permanently unusable so the dispatcher never hands it to pywebpush.
+        return "gone", f"Invalid push subscription endpoint: {exc}"
+
     if webpush is None:
         return "error", "pywebpush is not available"
 
@@ -418,7 +426,7 @@ def _send_push_notification(
     try:
         webpush(
             subscription_info={
-                "endpoint": subscription.endpoint,
+                "endpoint": endpoint,
                 "keys": {
                     "p256dh": subscription.key_p256dh,
                     "auth": subscription.key_auth,

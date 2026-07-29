@@ -14,15 +14,12 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $repoRoot "backend"
 $tickersCsv = Join-Path $repoRoot "data\\cef_tickers.csv"
 
-# Root .env is the canonical app env file. This script only overrides the
-# values that need different local-dev behavior from Docker defaults.
-$env:DATABASE_URL = "postgresql+psycopg://cef:cef@${DbHost}:$DbPort/cef_news"
+# Root .env is the canonical app env file. This script only overrides values
+# that need different local-dev behavior from Docker defaults. DATABASE_URL
+# and ADMIN_API_KEY are resolved through the same Settings class as the app
+# after the virtual environment is ready.
 $env:TICKERS_CSV_PATH = $tickersCsv
 $env:CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3005,http://127.0.0.1:3005"
-if ([string]::IsNullOrWhiteSpace($env:ADMIN_API_KEY)) {
-    $env:ADMIN_API_KEY = [guid]::NewGuid().ToString("N")
-    Write-Host "Generated ADMIN_API_KEY=$($env:ADMIN_API_KEY)"
-}
 $env:SCHEDULER_ENABLED = "true"
 if ($DisableScheduler) {
     $env:SCHEDULER_ENABLED = "false"
@@ -47,14 +44,105 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Bootstrapping pip in backend virtual environment..."
         & $venvPython -m ensurepip --upgrade
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to bootstrap pip in backend virtual environment."
+        }
     }
 
-    # Install backend requirements if key packages aren't available in the venv.
-    & $venvPython -c "import uvicorn; import alembic; import httpx" *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Installing backend dependencies..."
-        & $venvPython -m pip install -r requirements.txt -r requirements-dev.txt
+    # Keep the ignored local venv aligned with both requirements files. A hash
+    # stamp tracks extras as well as base pins, unlike import/version spot checks.
+    $requirementsFingerprint = (
+        (Get-FileHash "requirements.txt" -Algorithm SHA256).Hash + ":" +
+        (Get-FileHash "requirements-dev.txt" -Algorithm SHA256).Hash
+    )
+    $venvDir = Split-Path -Parent (Split-Path -Parent $venvPython)
+    $dependencyStampPath = Join-Path $venvDir ".cef-requirements.sha256"
+    $installedRequirementsFingerprint = ""
+    if (Test-Path $dependencyStampPath) {
+        $installedRequirementsFingerprint = (Get-Content $dependencyStampPath -Raw).Trim()
     }
+    $needsDependencyInstall = $installedRequirementsFingerprint -ne $requirementsFingerprint
+
+    if (-not $needsDependencyInstall) {
+        $pinCheckScript = @'
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+import sys
+
+for requirements_file in (Path("requirements.txt"), Path("requirements-dev.txt")):
+    for raw_line in requirements_file.read_text(encoding="utf-8").splitlines():
+        requirement = raw_line.partition("#")[0].strip()
+        name_with_extras, separator, expected = requirement.partition("==")
+        if not requirement or not separator:
+            continue
+        package_name = name_with_extras.split("[", 1)[0].strip()
+        try:
+            actual = version(package_name)
+        except PackageNotFoundError:
+            sys.exit(1)
+        if actual != expected.strip():
+            sys.exit(1)
+'@
+        & $venvPython -c $pinCheckScript *> $null
+        $needsDependencyInstall = $LASTEXITCODE -ne 0
+    }
+
+    if (-not $needsDependencyInstall) {
+        & $venvPython -m pip check *> $null
+        $needsDependencyInstall = $LASTEXITCODE -ne 0
+    }
+
+    if ($needsDependencyInstall) {
+        Write-Host "Installing or updating backend dependencies..."
+        & $venvPython -m pip install -r requirements.txt -r requirements-dev.txt
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install backend dependencies."
+        }
+        & $venvPython -m pip check
+        if ($LASTEXITCODE -ne 0) {
+            throw "Backend dependencies are installed but inconsistent."
+        }
+        [System.IO.File]::WriteAllText($dependencyStampPath, $requirementsFingerprint)
+    }
+
+    # Resolve process-environment and root .env values exactly as the app does.
+    # Capture the JSON rather than echoing either secret to the terminal.
+    $readConfigScript = @'
+import json
+
+from app.config import get_settings
+
+settings = get_settings()
+print(
+    json.dumps(
+        {
+            "database_url": settings.database_url,
+            "admin_api_key": settings.admin_api_key,
+        }
+    )
+)
+'@
+    $resolvedConfigJson = (& $venvPython -c $readConfigScript | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to load DATABASE_URL and ADMIN_API_KEY from the root .env file."
+    }
+    $resolvedConfig = $resolvedConfigJson | ConvertFrom-Json
+
+    $databaseUri = [System.UriBuilder]::new([string]$resolvedConfig.database_url)
+    # This is a local-development helper, so always apply its loopback defaults
+    # instead of inheriting a potentially remote DATABASE_URL from the caller.
+    # Connecting elsewhere requires an explicit -DbHost/-DbPort choice.
+    $databaseUri.Host = $DbHost
+    $databaseUri.Port = $DbPort
+    $env:DATABASE_URL = $databaseUri.Uri.AbsoluteUri
+
+    $resolvedAdminApiKey = [string]$resolvedConfig.admin_api_key
+    if ([string]::IsNullOrWhiteSpace($resolvedAdminApiKey)) {
+        $resolvedAdminApiKey = [guid]::NewGuid().ToString("N")
+        Write-Host "Generated a temporary ADMIN_API_KEY for this local run (value omitted)."
+        Write-Host "Set ADMIN_API_KEY in .env before starting if you need to call admin endpoints."
+    }
+    $env:ADMIN_API_KEY = $resolvedAdminApiKey
 
     # Ensure the target database exists (useful when Postgres volume was initialized with a different DB).
     $ensureDbScript = @'
@@ -109,7 +197,8 @@ except Exception as target_error:
     }
 
     Write-Host "Starting backend on http://${BindHost}:$Port"
-    Write-Host "DATABASE_URL=$($env:DATABASE_URL)"
+    $databaseName = $databaseUri.Path.TrimStart("/")
+    Write-Host "Database target: $($databaseUri.Host):$($databaseUri.Port)/$databaseName (credentials omitted)"
     & $venvPython -m uvicorn app.main:app --reload --host $BindHost --port $Port
 }
 finally {

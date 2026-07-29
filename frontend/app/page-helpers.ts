@@ -131,6 +131,15 @@ export function buildWatchlistQueryParams(watchlist: Watchlist | undefined): {
   }
 }
 
+export function newsItemMatchesQuery(
+  item: Pick<NewsItem, "tickers" | "title">,
+  query: string
+): boolean {
+  const queryText = query.trim().toLowerCase()
+  const haystack = [item.title, ...item.tickers].join(" ").toLowerCase()
+  return haystack.includes(queryText)
+}
+
 export function watchlistMatchesItem(item: NewsItem, watchlist: Watchlist): boolean {
   if (watchlist.tickers.length > 0) {
     const hasTickerMatch = item.tickers?.some((ticker) => watchlist.tickers.includes(ticker)) ?? false
@@ -146,15 +155,8 @@ export function watchlistMatchesItem(item: NewsItem, watchlist: Watchlist): bool
     }
   }
 
-  if (watchlist.q) {
-    const queryText = watchlist.q.trim().toLowerCase()
-    const haystack = [item.title, item.summary, item.source, item.provider, ...(item.tickers || [])]
-      .filter((v): v is string => typeof v === "string" && v.length > 0)
-      .join(" ")
-      .toLowerCase()
-    if (!haystack.includes(queryText)) {
-      return false
-    }
+  if (watchlist.q && !newsItemMatchesQuery(item, watchlist.q)) {
+    return false
   }
 
   return true
