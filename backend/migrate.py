@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from alembic import command
@@ -17,6 +18,111 @@ from app.pg_utils import is_postgresql_url
 # The revision that matches the schema produced by _bootstrap_legacy_schema().
 # Legacy databases are stamped here so that any later migrations still run via upgrade().
 BASELINE_REVISION = "20260319_0001"
+# Immutable topology snapshot for a valid pre-Alembic database after
+# _bootstrap_legacy_schema() has applied the compatibility columns. Keep this
+# tied to BASELINE_REVISION: later model/migration additions belong only in the
+# current-metadata validation that runs after upgrade.
+BASELINE_REQUIRED_COLUMNS: Mapping[str, frozenset[str]] = {
+    "tickers": frozenset(
+        {
+            "id",
+            "symbol",
+            "fund_name",
+            "sponsor",
+            "validation_keywords",
+            "active",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "sources": frozenset({"id", "code", "name", "base_url", "enabled"}),
+    "feed_poll_state": frozenset(
+        {
+            "id",
+            "feed_url",
+            "etag",
+            "last_modified",
+            "failure_count",
+            "last_failure_at",
+            "backoff_until",
+            "updated_at",
+        }
+    ),
+    "articles": frozenset(
+        {
+            "id",
+            "canonical_url",
+            "canonical_url_hash",
+            "title",
+            "summary",
+            "published_at",
+            "source_name",
+            "provider_name",
+            "content_hash",
+            "title_normalized_hash",
+            "cluster_key",
+            "first_seen_at",
+            "first_alert_sent_at",
+            "created_at",
+            "updated_at",
+        }
+    ),
+    "article_tickers": frozenset(
+        {
+            "id",
+            "article_id",
+            "ticker_id",
+            "match_type",
+            "confidence",
+            "extraction_version",
+        }
+    ),
+    "raw_feed_items": frozenset(
+        {
+            "id",
+            "source_id",
+            "article_id",
+            "feed_url",
+            "raw_guid",
+            "raw_title",
+            "raw_link",
+            "raw_pub_date",
+            "raw_payload_json",
+            "fetched_at",
+        }
+    ),
+    "ingestion_runs": frozenset(
+        {
+            "id",
+            "source_id",
+            "feed_url",
+            "started_at",
+            "finished_at",
+            "status",
+            "items_seen",
+            "items_inserted",
+            "error_text",
+        }
+    ),
+    "push_subscriptions": frozenset(
+        {
+            "id",
+            "endpoint",
+            "key_p256dh",
+            "key_auth",
+            "expiration_time",
+            "alert_scopes_json",
+            "last_notified_json",
+            "manage_token_hash",
+            "active",
+            "failure_count",
+            "last_error",
+            "last_success_at",
+            "created_at",
+            "updated_at",
+        }
+    ),
+}
 
 
 def _build_alembic_config(database_url: str) -> Config:
@@ -29,6 +135,45 @@ def _build_alembic_config(database_url: str) -> Config:
 
 def _app_table_names() -> set[str]:
     return set(Base.metadata.tables)
+
+
+def _current_required_columns() -> Mapping[str, frozenset[str]]:
+    return {
+        table_name: frozenset(str(column_name) for column_name in table.columns.keys())
+        for table_name, table in Base.metadata.tables.items()
+    }
+
+
+def _assert_app_schema_present(
+    inspector,
+    *,
+    context: str,
+    required_columns: Mapping[str, frozenset[str]] | None = None,
+) -> None:
+    if required_columns is None:
+        required_columns = _current_required_columns()
+
+    existing_tables = set(inspector.get_table_names())
+    missing_tables = sorted(set(required_columns) - existing_tables)
+    if missing_tables:
+        raise RuntimeError(
+            f"{context} is missing required app tables: {', '.join(missing_tables)}."
+        )
+
+    missing_columns: list[str] = []
+    for table_name, expected_columns in required_columns.items():
+        existing_columns = {
+            str(column["name"])
+            for column in inspector.get_columns(table_name)
+        }
+        missing_columns.extend(
+            f"{table_name}.{column_name}"
+            for column_name in sorted(expected_columns - existing_columns)
+        )
+    if missing_columns:
+        raise RuntimeError(
+            f"{context} is missing required app columns: {', '.join(missing_columns)}."
+        )
 
 
 def _get_alembic_head_revision(database_url: str) -> str:
@@ -53,7 +198,8 @@ def assert_schema_at_head(database_url: str | None = None) -> None:
     try:
         with engine.connect() as connection:
             inspector = inspect(connection)
-            if "alembic_version" not in inspector.get_table_names():
+            existing_tables = set(inspector.get_table_names())
+            if "alembic_version" not in existing_tables:
                 raise RuntimeError(
                     "Database schema is not initialized; run backend/migrate.py before starting the app."
                 )
@@ -67,6 +213,10 @@ def assert_schema_at_head(database_url: str | None = None) -> None:
                     f"({current_revision!r} != {head_revision!r}); "
                     "run backend/migrate.py before starting the app."
                 )
+            _assert_app_schema_present(
+                inspector,
+                context="Database schema at Alembic head",
+            )
     finally:
         engine.dispose()
 
@@ -235,7 +385,9 @@ def run_migrations(database_url: str | None = None) -> None:
             try:
                 inspector = inspect(connection)
                 existing_tables = set(inspector.get_table_names())
-                has_existing_app_schema = bool(existing_tables & _app_table_names())
+                known_app_tables = _app_table_names() | set(BASELINE_REQUIRED_COLUMNS)
+                existing_app_tables = existing_tables & known_app_tables
+                has_existing_app_schema = bool(existing_app_tables)
                 has_version_table = "alembic_version" in existing_tables
 
                 # Alembic and the bootstrap helpers both need a clean transaction
@@ -244,13 +396,40 @@ def run_migrations(database_url: str | None = None) -> None:
                     connection.rollback()
 
                 if has_existing_app_schema and not has_version_table:
+                    missing_legacy_tables = sorted(
+                        set(BASELINE_REQUIRED_COLUMNS) - existing_app_tables
+                    )
+                    if missing_legacy_tables:
+                        raise RuntimeError(
+                            "Partial app schema detected without alembic_version; "
+                            "refusing to stamp it as the complete legacy baseline. "
+                            "Missing tables: "
+                            f"{', '.join(missing_legacy_tables)}."
+                        )
                     print("Existing app schema detected without alembic_version; bootstrapping legacy schema.")
                     _bootstrap_legacy_schema(connection)
+                    _assert_app_schema_present(
+                        inspect(connection),
+                        context="Legacy database schema after bootstrap",
+                        required_columns=BASELINE_REQUIRED_COLUMNS,
+                    )
+                    if connection.in_transaction():
+                        connection.rollback()
                     command.stamp(config, BASELINE_REVISION)
 
                 command.upgrade(config, "head")
+                _assert_app_schema_present(
+                    inspect(connection),
+                    context="Database schema after migration",
+                )
             finally:
                 if locked:
+                    # Schema inspection and failed migration statements can
+                    # leave an implicit transaction open. PostgreSQL advisory
+                    # locks are session-scoped, so clear that transaction
+                    # before beginning the explicit unlock statement.
+                    if connection.in_transaction():
+                        connection.rollback()
                     with connection.begin():
                         connection.execute(
                             text("SELECT pg_advisory_unlock(:lock_key)"),

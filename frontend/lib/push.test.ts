@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { disablePushNotifications, enablePushNotifications } from "./push"
+import {
+  disablePushNotifications,
+  enablePushNotifications,
+  getPushStatus,
+} from "./push"
 
 type MockSubscription = {
   endpoint: string
@@ -55,7 +59,7 @@ function createSubscription(endpoint = "https://push.example/subscription"): Moc
         auth: "auth",
       },
     })),
-    unsubscribe: vi.fn().mockResolvedValue(undefined),
+    unsubscribe: vi.fn().mockResolvedValue(true),
   }
 }
 
@@ -146,5 +150,49 @@ describe("push notifications", () => {
 
     expect(subscription.unsubscribe).toHaveBeenCalledTimes(1)
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("keeps the browser subscription and token when backend deletion fails", async () => {
+    installNotificationPermission("granted")
+    installPushSupport()
+
+    const subscription = createSubscription()
+    const registration = createRegistration(subscription)
+    installServiceWorkerRegistration(registration)
+    localStorage.setItem("pushManageToken", "manage-token")
+    mockFetchSequence({ ok: false, status: 500 })
+
+    await expect(disablePushNotifications()).rejects.toThrow(
+      "Push subscription delete failed: 500"
+    )
+
+    expect(subscription.unsubscribe).not.toHaveBeenCalled()
+    expect(localStorage.getItem("pushManageToken")).toBe("manage-token")
+  })
+
+  it("finishes disabling after backend deletion even if local cleanup fails", async () => {
+    installNotificationPermission("granted")
+    installPushSupport()
+
+    const subscription = createSubscription()
+    subscription.unsubscribe.mockRejectedValue(new Error("browser cleanup failed"))
+    const registration = createRegistration(subscription)
+    installServiceWorkerRegistration(registration)
+    localStorage.setItem("pushManageToken", "manage-token")
+    mockFetchSequence({ ok: true, status: 200 })
+
+    await expect(disablePushNotifications()).resolves.toBeUndefined()
+
+    expect(subscription.unsubscribe).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem("pushManageToken")).toBeNull()
+    expect(localStorage.getItem("pushDisableCleanupPending")).toBe("true")
+
+    subscription.unsubscribe.mockResolvedValue(true)
+    await expect(getPushStatus()).resolves.toEqual({
+      supported: true,
+      subscribed: false,
+    })
+    expect(subscription.unsubscribe).toHaveBeenCalledTimes(2)
+    expect(localStorage.getItem("pushDisableCleanupPending")).toBeNull()
   })
 })

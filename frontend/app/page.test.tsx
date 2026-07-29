@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import Page from "./page"
+import * as pushSubscriptionHook from "@/hooks/usePushSubscription"
 import * as api from "@/lib/api"
 import * as localStorageApi from "@/lib/local-storage"
 
@@ -22,6 +23,8 @@ vi.mock("@/hooks/usePushSubscription", () => ({
     activePushScopeNames: [],
     isPushScopeEnabled: vi.fn(() => false),
     pushError: null,
+    pushScopeSelectionError: null,
+    pushScopeSyncError: null,
     pushSubscribed: false,
     togglePushScope: vi.fn(),
     togglePushSubscription: vi.fn(),
@@ -39,6 +42,7 @@ vi.mock("@/lib/local-storage", async (importOriginal) => {
 
 const mockedApi = vi.mocked(api)
 const mockedLocalStorage = vi.mocked(localStorageApi)
+const mockedPushSubscriptionHook = vi.mocked(pushSubscriptionHook)
 
 function makeNewsItem({
   id,
@@ -124,7 +128,7 @@ function matchNewsIdsForReadQuery(params: {
     }
 
     if (params.q) {
-      const haystack = [item.title, item.summary, item.source, item.provider, ...item.tickers]
+      const haystack = [item.title, ...item.tickers]
         .join(" ")
         .toLowerCase()
       if (!haystack.includes(params.q.toLowerCase())) {
@@ -143,6 +147,19 @@ describe("Page refresh requests", () => {
     cleanup()
     localStorage.clear()
     vi.clearAllMocks()
+
+    mockedPushSubscriptionHook.usePushSubscription.mockReturnValue({
+      alertIncludeAllNews: true,
+      activePushScopeCount: 0,
+      activePushScopeNames: [],
+      isPushScopeEnabled: vi.fn(() => false),
+      pushError: null,
+      pushScopeSelectionError: null,
+      pushScopeSyncError: null,
+      pushSubscribed: false,
+      togglePushScope: vi.fn(),
+      togglePushSubscription: vi.fn(),
+    })
 
     mockedApi.fetchTickers.mockResolvedValue({
       items: [
@@ -195,6 +212,73 @@ describe("Page refresh requests", () => {
     fireEvent.click(screen.getByTitle("Refresh Data"))
 
     await waitFor(() => expect(mockedApi.fetchNews).toHaveBeenCalledTimes(2))
+  })
+
+  it("shows a push scope synchronization failure while push remains enabled", async () => {
+    mockedPushSubscriptionHook.usePushSubscription.mockReturnValue({
+      alertIncludeAllNews: true,
+      activePushScopeCount: 1,
+      activePushScopeNames: ["All News"],
+      isPushScopeEnabled: vi.fn(() => true),
+      pushError: null,
+      pushScopeSelectionError: null,
+      pushScopeSyncError: "Failed to sync push notification scopes: server rejected the update",
+      pushSubscribed: true,
+      togglePushScope: vi.fn(),
+      togglePushSubscription: vi.fn(),
+    })
+
+    render(<Page />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Failed to sync push notification scopes: server rejected the update"
+    )
+    expect(screen.getByRole("button", { name: "Push On" })).toBeInTheDocument()
+  })
+
+  it("clears the prior feed and cursor when a new query fails", async () => {
+    mockedApi.fetchNews
+      .mockResolvedValueOnce({
+        items: [
+          makeNewsItem({
+            id: 151,
+            readKey: "old-query-key",
+            title: "Old query article",
+            source: "Example",
+            provider: "Business Wire",
+            tickers: ["GOF"],
+          }),
+        ],
+        next_cursor: "old-query-cursor",
+        meta: {
+          count: 1,
+          limit: 40,
+          sort: "latest",
+        },
+        global_summary: {
+          total: 1,
+          tracked_ids: [151],
+          tracked_read_keys: ["old-query-key"],
+          tracked_limit: 100,
+        },
+      })
+      .mockRejectedValueOnce(new Error("new query failed"))
+
+    render(<Page />)
+
+    expect(await screen.findByRole("link", { name: "Old query article" })).toBeInTheDocument()
+
+    fireEvent.change(screen.getAllByRole("combobox")[1], {
+      target: { value: "Yahoo Finance" },
+    })
+
+    expect(await screen.findByText("Error: new query failed")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Old query article" })).not.toBeInTheDocument()
+
+    const loadMoreButton = screen.getByRole("button", { name: "End of results" })
+    expect(loadMoreButton).toBeDisabled()
+    fireEvent.click(loadMoreButton)
+    expect(mockedApi.fetchNews).toHaveBeenCalledTimes(2)
   })
 
   it("does not mark a row read when only expanding its summary", async () => {
@@ -855,6 +939,79 @@ describe("Page refresh requests", () => {
     expect(screen.getByRole("link", { name: "GOF mapped Yahoo update" }).closest("article")).toHaveClass("read")
     expect(screen.getByRole("link", { name: "Business Wire general update" }).closest("article")).toHaveClass("read")
     expect(screen.getByRole("link", { name: "PRN general update" }).closest("article")).toHaveClass("unread")
+  })
+
+  it("matches watchlist queries against titles and tickers only", async () => {
+    localStorage.setItem(
+      "customWatchlists",
+      JSON.stringify([
+        {
+          id: "query-watchlist",
+          name: "Query Watchlist",
+          q: "rights offering",
+          tickers: [],
+        },
+      ])
+    )
+    mockedApi.fetchNews.mockResolvedValue({
+      items: [
+        makeNewsItem({
+          id: 551,
+          readKey: "key-provider-only",
+          title: "Quarterly distribution update",
+          source: "Rights Offering Desk",
+          provider: "Rights Offering",
+          summary: "Rights offering background",
+          tickers: ["GOF"],
+        }),
+        makeNewsItem({
+          id: 552,
+          readKey: "key-title-match",
+          title: "Fund announces rights offering",
+          source: "Example",
+          provider: "Yahoo Finance",
+          tickers: ["UTF"],
+        }),
+      ],
+      next_cursor: null,
+      meta: {
+        count: 2,
+        limit: 40,
+        sort: "latest",
+      },
+      global_summary: {
+        total: 2,
+        tracked_ids: [551, 552],
+        tracked_read_keys: ["key-provider-only", "key-title-match"],
+        tracked_limit: 100,
+      },
+    })
+    mockedApi.fetchNewsIds.mockRejectedValue(new Error("ids unavailable"))
+
+    render(<Page />)
+
+    const watchlistLabel = await screen.findByText("Query Watchlist")
+    const watchlistRow = watchlistLabel.closest(".watchlist-item")
+    expect(watchlistRow).not.toBeNull()
+    expect(watchlistRow?.querySelector(".unread-badge")).toHaveTextContent("1")
+
+    fireEvent.contextMenu(watchlistLabel)
+    await waitFor(() => expect(screen.getByText("Mark All Items as Read")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("Mark All Items as Read"))
+
+    await waitFor(() =>
+      expect(mockedApi.fetchNewsIds).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          q: "rights offering",
+          limit: 1000,
+        })
+      )
+    )
+
+    expect(screen.getByRole("link", { name: "Quarterly distribution update" }).closest("article"))
+      .toHaveClass("unread")
+    expect(screen.getByRole("link", { name: "Fund announces rights offering" }).closest("article"))
+      .toHaveClass("read")
   })
 
   it("can create a provider/query-only watchlist from the sidebar form", async () => {

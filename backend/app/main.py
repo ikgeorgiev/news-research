@@ -115,7 +115,20 @@ async def metrics_middleware(request: Request, call_next):
     finally:
         duration_seconds = time.perf_counter() - started_at
         route = request.scope.get("route")
-        path_template = getattr(route, "path", request.url.path)
+        # A request that does not match a route has no stable path template.
+        # Never use the raw URL here: arbitrary 404 paths would otherwise create
+        # an unbounded number of persistent Prometheus label combinations.
+        fastapi_scope = request.scope.get("fastapi")
+        effective_route = (
+            fastapi_scope.get("effective_route_context")
+            if isinstance(fastapi_scope, dict)
+            else None
+        )
+        path_template = (
+            getattr(effective_route, "path", None)
+            or getattr(route, "path", None)
+            or "__unmatched__"
+        )
         observe_http_request(request.method, path_template, status_code, duration_seconds)
 
 

@@ -6,15 +6,23 @@ from types import SimpleNamespace
 import tempfile
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.database import Base, get_db
 from app.ingestion import _run_push_alerts, run_ingestion_cycle
-from app.routes.push import delete_push_subscription, get_push_vapid_key, upsert_push_subscription
+from app.routes.push import (
+    delete_push_subscription,
+    get_push_vapid_key,
+    push_router,
+    upsert_push_subscription,
+)
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.push_alerts import (
     PushAlertDispatcher,
@@ -24,11 +32,22 @@ from app.push_alerts import (
     push_dispatcher_is_active,
 )
 from app.schemas import (
+    MAX_PUSH_ENDPOINT_LENGTH,
+    MAX_PUSH_KEY_LENGTH,
+    MAX_PUSH_MANAGE_TOKEN_LENGTH,
+    MAX_PUSH_PROVIDER_LENGTH,
+    MAX_PUSH_QUERY_LENGTH,
+    MAX_PUSH_TICKER_LENGTH,
+    MAX_PUSH_TICKERS_PER_WATCHLIST,
+    MAX_PUSH_WATCHLIST_ID_LENGTH,
+    MAX_PUSH_WATCHLIST_NAME_LENGTH,
+    MAX_PUSH_WATCHLISTS,
     PushAlertScopes,
     PushDeleteRequest,
     PushSubscriptionKeys,
     PushSubscriptionPayload,
     PushUpsertRequest,
+    PushWatchlistScope,
 )
 from app.sources import FeedDef, SourceFeed
 from app.utils import sha256_str
@@ -83,6 +102,215 @@ def _push_payload(*, endpoint: str, manage_token: str | None = None) -> PushUpse
     )
 
 
+def _valid_subscription_payload(
+    *,
+    endpoint: str = "https://fcm.googleapis.com/subscription",
+    p256dh: str = "p256dh-key",
+    auth: str = "auth-key",
+) -> PushSubscriptionPayload:
+    return PushSubscriptionPayload(
+        endpoint=endpoint,
+        expiration_time=None,
+        keys=PushSubscriptionKeys(p256dh=p256dh, auth=auth),
+    )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://fcm.googleapis.com/subscription",
+        "https://user:password@fcm.googleapis.com/subscription",
+        "https://localhost/subscription",
+        "https://127.0.0.1/subscription",
+        "https://10.0.0.1/subscription",
+        "https://169.254.169.254/latest/meta-data",
+        "https://240.0.0.1/subscription",
+        "https://[::1]/subscription",
+        "https://[fe80::1]/subscription",
+        "https://%31%32%37.0.0.1/subscription",
+        "https://2130706433/subscription",
+        "https://0177.0.0.1/subscription",
+        "https://0x7f.0.0.1/subscription",
+        "https://127.1/subscription",
+        "https://127.0.0.1.nip.io/subscription",
+        "https://attacker.example/subscription",
+    ],
+)
+def test_push_subscription_payload_rejects_unsafe_endpoints(endpoint: str):
+    with pytest.raises(ValidationError):
+        _valid_subscription_payload(endpoint=endpoint)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://fcm.googleapis.com/fcm/send/token",
+        "https://android.googleapis.com/gcm/send/token",
+        "https://updates.push.services.mozilla.com/wpush/v2/token",
+        "https://updates-push.services.mozaws.net/wpush/v2/token",
+        "https://web.push.apple.com/token",
+        "https://wns2-sg2p.notify.windows.com/w/?token=value",
+    ],
+)
+def test_push_subscription_payload_accepts_supported_push_services(endpoint: str):
+    assert _valid_subscription_payload(endpoint=endpoint).endpoint == endpoint
+
+
+@pytest.mark.parametrize(
+    "build_invalid_model",
+    [
+        pytest.param(
+            lambda: _valid_subscription_payload(
+                endpoint="https://fcm.googleapis.com/" + ("x" * MAX_PUSH_ENDPOINT_LENGTH)
+            ),
+            id="endpoint",
+        ),
+        pytest.param(
+            lambda: _valid_subscription_payload(
+                p256dh="x" * (MAX_PUSH_KEY_LENGTH + 1)
+            ),
+            id="p256dh",
+        ),
+        pytest.param(
+            lambda: _valid_subscription_payload(
+                auth="x" * (MAX_PUSH_KEY_LENGTH + 1)
+            ),
+            id="auth",
+        ),
+        pytest.param(
+            lambda: PushUpsertRequest(
+                subscription=_valid_subscription_payload(),
+                scopes=PushAlertScopes(),
+                manage_token="x" * (MAX_PUSH_MANAGE_TOKEN_LENGTH + 1),
+            ),
+            id="manage-token",
+        ),
+        pytest.param(
+            lambda: PushWatchlistScope(
+                id="x" * (MAX_PUSH_WATCHLIST_ID_LENGTH + 1)
+            ),
+            id="watchlist-id",
+        ),
+        pytest.param(
+            lambda: PushWatchlistScope(
+                id="watchlist",
+                name="x" * (MAX_PUSH_WATCHLIST_NAME_LENGTH + 1),
+            ),
+            id="watchlist-name",
+        ),
+        pytest.param(
+            lambda: PushWatchlistScope(
+                id="watchlist",
+                provider="x" * (MAX_PUSH_PROVIDER_LENGTH + 1),
+            ),
+            id="provider",
+        ),
+        pytest.param(
+            lambda: PushWatchlistScope(
+                id="watchlist",
+                q="x" * (MAX_PUSH_QUERY_LENGTH + 1),
+            ),
+            id="query",
+        ),
+        pytest.param(
+            lambda: PushWatchlistScope(
+                id="watchlist",
+                tickers=["x" * (MAX_PUSH_TICKER_LENGTH + 1)],
+            ),
+            id="ticker-symbol",
+        ),
+    ],
+)
+def test_push_registration_models_reject_oversized_strings(build_invalid_model):
+    with pytest.raises(ValidationError):
+        build_invalid_model()
+
+
+def test_push_registration_models_reject_oversized_scope_lists():
+    with pytest.raises(ValidationError):
+        PushAlertScopes(
+            watchlists=[
+                PushWatchlistScope(id=f"watchlist-{index}")
+                for index in range(MAX_PUSH_WATCHLISTS + 1)
+            ]
+        )
+
+    with pytest.raises(ValidationError):
+        PushWatchlistScope(
+            id="watchlist",
+            tickers=["GOF"] * (MAX_PUSH_TICKERS_PER_WATCHLIST + 1),
+        )
+
+
+def test_push_subscription_route_rejects_invalid_payloads_and_accepts_normal_one(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(autoflush=False, autocommit=False, bind=engine)()
+    test_app = FastAPI()
+    test_app.include_router(push_router)
+    test_app.dependency_overrides[get_db] = lambda: db
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
+
+    base_payload = {
+        "subscription": {
+            "endpoint": "https://fcm.googleapis.com/route-valid",
+            "expiration_time": None,
+            "keys": {"p256dh": "p256dh-key", "auth": "auth-key"},
+        },
+        "scopes": {"include_all_news": True, "watchlists": []},
+        "manage_token": None,
+    }
+
+    try:
+        with TestClient(test_app) as client:
+            unsafe_payload = {
+                **base_payload,
+                "subscription": {
+                    **base_payload["subscription"],
+                    "endpoint": "https://127.0.0.1/internal",
+                },
+            }
+            assert (
+                client.put("/push/subscription", json=unsafe_payload).status_code
+                == 422
+            )
+
+            oversized_payload = {
+                **base_payload,
+                "scopes": {
+                    "include_all_news": False,
+                    "watchlists": [
+                        {"id": f"watchlist-{index}"}
+                        for index in range(MAX_PUSH_WATCHLISTS + 1)
+                    ],
+                },
+            }
+            assert (
+                client.put("/push/subscription", json=oversized_payload).status_code
+                == 422
+            )
+
+            response = client.put("/push/subscription", json=base_payload)
+
+        assert response.status_code == 200
+        assert response.json()["created"] is True
+        stored = db.scalar(
+            select(PushSubscription).where(
+                PushSubscription.endpoint == "https://fcm.googleapis.com/route-valid"
+            )
+        )
+        assert stored is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_get_push_vapid_key_disabled_when_not_configured(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: False)
     response = get_push_vapid_key()
@@ -97,7 +325,7 @@ def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Se
     monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
     created = upsert_push_subscription(
-        _push_payload(endpoint="https://push.example/sub-a"),
+        _push_payload(endpoint="https://fcm.googleapis.com/sub-a"),
         db=db,
     )
     assert created.created is True
@@ -106,14 +334,14 @@ def test_upsert_push_subscription_seeds_and_requires_manage_token(db_session: Se
 
     with pytest.raises(HTTPException) as exc:
         upsert_push_subscription(
-            _push_payload(endpoint="https://push.example/sub-a"),
+            _push_payload(endpoint="https://fcm.googleapis.com/sub-a"),
             db=db,
         )
     assert exc.value.status_code == 401
 
     updated = upsert_push_subscription(
         _push_payload(
-            endpoint="https://push.example/sub-a",
+            endpoint="https://fcm.googleapis.com/sub-a",
             manage_token=created.manage_token,
         ),
         db=db,
@@ -128,7 +356,7 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
     monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
     created = upsert_push_subscription(
-        _push_payload(endpoint="https://push.example/sub-delete"),
+        _push_payload(endpoint="https://fcm.googleapis.com/sub-delete"),
         db=db,
     )
     assert created.manage_token is not None
@@ -136,7 +364,7 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
     with pytest.raises(HTTPException) as exc:
         delete_push_subscription(
             PushDeleteRequest(
-                endpoint="https://push.example/sub-delete",
+                endpoint="https://fcm.googleapis.com/sub-delete",
                 manage_token="wrong-token",
             ),
             db=db,
@@ -145,7 +373,7 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
 
     response = delete_push_subscription(
         PushDeleteRequest(
-            endpoint="https://push.example/sub-delete",
+            endpoint="https://fcm.googleapis.com/sub-delete",
             manage_token=created.manage_token,
         ),
         db=db,
@@ -157,7 +385,7 @@ def test_delete_push_subscription_requires_valid_manage_token(db_session: Sessio
 def test_delete_push_subscription_works_when_push_runtime_is_disabled(db_session: Session, monkeypatch: pytest.MonkeyPatch):
     db = db_session
     sub = PushSubscription(
-        endpoint="https://push.example/sub-disabled-delete",
+        endpoint="https://fcm.googleapis.com/sub-disabled-delete",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -173,7 +401,7 @@ def test_delete_push_subscription_works_when_push_runtime_is_disabled(db_session
 
     response = delete_push_subscription(
         PushDeleteRequest(
-            endpoint="https://push.example/sub-disabled-delete",
+            endpoint="https://fcm.googleapis.com/sub-disabled-delete",
             manage_token="disabled-token",
         ),
         db=db,
@@ -203,7 +431,7 @@ def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
                     conflict_db = session_factory()
                     conflict_db.add(
                         PushSubscription(
-                            endpoint="https://push.example/sub-race",
+                            endpoint="https://fcm.googleapis.com/sub-race",
                             key_p256dh="existing-p256dh",
                             key_auth="existing-auth",
                             expiration_time=None,
@@ -221,12 +449,12 @@ def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
             monkeypatch.setattr(db, "commit", commit_with_conflict)
 
             response = upsert_push_subscription(
-                _push_payload(endpoint="https://push.example/sub-race"),
+                _push_payload(endpoint="https://fcm.googleapis.com/sub-race"),
                 db=db,
             )
 
             subscription = db.scalar(
-                select(PushSubscription).where(PushSubscription.endpoint == "https://push.example/sub-race")
+                select(PushSubscription).where(PushSubscription.endpoint == "https://fcm.googleapis.com/sub-race")
             )
 
             assert response.created is False
@@ -246,7 +474,7 @@ def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session
     second = _seed_article_with_ticker(db, slug="push-gone-2")
 
     sub = PushSubscription(
-        endpoint="https://push.example/sub-gone",
+        endpoint="https://fcm.googleapis.com/sub-gone",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -278,6 +506,62 @@ def test_check_and_send_alerts_deactivates_gone_subscription(db_session: Session
     assert second.id > first.id
 
 
+def test_check_and_send_alerts_deactivates_unsafe_legacy_endpoint_without_sending(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    db = db_session
+    first = _seed_article_with_ticker(db, slug="push-unsafe-endpoint-1")
+    second = _seed_article_with_ticker(db, slug="push-unsafe-endpoint-2")
+
+    sub = PushSubscription(
+        # Persist directly to simulate a row created before endpoint validation.
+        endpoint="https://127.0.0.1/internal",
+        key_p256dh="p256dh-key",
+        key_auth="auth-key",
+        expiration_time=None,
+        alert_scopes_json={"include_all_news": True, "watchlists": []},
+        last_notified_json={"all": first.id},
+        manage_token_hash=sha256_str("unsafe-endpoint-token"),
+        active=True,
+    )
+    db.add(sub)
+    db.commit()
+
+    sender_calls: list[dict] = []
+
+    def _unexpected_webpush(**kwargs):
+        sender_calls.append(kwargs)
+        pytest.fail("unsafe legacy endpoint reached the push sender")
+
+    monkeypatch.setattr("app.push_alerts.webpush", _unexpected_webpush)
+
+    settings_obj = SimpleNamespace(
+        vapid_public_key="public",
+        vapid_private_key="private",
+        vapid_contact_email="alerts@example.com",
+        push_send_timeout_seconds=10,
+        push_max_per_cycle=25,
+        push_max_consecutive_failures=20,
+    )
+
+    stats = check_and_send_alerts(db, settings_obj)
+    db.refresh(sub)
+
+    assert stats == {
+        "scanned": 1,
+        "sent": 0,
+        "failed": 0,
+        "deactivated": 1,
+    }
+    assert sender_calls == []
+    assert sub.active is False
+    assert sub.failure_count == 1
+    assert sub.last_error is not None
+    assert sub.last_error.startswith("Invalid push subscription endpoint:")
+    assert second.id > first.id
+
+
 def test_check_and_send_alerts_processes_every_subscription_across_batches(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -289,7 +573,7 @@ def test_check_and_send_alerts_processes_every_subscription_across_batches(
     subscriptions: list[PushSubscription] = []
     for idx in range(3):
         sub = PushSubscription(
-            endpoint=f"https://push.example/sub-batch-{idx}",
+            endpoint=f"https://fcm.googleapis.com/sub-batch-{idx}",
             key_p256dh="p256dh-key",
             key_auth="auth-key",
             expiration_time=None,
@@ -341,7 +625,7 @@ def test_check_and_send_alerts_continues_after_mid_scan_deactivation(
     subscriptions: list[PushSubscription] = []
     for idx in range(3):
         sub = PushSubscription(
-            endpoint=f"https://push.example/sub-midscan-{idx}",
+            endpoint=f"https://fcm.googleapis.com/sub-midscan-{idx}",
             key_p256dh="p256dh-key",
             key_auth="auth-key",
             expiration_time=None,
@@ -405,7 +689,7 @@ def test_check_and_send_alerts_defers_new_higher_id_subscriptions_until_next_run
     subscriptions: list[PushSubscription] = []
     for idx in range(2):
         sub = PushSubscription(
-            endpoint=f"https://push.example/sub-snapshot-{idx}",
+            endpoint=f"https://fcm.googleapis.com/sub-snapshot-{idx}",
             key_p256dh="p256dh-key",
             key_auth="auth-key",
             expiration_time=None,
@@ -429,7 +713,7 @@ def test_check_and_send_alerts_defers_new_higher_id_subscriptions_until_next_run
             inserted["done"] = True
             with session_factory() as other_db:
                 new_sub = PushSubscription(
-                    endpoint="https://push.example/sub-snapshot-new",
+                    endpoint="https://fcm.googleapis.com/sub-snapshot-new",
                     key_p256dh="p256dh-key",
                     key_auth="auth-key",
                     expiration_time=None,
@@ -808,7 +1092,7 @@ def test_check_and_send_alerts_does_not_advance_watermark_on_transient_error(db_
     second = _seed_article_with_ticker(db, slug="retry-2")
 
     sub = PushSubscription(
-        endpoint="https://push.example/sub-retry",
+        endpoint="https://fcm.googleapis.com/sub-retry",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -855,7 +1139,7 @@ def test_check_and_send_alerts_advances_each_scope_only_through_delivered_ids(
     seeded_articles = [_seed_article_with_ticker(db, slug=f"backlog-{idx}") for idx in range(6)]
 
     sub = PushSubscription(
-        endpoint="https://push.example/sub-backlog",
+        endpoint="https://fcm.googleapis.com/sub-backlog",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -924,7 +1208,7 @@ def test_check_and_send_alerts_excludes_articles_mapped_only_to_inactive_tickers
     _inactive_only = _seed_article_with_ticker(db, slug="inactive-only", symbol="AAA", active=False)
 
     sub = PushSubscription(
-        endpoint="https://push.example/sub-inactive-only",
+        endpoint="https://fcm.googleapis.com/sub-inactive-only",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -967,7 +1251,7 @@ def test_check_and_send_alerts_deactivates_after_repeated_non_gone_errors(db_ses
     _second = _seed_article_with_ticker(db, slug="repeat-error-2")
 
     sub = PushSubscription(
-        endpoint="https://push.example/sub-repeat-error",
+        endpoint="https://fcm.googleapis.com/sub-repeat-error",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -1014,7 +1298,7 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
     second = _seed_article_with_ticker(db, slug="persist-success-2")
 
     first_sub = PushSubscription(
-        endpoint="https://push.example/sub-persist-1",
+        endpoint="https://fcm.googleapis.com/sub-persist-1",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,
@@ -1024,7 +1308,7 @@ def test_check_and_send_alerts_persists_first_success_when_later_subscription_ab
         active=True,
     )
     second_sub = PushSubscription(
-        endpoint="https://push.example/sub-persist-2",
+        endpoint="https://fcm.googleapis.com/sub-persist-2",
         key_p256dh="p256dh-key",
         key_auth="auth-key",
         expiration_time=None,

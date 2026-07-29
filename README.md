@@ -83,11 +83,12 @@ There is no separate `backend/.env` runtime file anymore.
 Script notes:
 
 - `dev-db.ps1` starts only the `db` service (`docker compose up -d db`).
-- `dev-backend.ps1` uses `backend/.venv`, reads config from the repo root `.env`, overrides the DB/ticker/CORS values needed for local dev, installs deps if key packages are missing (`uvicorn`, `alembic`, `httpx`), and creates the target DB if absent.
+- `dev-backend.ps1` uses `backend/.venv`, resolves DB credentials/name and admin settings from the repo root `.env`, applies its local `-DbHost` / `-DbPort` parameters, overrides the ticker/CORS values needed for local dev, synchronizes exact dependency pins when the environment is missing or stale, and creates the target DB if absent.
 - `dev-backend.ps1` runs `python migrate.py` before starting the API so local schema stays aligned with the app.
 - If a local database already has the pre-Alembic schema, the migration bootstrap stamps it at the baseline revision and then applies future migrations normally.
-- `dev-frontend.ps1` uses `frontend/node_modules` and sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
-- If `ADMIN_API_KEY` is blank in `.env`, `dev-backend.ps1` generates one automatically for that local run.
+- `dev-frontend.ps1` synchronizes missing or stale `frontend/node_modules` with `npm ci` and sets `NEXT_PUBLIC_API_BASE` to `http://127.0.0.1:8001`.
+- `clean-local.ps1` removes generated caches and build output while preserving installed dependencies. Pass `-Dependencies` for a full local dependency reset.
+- If `ADMIN_API_KEY` is blank in `.env`, `dev-backend.ps1` generates an undisclosed temporary key so admin routes stay protected. Set an explicit value before starting when you need to call those routes.
 - You can override ports/host with script params (for example `.\dev-frontend.ps1 -Port 3010`).
 
 ## Secondary Path: Full Docker App Startup
@@ -179,7 +180,7 @@ Grafana auto-loads dashboard:
 - Default scrape target is `host.docker.internal:8001`.
 - If backend is unavailable at those ports, Grafana panels will be empty until a target responds.
 - Prometheus alert rules are loaded from `monitoring/prometheus/alerts.yml` and can be inspected in the Prometheus UI under `Alerts`.
-- The table panel uses a provisioned Postgres datasource (`db:5432`, `cef/cef`, `cef_news`).
+- The table panel uses a provisioned Postgres datasource (`db:5432`) with the configured `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
 
 ## Manual Local Dev (Without Helper Scripts)
 
@@ -276,7 +277,8 @@ Use `include_unmapped_from_provider=Business%20Wire` to include only Business Wi
 `GET /api/v1/tickers?q=` does case-insensitive prefix matching on the ticker symbol.
 
 Admin endpoints require the `X-API-Key` header and `ADMIN_API_KEY` to be configured.
-For local `.\dev-backend.ps1` runs, leaving `ADMIN_API_KEY` blank is fine because the script generates one automatically.
+For local `.\dev-backend.ps1` runs, leaving `ADMIN_API_KEY` blank is fine when you do not need admin endpoints; the script generates an undisclosed temporary key.
+Set an explicit value in `.env` before starting when you need to call admin endpoints.
 For Docker/manual runs, set a stable value in `.env` if you need admin endpoints.
 
 Push endpoints require Web Push configuration in `.env`:
@@ -284,6 +286,9 @@ Push endpoints require Web Push configuration in `.env`:
 - `VAPID_PUBLIC_KEY`
 - `VAPID_PRIVATE_KEY`
 - `VAPID_CONTACT_EMAIL`
+
+For SSRF protection, subscriptions are accepted only for the standard Google,
+Mozilla, Apple, and Windows browser push-service domains.
 
 Generate keys with:
 

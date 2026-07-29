@@ -30,16 +30,27 @@ export async function markReadKeysByQuery({
   pageSize: number
   maxPersistedKeys: number
 }): Promise<void> {
+  if (maxPersistedKeys <= 0) {
+    return
+  }
+
   let cursor: string | undefined
-  const collectedKeys = new Set<string>()
+  const collectedKeys: string[] = []
+  const collectedKeySet = new Set<string>()
   const applyCollectedKeys = (): void => {
-    if (collectedKeys.size === 0) {
+    if (collectedKeys.length === 0) {
       return
     }
 
     setReadKeys((previous) => {
       const next = new Set(previous)
-      for (const key of collectedKeys) {
+      // The API returns newest articles first. Insert the collected keys in
+      // reverse order so trimSet keeps the newest keys at the end of the Set.
+      for (let index = collectedKeys.length - 1; index >= 0; index -= 1) {
+        const key = collectedKeys[index]
+        // Re-adding an existing key does not change Set insertion order.
+        // Delete it first so a newly marked key receives the correct priority.
+        next.delete(key)
         next.add(key)
       }
       return trimSet(next, maxPersistedKeys)
@@ -53,7 +64,15 @@ export async function markReadKeysByQuery({
         cursor,
       }))
       for (const key of data.read_keys) {
-        collectedKeys.add(key)
+        if (collectedKeySet.has(key)) continue
+        collectedKeySet.add(key)
+        collectedKeys.push(key)
+        if (collectedKeys.length >= maxPersistedKeys) {
+          break
+        }
+      }
+      if (collectedKeys.length >= maxPersistedKeys) {
+        break
       }
       if (!data.next_cursor || data.ids.length === 0) {
         break

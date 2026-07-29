@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { buildNewsRequestParams, fetchNews, fetchTickers, type NewsFilterParams } from "@/lib/api"
 import { buildApiUrl } from "@/lib/api-base"
@@ -53,7 +53,7 @@ export function useNewsFeed({
   const itemsRef = useRef<NewsItem[]>([])
   const pendingNewItemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
-  const lastAutoRefreshAtRef = useRef(0)
+  const lastRefreshAtRef = useRef<number | null>(null)
   const backgroundRefreshErrorLoggedRef = useRef(false)
 
   useEffect(() => {
@@ -83,10 +83,23 @@ export function useNewsFeed({
     return buildNewsRequestParams(filters, overrides)
   }
 
-  const triggerRefresh = (reason: "auto" | "manual") => {
+  const triggerRefresh = useCallback((reason: "auto" | "manual") => {
+    const now = Date.now()
+    const lastRefreshAt = lastRefreshAtRef.current
+    if (
+      reason === "auto"
+      && lastRefreshAt !== null
+      && now - lastRefreshAt < AUTO_REFRESH_DEDUPE_MS
+    ) {
+      return
+    }
+
+    // Manual refreshes always run immediately, but reset the gate so a nearby
+    // automatic event does not start a duplicate fetch.
+    lastRefreshAtRef.current = now
     refreshReasonRef.current = reason
     setRefreshTick((previous) => previous + 1)
-  }
+  }, [])
   const sseUrl = buildApiUrl("/api/v1/events/news")
 
   useEffect(() => {
@@ -118,14 +131,7 @@ export function useNewsFeed({
 
     let timer: ReturnType<typeof setInterval> | null = null
 
-    const refreshNow = () => {
-      const now = Date.now()
-      if (now - lastAutoRefreshAtRef.current < AUTO_REFRESH_DEDUPE_MS) {
-        return
-      }
-      lastAutoRefreshAtRef.current = now
-      triggerRefresh("auto")
-    }
+    const refreshNow = () => triggerRefresh("auto")
 
     const startTimer = () => {
       if (timer !== null) return
@@ -163,7 +169,7 @@ export function useNewsFeed({
       document.removeEventListener("visibilitychange", onVisibilityChange)
       window.removeEventListener("focus", onWindowFocus)
     }
-  }, [runtimeReady, sseConnected])
+  }, [runtimeReady, sseConnected, triggerRefresh])
 
   useEffect(() => {
     if (!runtimeReady) return
@@ -179,9 +185,7 @@ export function useNewsFeed({
       }
 
       if (payload.type === "push-notification") {
-        const feedEl = feedContainerRef.current
-        const scrolledDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
-        triggerRefresh(scrolledDeep ? "auto" : "manual")
+        triggerRefresh("auto")
       }
     }
 
@@ -189,7 +193,7 @@ export function useNewsFeed({
     return () => {
       navigator.serviceWorker.removeEventListener("message", onMessage)
     }
-  }, [runtimeReady])
+  }, [runtimeReady, triggerRefresh])
 
   useEffect(() => {
     const queryKey = JSON.stringify({
@@ -247,7 +251,11 @@ export function useNewsFeed({
     }
 
     if (!sameQueryAsPrevious) {
+      itemsRef.current = []
+      pendingNewItemsRef.current = []
+      setItems([])
       setPendingNewItems([])
+      setNextCursor(null)
     }
 
     lastQueryKeyRef.current = queryKey

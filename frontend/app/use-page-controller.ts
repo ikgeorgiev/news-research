@@ -8,6 +8,7 @@ import { Watchlist } from "@/lib/types"
 import {
   buildWatchlistQueryParams,
   GENERAL_NEWS_PROVIDER,
+  newsItemMatchesQuery,
   STATIC_PROVIDER_OPTIONS,
 } from "./page-helpers"
 import { useFeedPreferences } from "./use-feed-preferences"
@@ -107,7 +108,7 @@ function buildMarkAllReadQueryParams({
 }
 
 function markAllReadMatchesItem(
-  item: { provider: string; summary: string | null; source: string; tickers: string[]; title: string },
+  item: { provider: string; tickers: string[]; title: string },
   params: MarkAllReadQueryParams
 ): boolean {
   // Best-effort fallback for API failures; keep this aligned with backend read-query filtering.
@@ -133,15 +134,8 @@ function markAllReadMatchesItem(
     }
   }
 
-  if (params.q) {
-    const queryText = params.q.trim().toLowerCase()
-    const haystack = [item.title, item.summary, item.source, item.provider, ...(item.tickers || [])]
-      .filter((v): v is string => typeof v === "string" && v.length > 0)
-      .join(" ")
-      .toLowerCase()
-    if (!haystack.includes(queryText)) {
-      return false
-    }
+  if (params.q && !newsItemMatchesQuery(item, params.q)) {
+    return false
   }
 
   return true

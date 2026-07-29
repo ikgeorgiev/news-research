@@ -21,6 +21,8 @@ vi.mock("@/hooks/usePushSubscription", () => ({
     activePushScopeNames: [],
     isPushScopeEnabled: vi.fn(() => false),
     pushError: null,
+    pushScopeSelectionError: null,
+    pushScopeSyncError: null,
     pushSubscribed: false,
     togglePushScope: vi.fn(),
     togglePushSubscription: vi.fn(),

@@ -4,7 +4,6 @@ import asyncio
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-import uuid
 
 from alembic import command
 from alembic.config import Config
@@ -166,6 +165,52 @@ def test_assert_schema_at_head_refuses_stale_postgresql_schema(monkeypatch):
     assert engine.disposed is True
 
 
+def test_assert_schema_at_head_refuses_missing_app_tables(monkeypatch):
+    connection = _SchemaCheckConnection(revision="20260421_0001")
+    engine = _SchemaCheckEngine(connection)
+    inspector = SimpleNamespace(get_table_names=lambda: ["alembic_version", "articles"])
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "_get_alembic_head_revision", lambda _url: "20260421_0001")
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+
+    with pytest.raises(RuntimeError, match="missing required app tables"):
+        migrate.assert_schema_at_head("postgresql+psycopg://example/db")
+
+    assert engine.disposed is True
+
+
+def test_assert_schema_at_head_refuses_missing_app_columns(monkeypatch):
+    connection = _SchemaCheckConnection(revision="20260421_0001")
+    engine = _SchemaCheckEngine(connection)
+    inspector = SimpleNamespace(
+        get_table_names=lambda: [
+            "alembic_version",
+            *database.Base.metadata.tables.keys(),
+        ],
+        get_columns=lambda table_name: [
+            {"name": column_name}
+            for column_name in database.Base.metadata.tables[table_name].columns.keys()
+            if not (
+                table_name == "push_subscriptions"
+                and column_name == "key_auth"
+            )
+        ],
+    )
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "_get_alembic_head_revision", lambda _url: "20260421_0001")
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"missing required app columns: push_subscriptions\.key_auth",
+    ):
+        migrate.assert_schema_at_head("postgresql+psycopg://example/db")
+
+    assert engine.disposed is True
+
+
 def test_startup_warns_when_ingestion_workers_exceed_pool_capacity(caplog):
     settings = SimpleNamespace(
         database_pool_size=2,
@@ -224,6 +269,7 @@ def test_run_migrations_uses_postgresql_advisory_lock_around_upgrade(monkeypatch
 
     monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
     monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(migrate, "_assert_app_schema_present", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         migrate.command,
         "upgrade",
@@ -248,6 +294,93 @@ def test_run_migrations_uses_postgresql_advisory_lock_around_upgrade(monkeypatch
     assert engine.disposed is True
 
 
+def test_run_migrations_rolls_back_implicit_transactions_before_unlock(monkeypatch):
+    events: list[object] = []
+    connection = _RecordingConnection("postgresql", events)
+    connection.in_transaction = lambda: True
+    connection.rollback = lambda: events.append("rollback")
+    engine = _RecordingEngine(connection)
+    inspector = SimpleNamespace(get_table_names=lambda: [])
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(migrate, "_assert_app_schema_present", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migrate.command,
+        "upgrade",
+        lambda _config, revision: events.append(("upgrade", revision)),
+    )
+    monkeypatch.setattr(
+        migrate,
+        "get_settings",
+        lambda: SimpleNamespace(migration_advisory_lock_key=987654321),
+    )
+
+    run_migrations(database_url="postgresql+psycopg://example/db")
+
+    assert events == [
+        "lock",
+        "rollback",
+        ("upgrade", "head"),
+        "rollback",
+        "unlock",
+    ]
+
+
+def test_run_migrations_validates_legacy_snapshot_before_future_upgrade(monkeypatch):
+    events: list[object] = []
+    state = {"upgraded": False}
+    connection = _RecordingConnection("sqlite", events)
+    engine = _RecordingEngine(connection)
+
+    current_required_columns = dict(migrate.BASELINE_REQUIRED_COLUMNS)
+    current_required_columns["articles"] = (
+        current_required_columns["articles"] | {"future_migration_column"}
+    )
+
+    inspector = SimpleNamespace(
+        get_table_names=lambda: list(migrate.BASELINE_REQUIRED_COLUMNS),
+        get_columns=lambda table_name: [
+            {"name": column_name}
+            for column_name in (
+                migrate.BASELINE_REQUIRED_COLUMNS[table_name]
+                | (
+                    {"future_migration_column"}
+                    if state["upgraded"] and table_name == "articles"
+                    else set()
+                )
+            )
+        ],
+    )
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(migrate, "_bootstrap_legacy_schema", lambda _connection: None)
+    monkeypatch.setattr(
+        migrate,
+        "_current_required_columns",
+        lambda: current_required_columns,
+    )
+    monkeypatch.setattr(
+        migrate.command,
+        "stamp",
+        lambda _config, revision: events.append(("stamp", revision)),
+    )
+
+    def upgrade(_config, revision):
+        events.append(("upgrade", revision))
+        state["upgraded"] = True
+
+    monkeypatch.setattr(migrate.command, "upgrade", upgrade)
+
+    run_migrations(database_url="sqlite:///:memory:")
+
+    assert events == [
+        ("stamp", migrate.BASELINE_REVISION),
+        ("upgrade", "head"),
+    ]
+
+
 def test_run_migrations_skips_advisory_lock_for_sqlite(monkeypatch):
     events: list[object] = []
     connection = _RecordingConnection("sqlite", events)
@@ -259,6 +392,7 @@ def test_run_migrations_skips_advisory_lock_for_sqlite(monkeypatch):
 
     monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
     monkeypatch.setattr(migrate, "inspect", lambda _connection: inspector)
+    monkeypatch.setattr(migrate, "_assert_app_schema_present", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         migrate.command,
         "upgrade",
@@ -274,10 +408,8 @@ def test_run_migrations_skips_advisory_lock_for_sqlite(monkeypatch):
     assert engine.disposed is True
 
 
-def test_alembic_upgrade_head_creates_expected_schema():
-    temp_dir = Path("backend/tests/.tmp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    db_path = temp_dir / f"alembic-schema-{uuid.uuid4().hex}.db"
+def test_alembic_upgrade_head_creates_expected_schema(scratch_dir: Path):
+    db_path = scratch_dir / "alembic-schema.db"
     database_url = f"sqlite:///{db_path.as_posix()}"
 
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
@@ -317,10 +449,42 @@ def test_alembic_upgrade_head_creates_expected_schema():
             db_path.unlink()
 
 
-def test_run_migrations_bootstraps_legacy_schema_before_stamping():
-    temp_dir = Path("backend/tests/.tmp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    db_path = temp_dir / f"alembic-legacy-{uuid.uuid4().hex}.db"
+def test_legacy_schema_snapshot_matches_alembic_baseline_revision(
+    scratch_dir: Path,
+):
+    db_path = scratch_dir / "alembic-baseline.db"
+    database_url = f"sqlite:///{db_path.as_posix()}"
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    config.set_main_option(
+        "script_location",
+        str(Path(__file__).resolve().parents[1] / "alembic"),
+    )
+    config.attributes["database_url"] = database_url
+
+    try:
+        command.upgrade(config, migrate.BASELINE_REVISION)
+        engine = create_engine(database_url)
+        try:
+            inspector = inspect(engine)
+            assert set(migrate.BASELINE_REQUIRED_COLUMNS) == (
+                set(inspector.get_table_names()) - {"alembic_version"}
+            )
+            for table_name, expected_columns in migrate.BASELINE_REQUIRED_COLUMNS.items():
+                assert expected_columns == frozenset(
+                    str(column["name"])
+                    for column in inspector.get_columns(table_name)
+                )
+        finally:
+            engine.dispose()
+    finally:
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_run_migrations_bootstraps_legacy_schema_before_stamping(
+    scratch_dir: Path,
+):
+    db_path = scratch_dir / "alembic-legacy.db"
     database_url = f"sqlite:///{db_path.as_posix()}"
 
     engine = create_engine(database_url)
@@ -411,6 +575,24 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping():
                     """
                 )
             )
+            # The real pre-Alembic database contained the complete application
+            # topology. Keep unrelated tables current in this focused fixture
+            # while the three tables above exercise legacy column patching.
+            # Migration 0002 must remain responsible for its unique indexes.
+            for table_name in (
+                "feed_poll_state",
+                "push_subscriptions",
+                "sources",
+                "ingestion_runs",
+                "raw_feed_items",
+            ):
+                database.Base.metadata.tables[table_name].create(connection)
+            for index_name in (
+                "uq_raw_feed_items_source_guid_nn",
+                "uq_raw_feed_items_source_link_pub_date_nn",
+                "uq_raw_feed_items_source_link_guidless_undated",
+            ):
+                connection.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
 
         run_migrations(database_url=database_url)
 
@@ -419,7 +601,17 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping():
         ticker_columns = {column["name"] for column in inspector.get_columns("tickers")}
         article_ticker_columns = {column["name"] for column in inspector.get_columns("article_tickers")}
 
-        assert "alembic_version" in inspector.get_table_names()
+        assert set(inspector.get_table_names()) == {
+            "alembic_version",
+            "article_tickers",
+            "articles",
+            "feed_poll_state",
+            "ingestion_runs",
+            "push_subscriptions",
+            "raw_feed_items",
+            "sources",
+            "tickers",
+        }
         assert {"first_seen_at", "first_alert_sent_at"} <= article_columns
         assert "validation_keywords" in ticker_columns
         assert "extraction_version" in article_ticker_columns
@@ -436,10 +628,56 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping():
             db_path.unlink()
 
 
-def test_alembic_sqlite_schema_supports_raw_feed_item_upsert():
-    temp_dir = Path("backend/tests/.tmp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    db_path = temp_dir / f"alembic-upsert-{uuid.uuid4().hex}.db"
+def test_run_migrations_refuses_to_stamp_partial_legacy_schema(
+    scratch_dir: Path,
+):
+    db_path = scratch_dir / "alembic-partial.db"
+    database_url = f"sqlite:///{db_path.as_posix()}"
+
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE articles (id INTEGER PRIMARY KEY)"))
+
+        with pytest.raises(RuntimeError, match="Partial app schema detected"):
+            run_migrations(database_url=database_url)
+
+        assert "alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_run_migrations_refuses_to_stamp_legacy_schema_with_missing_column(
+    scratch_dir: Path,
+):
+    db_path = scratch_dir / "alembic-missing-column.db"
+    database_url = f"sqlite:///{db_path.as_posix()}"
+
+    engine = create_engine(database_url)
+    try:
+        database.Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE push_subscriptions DROP COLUMN key_auth")
+            )
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"missing required app columns: push_subscriptions\.key_auth",
+        ):
+            run_migrations(database_url=database_url)
+
+        assert "alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_alembic_sqlite_schema_supports_raw_feed_item_upsert(scratch_dir: Path):
+    db_path = scratch_dir / "alembic-upsert.db"
     database_url = f"sqlite:///{db_path.as_posix()}"
 
     config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
