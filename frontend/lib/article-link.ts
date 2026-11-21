@@ -17,7 +17,7 @@ export function originalWireLink(value: string): (ArticleLink & { wireKey: strin
     && url.pathname.match(/^\/news\/home\/(\d{12,20})\/([a-z]{2})(?:\/|$)/i)
   if (bw) return { url: url.href, publisher: "Business Wire", original: true, wireKey: `bw:${bw[1]}:${bw[2].toLowerCase()}` }
   const gnw = /^(?:www\.)?globenewswire\.com$/.test(url.hostname)
-    && url.pathname.match(/^\/news-release\/\d{4}\/\d{2}\/\d{2}\/(\d+)\/\d+\/([a-z]{2})\//i)
+    && url.pathname.match(/^\/(?:[a-z]{2}\/)?news-release\/\d{4}\/\d{2}\/\d{2}\/(\d+)\/\d+\/([a-z]{2})(?:\/|$)/i)
   if (gnw) return { url: url.href, publisher: "GlobeNewswire", original: true, wireKey: `gnw:${gnw[1]}:${gnw[2].toLowerCase()}` }
   const prn = /^(?:www\.)?prnewswire\.com$/.test(url.hostname)
     && url.pathname.match(/^\/news-releases\/.+-(\d+)\.html$/i)
@@ -25,14 +25,7 @@ export function originalWireLink(value: string): (ArticleLink & { wireKey: strin
   return null
 }
 
-/** Presentation only: never changes stored source, deduplication identity or arrival times. */
-export function articleLink(item: NewsItem, body?: ArticleBody | null): ArticleLink | null {
-  const direct = originalWireLink(item.url)
-  if (direct) return direct
-  if (body?.article_id === item.id && body.title.trim() === item.title.trim()) {
-    const original = originalWireLink(body.original_url)
-    if (original?.wireKey === body.wire_key) return original
-  }
+function citedWireLink(item: NewsItem) {
   // The validated BW body retains this explicit publisher attribution. Do not
   // infer wire IDs from republisher slugs, Yahoo IDs, titles or related tickers.
   if (["FinancialContent", "Yahoo Finance"].includes(item.provider) || item.source === "Business Wire") {
@@ -41,6 +34,23 @@ export function articleLink(item: NewsItem, body?: ArticleBody | null): ArticleL
     const identities = new Set(citations.map(link => link!.wireKey))
     if (identities.size === 1) return citations[0]!
   }
+  return null
+}
+
+export function itemWireLink(item: NewsItem) {
+  return originalWireLink(item.url) ?? citedWireLink(item)
+}
+
+/** Presentation only: never changes stored source, deduplication identity or arrival times. */
+export function articleLink(item: NewsItem, body?: ArticleBody | null): ArticleLink | null {
+  const direct = originalWireLink(item.url)
+  if (direct) return direct
+  const citation = citedWireLink(item)
+  if (body?.article_id === item.id && body.title.trim() === item.title.trim()) {
+    const original = originalWireLink(body.original_url)
+    if (original?.wireKey === body.wire_key && (!citation || citation.wireKey === body.wire_key)) return original
+  }
+  if (citation) return citation
   const fallback = safeUrl(item.url)
   return fallback ? { url: fallback.href, publisher: item.provider || item.source || fallback.hostname, original: false } : null
 }

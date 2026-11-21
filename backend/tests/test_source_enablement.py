@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
@@ -210,10 +209,8 @@ def test_run_ingestion_cycle_splits_scheduler_maintenance_timeouts(
     assert observed_revalidate_timeouts == [15]
 
 
-def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
-    db_path = Path(__file__).resolve().parent / ".tmp_ingestion_parallel.db"
-    if db_path.exists():
-        db_path.unlink()
+def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch, scratch_dir):
+    db_path = scratch_dir / "ingestion.db"
 
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
@@ -300,16 +297,12 @@ def test_run_ingestion_cycle_parallel_mode_serializes_per_source(monkeypatch):
     finally:
         db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()
 
 
 def test_run_ingestion_cycle_parallel_mode_allows_yahoo_concurrency_when_enabled(
-    monkeypatch,
+    monkeypatch, scratch_dir,
 ):
-    db_path = Path(__file__).resolve().parent / ".tmp_ingestion_parallel_yahoo.db"
-    if db_path.exists():
-        db_path.unlink()
+    db_path = scratch_dir / "ingestion.db"
 
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
@@ -395,8 +388,6 @@ def test_run_ingestion_cycle_parallel_mode_allows_yahoo_concurrency_when_enabled
     finally:
         db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()
 
 
 def test_wire_feed_starts_while_first_yahoo_request_is_still_running(monkeypatch, tmp_path):

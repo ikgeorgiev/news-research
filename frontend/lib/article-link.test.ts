@@ -22,6 +22,17 @@ describe("original publisher links", () => {
       expect(articleLink({ ...item, summary: null }, bad)?.url).toBe(item.url)
     }
   })
+  it("keeps the archive's canonical URL for the same release cited by a legacy HTTP link", () => {
+    const body = { article_id: item.id, title: item.title, original_url: original, wire_key: "bw:20261106529638:en" } as ArticleBody
+    const legacy = original.replace("https://www.", "http://")
+    expect(articleLink({ ...item, summary: "View source version on businesswire.com: " + legacy }, body)?.url).toBe(original)
+  })
+  it("recognizes localized and slugless GlobeNewswire links to the same publisher release", () => {
+    const path = "/news-release/2026/11/02/3393802/16530/en"
+    for (const url of ["https://www.globenewswire.com/fr" + path + "/release.html", "http://globenewswire.com" + path]) {
+      expect(originalWireLink(url)?.wireKey).toBe("gnw:3393802:en")
+    }
+  })
   it("keeps native GNW links but never guesses an original from a Yahoo ID", () => {
     const url = "https://www.globenewswire.com/news-release/2026/11/04/3395763/0/en/oxford-lane.html"
     expect(articleLink({ ...item, url })?.publisher).toBe("GlobeNewswire")

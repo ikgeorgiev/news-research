@@ -40,6 +40,64 @@ class BrowserReportTests(unittest.TestCase):
         self.assertEqual(r['successful_native_copies'],0);self.assertEqual(r['sampled_interval_seconds'],0)
         self.assertEqual(len(r['excluded_responses']),2)
 
+    def test_compatibility_sample_cannot_start_a_live_interval(self):
+        self.save('fixture', 0, compatibility=True)
+        self.save('first-live', 60)
+        self.save('second-live', 120)
+        source = report.summarize([self.store], '2026-11-09', self.now + timedelta(seconds=121))['sources']['newsfilter-browser']
+        self.assertEqual(source['successful_native_copies'], 2)
+        self.assertEqual(source['sampled_interval_seconds'], 60)
+
+    def test_as_of_excludes_later_local_receipts_and_diagnostics(self):
+        later = (self.now + timedelta(seconds=30)).isoformat()
+        self.save('not-yet-received', 0)
+        with self.db:
+            self.db.execute('UPDATE responses SET local_received=?', (later,))
+            self.db.execute('INSERT INTO bridge_diagnostics VALUES(?,?,?,?)', ('s', 'late', later, '{}'))
+        result = report.summarize([self.store], '2026-11-09', self.now)
+        self.assertEqual(result['sources']['newsfilter-browser']['successful_native_copies'], 0)
+        self.assertEqual(result['stores'][0]['transport_diagnostics'], [])
+
+    def test_session_status_and_close_reason_respect_as_of(self):
+        later_heartbeat = self.now + timedelta(seconds=20)
+        close = self.now + timedelta(seconds=30)
+        planned_end = (self.now + timedelta(hours=1)).isoformat()
+        with self.db:
+            self.db.execute('INSERT INTO bridge_sessions VALUES(?,?,?,?,?,?,?,?,?,?)',
+                            ('s', 'godel-browser', self.now.isoformat(), planned_end, 'bounded', 42,
+                             close.isoformat(), 'user_stop', later_heartbeat.isoformat(), '{"status":"paused"}'))
+
+        def session_at(at):
+            return report.summarize([self.store], '2026-11-09', at)['stores'][0]['sessions'][0]
+
+        early = session_at(self.now)
+        self.assertEqual(early['planned_end'], planned_end)
+        self.assertIsNone(early['last_client_at'])
+        self.assertIsNone(early['client_status'])
+        self.assertFalse(early['client_status_known'])
+        before_close = session_at(later_heartbeat)
+        self.assertTrue(before_close['client_status_known'])
+        self.assertEqual(before_close['last_client_at'], later_heartbeat.isoformat())
+        self.assertEqual(json.loads(before_close['client_status']), {'status': 'paused'})
+        self.assertIsNone(before_close['closed_at'])
+        self.assertIsNone(before_close['close_reason'])
+        self.assertEqual(session_at(close)['close_reason'], 'user_stop')
+
+    def test_push_copy_cannot_start_listing_interval_in_a_shared_scope(self):
+        from test_news_live import N, godel
+        for offset in (0, 60, 120):
+            at = self.now + timedelta(seconds=offset)
+            with patch.object(N, 'utc', return_value=at), patch.object(nf.live, 'utc', return_value=at):
+                nf.live.godel_event(self.db, self.store, godel(str(offset)), 'regular')
+        first = self.db.execute('SELECT id, meta FROM responses ORDER BY id LIMIT 1').fetchone()
+        # Model an older or imported store whose scope labels do not encode transport.
+        meta = {**json.loads(first['meta']), 'receipt_kind': 'passive_browser_stream_copy'}
+        with self.db:
+            self.db.execute('UPDATE responses SET meta=?, status=NULL WHERE id=?', (json.dumps(meta), first['id']))
+        source = report.summarize([self.store], '2026-11-09', self.now + timedelta(seconds=120))['sources']['godel-browser']
+        self.assertEqual(source['successful_native_copies'], 3)
+        self.assertEqual(source['sampled_interval_seconds'], 60)
+
     def test_report_does_not_mutate_the_store_or_claim_zero_releases(self):
         self.save('one',0)
         before=(self.store/'live.sqlite').read_bytes()
@@ -54,6 +112,17 @@ class BrowserReportTests(unittest.TestCase):
         r=report.summarize([self.store/'absent'],'2026-11-09',self.now)
         self.assertEqual(r['stores'][0]['status'],'not_initialized')
         self.assertEqual(r['sources']['godel-browser']['unobserved_or_censored_seconds'],600)
+
+    def test_overlap_counts_only_time_when_both_sources_were_sampled(self):
+        from test_news_live import N, godel
+        self.save('one', 0)
+        self.save('two', 60)
+        for offset in (30, 90):
+            at = self.now + timedelta(seconds=offset)
+            with patch.object(N, 'utc', return_value=at), patch.object(nf.live, 'utc', return_value=at):
+                nf.live.godel_event(self.db, self.store, godel(str(offset)), 'regular')
+        result = report.summarize([self.store], '2026-11-09', self.now + timedelta(seconds=90))
+        self.assertEqual(result['simultaneously_sampled_seconds'], 30)
 
     def test_transport_recovery_diagnostics_are_read_only_and_do_not_create_coverage(self):
         event={'id':'gap-1','kind':'capture_recovered','at':self.now.isoformat(),'capture_id':None,'gap_ms':360000}

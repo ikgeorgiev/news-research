@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { buildNewsRequestParams, fetchNews, fetchTickers, type NewsFilterParams } from "@/lib/api"
+import { buildNewsRequestParams, fetchNews, fetchTickers } from "@/lib/api"
 import { buildApiUrl } from "@/lib/api-base"
-import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
+import { NewsItem, NewsResponse, TickerItem, Watchlist } from "@/lib/types"
 import { useEventSource } from "@/hooks/useEventSource"
 import { deliveryCheck } from "@/lib/delivery-check"
 
-import { buildFetchParams, dedupeById, mergeUniqueNewsItems } from "./page-helpers"
+import { buildNewsFilters, dedupeById, mergeUniqueNewsItems } from "./page-helpers"
 
 const AUTO_REFRESH_POLL_MS = 30_000
 const AUTO_REFRESH_SSE_MS = 120_000
@@ -38,6 +38,58 @@ function refreshExistingItems(previous: NewsItem[], fetched: NewsItem[]): NewsIt
   return previous.map((item) => latestById.get(item.id) ?? item)
 }
 
+type FeedState = {
+  items: NewsItem[]
+  pendingNewItems: NewsItem[]
+  nextCursor: string | null
+  pendingCursor: string | null
+  paginated: boolean
+}
+
+const EMPTY_FEED: FeedState = {
+  items: [], pendingNewItems: [], nextCursor: null, pendingCursor: null, paginated: false,
+}
+
+function showPending(feed: FeedState, head: NewsItem[] = []): FeedState {
+  // A queued snapshot with its own cursor starts a new contiguous history.
+  const tail = feed.pendingCursor ? [] : feed.items
+  return {
+    ...EMPTY_FEED,
+    items: mergeUniqueNewsItems(head, feed.pendingNewItems, tail),
+    nextCursor: feed.pendingCursor ?? feed.nextCursor,
+    paginated: true,
+  }
+}
+
+function mergeLivePage(feed: FeedState, page: NewsResponse, queue: boolean): FeedState {
+  if (page.next_cursor === null) {
+    // This is the entire filtered feed. While reading, hold new headlines
+    // above the first surviving article behind the banner, in server order.
+    const visibleIds = new Set(feed.items.map(item => item.id))
+    const firstVisible = queue ? page.items.findIndex(item => visibleIds.has(item.id)) : 0
+    if (firstVisible > 0) {
+      return { ...EMPTY_FEED, items: page.items.slice(firstVisible), pendingNewItems: page.items.slice(0, firstVisible) }
+    }
+    return { ...EMPTY_FEED, items: page.items }
+  }
+  const ids = new Set(page.items.map(item => item.id))
+  const overlaps = feed.pendingNewItems.some(item => ids.has(item.id))
+    || (!feed.pendingCursor && feed.items.some(item => ids.has(item.id)))
+  if (!overlaps) {
+    // A long outage can move every loaded row off the first page. Reusing
+    // the old cursor here would silently skip everything between snapshots.
+    return queue
+      ? { ...feed, pendingNewItems: page.items, pendingCursor: page.next_cursor }
+      : { ...EMPTY_FEED, items: page.items, nextCursor: page.next_cursor }
+  }
+  if (!queue) return showPending(feed, page.items)
+  return {
+    ...feed,
+    items: refreshExistingItems(feed.items, page.items),
+    pendingNewItems: mergeUniqueNewsItems(dedupeById(feed.items, page.items), feed.pendingNewItems),
+  }
+}
+
 export function useNewsFeed({
   activeWatchlist,
   activeWatchlistId,
@@ -54,10 +106,7 @@ export function useNewsFeed({
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalTrackedReadKeys, setGlobalTrackedReadKeys] = useState<string[]>([])
   const [totalCount, setTotalCount] = useState(0)
-  const [{ items, pendingNewItems }, setFeed] = useState<{ items: NewsItem[]; pendingNewItems: NewsItem[] }>({
-    items: [], pendingNewItems: [],
-  })
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [{ items, pendingNewItems, nextCursor }, setFeed] = useState(EMPTY_FEED)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -65,8 +114,7 @@ export function useNewsFeed({
   const [refreshTick, setRefreshTick] = useState(0)
   const [runtimeReady, setRuntimeReady] = useState(false)
 
-  const pageControllerRef = useRef<AbortController | null>(null)
-  const hasLoadedMoreRef = useRef(false)
+  const pageControllerRef = useRef<{ controller: AbortController; cursor: string } | null>(null)
   const feedContainerRef = useRef<HTMLElement | null>(null)
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
   const lastQueryKeyRef = useRef("")
@@ -76,24 +124,11 @@ export function useNewsFeed({
   const pendingAutoRefreshRef = useRef(false)
   const backgroundRefreshErrorLoggedRef = useRef(false)
 
-  const buildCurrentNewsRequest = (
-    overrides: Partial<Parameters<typeof fetchNews>[0]> = {}
-  ): Parameters<typeof fetchNews>[0] => {
-    const { fetchTickers, includeGeneralFromProvider } = buildFetchParams(
-      activeWatchlist,
-      activeWatchlistId,
-      ticker
-    )
-
-    const filters: NewsFilterParams = {
-      tickers: fetchTickers,
-      provider: provider || undefined,
-      includeUnmappedFromProvider: includeGeneralFromProvider,
-      q: searchQuery || undefined,
-    }
-
-    return buildNewsRequestParams(filters, overrides)
-  }
+  const filters = buildNewsFilters(activeWatchlistId, {
+    tickers: ticker ? [ticker] : activeWatchlist?.tickers,
+    provider,
+    q: searchQuery,
+  }, activeWatchlist?.provider)
 
   const triggerRefresh = useCallback(function refresh(reason: "auto" | "manual") {
     if (reason === "auto" && activeRefreshControllerRef.current !== null) {
@@ -143,7 +178,7 @@ export function useNewsFeed({
   }, [triggerRefresh])
 
   useEffect(() => () => {
-    pageControllerRef.current?.abort()
+    pageControllerRef.current?.controller.abort()
     pageControllerRef.current = null
     pendingAutoRefreshRef.current = false
     if (pendingRefreshTimerRef.current !== null) {
@@ -151,6 +186,14 @@ export function useNewsFeed({
       pendingRefreshTimerRef.current = null
     }
   }, [])
+  useEffect(() => {
+    const request = pageControllerRef.current
+    if (request && request.cursor !== nextCursor) {
+      pageControllerRef.current = null
+      request.controller.abort()
+      setLoadingMore(false)
+    }
+  }, [nextCursor])
   const sseUrl = buildApiUrl("/api/v1/events/news")
 
   useEffect(() => {
@@ -261,7 +304,7 @@ export function useNewsFeed({
     refreshReasonRef.current = "manual"
 
     const feedEl = feedContainerRef.current
-    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && items.length > 40
+    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && items.length > 0
     const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
     const checkRequest = deliveryCheck.beginRequest(!sameQueryAsPrevious ? "initial"
       : isAutoRefresh ? isReadingDeep ? "queued" : "automatic" : "manual")
@@ -283,22 +326,20 @@ export function useNewsFeed({
     }
 
     if (!sameQueryAsPrevious) {
-      hasLoadedMoreRef.current = false
-      setFeed({ items: [], pendingNewItems: [] })
-      setNextCursor(null)
+      setFeed(EMPTY_FEED)
     }
 
     lastQueryKeyRef.current = queryKey
     const queueNewItems = isAutoRefresh && isReadingDeep
     if (!isAutoRefresh) {
-      pageControllerRef.current?.abort()
+      pageControllerRef.current?.controller.abort()
       pageControllerRef.current = null
       setLoadingMore(false)
       setLoading(true)
     }
     if (!queueNewItems) setError(null)
 
-    fetchNews(buildCurrentNewsRequest({
+    fetchNews(buildNewsRequestParams(filters, {
       includeGlobalSummary: true,
       limit: 40,
       signal: controller.signal,
@@ -311,27 +352,12 @@ export function useNewsFeed({
           setGlobalTrackedReadKeys(data.global_summary.tracked_read_keys)
           setTotalCount(data.global_summary.total)
         }
-        const fetchedItems = data.items
-        if (queueNewItems) {
-          // Update enriched rows in place so the reader keeps their position.
-          setFeed((previous) => ({
-            items: refreshExistingItems(previous.items, fetchedItems),
-            pendingNewItems: mergeUniqueNewsItems(dedupeById(previous.items, fetchedItems), previous.pendingNewItems),
-          }))
-          return
-        }
-        if (isAutoRefresh && (pageControllerRef.current || hasLoadedMoreRef.current)) {
-          // Load More owns the cursor from the moment a reader asks for the
-          // next page. A live head refresh can finish on either side of it.
-          setFeed((previous) => ({
-            items: mergeUniqueNewsItems(fetchedItems, previous.pendingNewItems, previous.items),
-            pendingNewItems: [],
-          }))
-          return
-        }
-        hasLoadedMoreRef.current = false
-        setFeed({ items: fetchedItems, pendingNewItems: [] })
-        setNextCursor(data.next_cursor)
+        const fetchingOlderPage = pageControllerRef.current !== null
+        setFeed((previous) => {
+          const keepHistory = queueNewItems || fetchingOlderPage || previous.paginated || previous.pendingNewItems.length > 0
+          if (isAutoRefresh && keepHistory) return mergeLivePage(previous, data, queueNewItems)
+          return { ...EMPTY_FEED, items: data.items, nextCursor: data.next_cursor }
+        })
       })
       .catch((err: unknown) => {
         if (activeRefreshControllerRef.current !== controller || isAbortError(err)) return
@@ -366,30 +392,29 @@ export function useNewsFeed({
     if (!nextCursor || loading || pageControllerRef.current) return
     const checkRequest = deliveryCheck.beginRequest("more")
     const { controller, clearDeadline } = startFeedRequest()
-    pageControllerRef.current = controller
+    pageControllerRef.current = { controller, cursor: nextCursor }
 
     setLoadingMore(true)
     setError(null)
 
     try {
-      const data = await fetchNews(buildCurrentNewsRequest({
+      const data = await fetchNews(buildNewsRequestParams(filters, {
         limit: 40,
         cursor: nextCursor,
         signal: controller.signal,
       }))
       if (controller.signal.aborted) return
       deliveryCheck.response(checkRequest, data.items)
-      hasLoadedMoreRef.current = true
-      const fetchedItems = data.items
-      setFeed((previous) => ({ ...previous, items: mergeUniqueNewsItems(previous.items, fetchedItems) }))
-      setNextCursor(data.next_cursor)
+      setFeed((previous) => previous.nextCursor === nextCursor ? {
+        ...previous, items: mergeUniqueNewsItems(previous.items, data.items), nextCursor: data.next_cursor, paginated: true,
+      } : previous)
     } catch (err: unknown) {
-      if (pageControllerRef.current !== controller || isAbortError(err)) return
+      if (pageControllerRef.current?.controller !== controller || isAbortError(err)) return
       const message = getErrorMessage(err, "Failed to load more")
       setError(message)
     } finally {
       clearDeadline()
-      if (pageControllerRef.current === controller) {
+      if (pageControllerRef.current?.controller === controller) {
         pageControllerRef.current = null
         setLoadingMore(false)
       }
@@ -397,16 +422,14 @@ export function useNewsFeed({
   }
 
   const loadPendingArticles = () => {
-    setFeed((previous) => ({
-      items: mergeUniqueNewsItems(previous.pendingNewItems, previous.items),
-      pendingNewItems: [],
-    }))
+    setFeed((previous) => showPending(previous))
     feedContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
   }
 
   return {
     error,
     feedContainerRef,
+    filters,
     globalTrackedReadKeys,
     items,
     loadMore,

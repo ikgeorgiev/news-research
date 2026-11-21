@@ -115,6 +115,7 @@ class SourceCoordinator:
         plan = {}
         next_refresh = next_heartbeat = next_maintenance = 0.0
         pending_sync = dict(EMPTY_SYNC)
+        maintenance_sync: dict[str, int] = {}
         maintenance = None
         self._update(status="running", worker_limit=workers, cooldown_seconds=cooldown)
         try:

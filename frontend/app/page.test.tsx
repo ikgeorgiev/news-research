@@ -1014,6 +1014,60 @@ describe("Page refresh requests", () => {
       .toHaveClass("read")
   })
 
+  it("exposes watchlist selection and its context actions to keyboard users", async () => {
+    localStorage.setItem("customWatchlists", JSON.stringify([{ id: "fund", name: "My fund", tickers: ["UTF"] }]))
+    render(<Page />)
+    const all = await screen.findByRole("button", { name: "All News" })
+    const fund = await screen.findByRole("button", { name: "My fund" })
+    expect(all).toHaveAttribute("aria-current", "true")
+    fireEvent.click(fund)
+    expect(fund).toHaveAttribute("aria-current", "true")
+    fireEvent.keyDown(fund, { key: "F10", shiftKey: true })
+    const action = await screen.findByRole("button", { name: "Enable Push" })
+    expect(action).toHaveFocus()
+    expect(screen.getByRole("button", { name: "Mark All Items as Read" })).toBeInTheDocument()
+    fireEvent.keyDown(action, { key: "Escape" })
+    expect(screen.queryByRole("button", { name: "Mark All Items as Read" })).not.toBeInTheDocument()
+    expect(fund).toHaveFocus()
+  })
+
+  it("uses the same mapped articles and field boundaries for a saved query badge and offline mark-all-read", async () => {
+    localStorage.setItem("customWatchlists", JSON.stringify([{ id: "income", name: "Income UTF news", q: "income UTF", tickers: [] }]))
+    const makeItem = (id: number, title: string, tickers: string[]) => makeNewsItem({
+      id, readKey: `income-${id}`, title, tickers, source: "Example", provider: "Business Wire",
+    })
+    const items = [
+      makeItem(1, "Income UTF update", ["UTF"]),
+      makeItem(2, "Fund income", ["UTF"]),
+      makeItem(3, "Income UTF general announcement", []),
+    ]
+    mockedApi.fetchNews.mockResolvedValue({ items, next_cursor: null, meta: { count: 3, limit: 40, sort: "latest" } })
+    mockedApi.fetchNewsIds.mockRejectedValue(new Error("offline"))
+    render(<Page />)
+    await screen.findByRole("link", { name: items[0].title })
+    const label = await screen.findByText("Income UTF news")
+    expect(label.closest(".watchlist-item")?.querySelector(".unread-badge")).toHaveTextContent(/^1$/)
+    fireEvent.contextMenu(label)
+    fireEvent.click(await screen.findByText("Mark All Items as Read"))
+    await waitFor(() => expect(screen.getByRole("link", { name: items[0].title }).closest("article")).toHaveClass("read"))
+    for (const item of items.slice(1)) {
+      expect(screen.getByRole("link", { name: item.title }).closest("article")).toHaveClass("unread")
+    }
+  })
+
+  it("includes general Business Wire articles when the current provider overrides a saved query's provider", async () => {
+    localStorage.setItem("customWatchlists", JSON.stringify([{ id: "income", name: "Income news", q: "income", tickers: [] }]))
+    render(<Page />)
+    const label = await screen.findByText("Income news")
+    fireEvent.click(label)
+    fireEvent.change(screen.getByLabelText("Filter by source"), { target: { value: "Business Wire" } })
+    const filters = { provider: "Business Wire", q: "income", includeUnmappedFromProvider: "Business Wire" }
+    await waitFor(() => expect(mockedApi.fetchNews).toHaveBeenLastCalledWith(expect.objectContaining(filters)))
+    fireEvent.contextMenu(label)
+    fireEvent.click(await screen.findByText("Mark All Items as Read"))
+    expect(mockedApi.fetchNewsIds).toHaveBeenCalledWith(expect.objectContaining(filters))
+  })
+
   it("can create a provider/query-only watchlist from the sidebar form", async () => {
     render(<Page />)
 

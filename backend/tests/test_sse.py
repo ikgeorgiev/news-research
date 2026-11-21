@@ -5,8 +5,10 @@ from contextlib import contextmanager
 from ipaddress import ip_network
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 from app.routes.sse import _client_ip, _stream_news_events, sse_router
 from app.sse import SSEBroadcaster, SSEConnectionLimiter
@@ -198,3 +200,39 @@ def test_sse_route_rejects_connections_over_the_per_ip_cap():
     assert response.json() == {
         "detail": "Too many concurrent event streams for this IP. Limit: 1."
     }
+
+
+@pytest.mark.parametrize("fail_during", ["headers", "ready"])
+def test_sse_route_releases_its_slot_on_send_failure(fail_during):
+    async def run_check():
+        app = FastAPI()
+        app.include_router(sse_router)
+        broadcaster = FakeBroadcaster(is_available=True)
+        limiter = SSEConnectionLimiter(max_connections_per_ip=2)
+        app.state.sse_broadcaster = broadcaster
+        app.state.sse_connection_limiter = limiter
+        host = "127.0.0.1"
+        assert limiter.try_acquire(host)  # Another open connection must keep its slot.
+        scope = {
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "GET", "scheme": "http", "path": "/events/news",
+            "query_string": b"", "headers": [], "client": (host, 1234),
+            "server": ("testserver", 80), "http_version": "1.1",
+        }
+
+        async def receive():
+            await asyncio.Event().wait()
+
+        async def send(message):
+            assert limiter.active_connections_for(host) == 2
+            if ((fail_during == "headers" and message["type"] == "http.response.start")
+                    or (fail_during == "ready" and message.get("body", b"").startswith(b"event: ready"))):
+                raise OSError("client disconnected")
+
+        with pytest.raises(ClientDisconnect):
+            await asyncio.wait_for(app(scope, receive, send), timeout=2)
+        assert limiter.active_connections_for(host) == 1
+        assert not broadcaster._listeners
+        assert limiter.try_acquire(host)
+
+    asyncio.run(run_check())

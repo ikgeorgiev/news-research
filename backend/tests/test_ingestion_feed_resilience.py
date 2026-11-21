@@ -3,26 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import select
 
-from app.raw_feed_items import _preserve_alt_feed_url
-from app.feed_runtime import (
-    _load_tickers_from_csv_if_changed,
-    prune_raw_feed_items,
-    reconcile_stale_ingestion_runs,
-)
 from app.article_ingest import EntryResult
-from app.models import (
-    Article,
-    ArticleTicker,
-    IngestionRun,
-    RawFeedItem,
-    Source,
-    Ticker,
-)
 from app.constants import EXTRACTION_VERSION
-from app.utils import parse_datetime, sha256_str
+from app.feed_runtime import prune_raw_feed_items
+from app.models import Article, ArticleTicker, RawFeedItem
+from app.raw_feed_items import _preserve_alt_feed_url
+from app.utils import parse_datetime
 from tests.helpers import (
     build_raw_feed_item,
     call_ingest,
@@ -31,6 +19,7 @@ from tests.helpers import (
     seed_source,
     seed_ticker,
 )
+
 
 def test_ingest_feed_dedupes_raw_feed_rows(db_session, stub_feed_io):
     db = db_session
@@ -326,6 +315,13 @@ def test_ingest_feed_refreshes_undated_guidless_exact_url_rows(db_session, stub_
     assert raw_rows[0].raw_pub_date is None
     assert first_row is not None
     assert raw_rows[0].id == first_row.id
+
+    mirror_source = seed_source(db, code="yahoo", name="Yahoo Finance")
+    stub_feed_io([{**updated_entry, "link": "https://example.com/syndicated-correction"}])
+    mirror = call_ingest(db, mirror_source, "https://example.com/mirror.xml", known_symbols={"UTF"},
+                         symbol_to_id={"UTF": ticker.id})
+    assert mirror["items_inserted"] == 0
+    assert db.scalar(select(RawFeedItem.article_id).where(RawFeedItem.source_id == mirror_source.id)) == article.id
 
 
 def test_ingest_feed_matches_legacy_undated_guidless_rows(db_session, stub_feed_io):

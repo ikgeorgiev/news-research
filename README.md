@@ -263,7 +263,7 @@ If you already use frontend `3000` or backend `800`/`8000` in another repo, run 
 .\dev-frontend.ps1 -Port 3005 -ApiBase http://127.0.0.1:8001
 ```
 
-If another project is using PostgreSQL `5432`, this repo intentionally uses `5433` for local DB access.
+The default PostgreSQL host port is `5433`. For a custom Compose port, set `POSTGRES_PORT` and the port in the host-side `DATABASE_URL` together. The development backend uses `POSTGRES_PORT` unless you pass `-DbPort`. Read-only research reports check that both settings agree before connecting.
 
 For frontend on `3000` instead:
 

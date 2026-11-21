@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 import json
 from ipaddress import IPv4Network, IPv6Network, ip_address
 import time
-from typing import Sequence
+from typing import Annotated, Sequence
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -126,8 +128,7 @@ async def _stream_news_events(request: Request, broadcaster: SSEBroadcaster):
                         next_keepalive_at = now + 30.0
 
 
-@sse_router.get("/events/news")
-async def news_event_stream(request: Request):
+async def _reserved_news_stream(request: Request) -> AsyncIterator[AsyncIterator[str]]:
     broadcaster: SSEBroadcaster = request.app.state.sse_broadcaster
     connection_limiter: SSEConnectionLimiter = request.app.state.sse_connection_limiter
     settings = get_settings()
@@ -146,15 +147,19 @@ async def news_event_stream(request: Request):
             ),
         )
 
-    async def _guarded_stream():
-        try:
-            async for chunk in _stream_news_events(request, broadcaster):
-                yield chunk
-        finally:
-            connection_limiter.release(client_ip)
+    try:
+        async with aclosing(_stream_news_events(request, broadcaster)) as stream:
+            yield stream
+    finally:
+        connection_limiter.release(client_ip)
 
+
+@sse_router.get("/events/news")
+async def news_event_stream(
+    stream: Annotated[AsyncIterator[str], Depends(_reserved_news_stream, scope="request")],
+):
     return StreamingResponse(
-        _guarded_stream(),
+        stream,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

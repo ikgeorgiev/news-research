@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.dialects.postgresql import aggregate_order_by
@@ -8,8 +9,10 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.article_filters import (
+    EPOCH_UTC,
     GENERAL_UNMAPPED_PROVIDER,
     article_resolved_provider_name,
+    article_sort_timestamp,
     build_article_query,
     mapped_or_provider_unmapped_condition,
     source_id_by_name_subquery,
@@ -28,23 +31,25 @@ from app.schemas import (
     TickerItem,
     TickerListResponse,
 )
-from app.utils import clean_summary_text, decode_cursor, encode_cursor
+from app.utils import clean_summary_text, decode_cursor, encode_cursor, to_utc
 
 news_router = APIRouter()
 
 MAX_NEWS_IDS_PAGE_SIZE = 5000
 GLOBAL_NEWS_TRACKED_LIMIT = 100
-EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
-
-def _article_sort_key_expr():
-    return func.coalesce(Article.published_at, Article.created_at, Article.first_seen_at)
+IncludeUnmapped = Annotated[bool, Query(description="Include articles not mapped to any active ticker")]
+UnmappedProvider = Annotated[
+    str | None,
+    Query(description="Include unmapped articles from this provider and active-ticker-mapped articles from all providers"),
+]
+FromTimestamp = Annotated[datetime | None, Query(alias="from")]
 
 
 def _coalesce_row_timestamp(*values: datetime | None) -> datetime:
     for value in values:
         if value is not None:
-            return value
+            return to_utc(value)
     return EPOCH_UTC
 
 
@@ -80,7 +85,7 @@ def _parse_aggregated_symbols(value: object) -> list[str]:
 
 
 def _apply_news_cursor(query, *, cursor: str | None = None):
-    sort_key = _article_sort_key_expr()
+    sort_key = article_sort_timestamp()
     cursor_payload = decode_cursor(cursor) if cursor else None
     if cursor_payload:
         cursor_published, cursor_id = cursor_payload
@@ -153,7 +158,7 @@ def _serialize_news_item(row: object) -> NewsItem:
         summary=clean_summary_text(row.summary),
         published_at=_published_at_for_response(row),
         first_seen_at=_first_seen_at_for_response(row),
-        alert_sent_at=row.alert_sent_at,
+        alert_sent_at=to_utc(row.alert_sent_at) if row.alert_sent_at is not None else None,
         tickers=_parse_aggregated_symbols(row.tickers),
         dedupe_group=row.dedupe_group,
     )
@@ -220,7 +225,7 @@ def _build_enriched_news_select(db: Session, news_page):
 
 
 def _build_global_summary(db: Session) -> NewsGlobalSummary | None:
-    sort_key = _article_sort_key_expr()
+    sort_key = article_sort_timestamp()
     provider_name = GENERAL_UNMAPPED_PROVIDER
     base_condition = mapped_or_provider_unmapped_condition(
         provider_name,
@@ -285,17 +290,11 @@ def list_news_ids(
     source: str | None = None,
     provider: str | None = None,
     q: str | None = None,
-    include_unmapped: bool = Query(
-        default=False,
-        description="Include articles not mapped to any active ticker",
-    ),
-    include_unmapped_from_provider: str | None = Query(
-        default=None,
-        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
-    ),
-    from_: datetime | None = Query(default=None, alias="from"),
+    include_unmapped: IncludeUnmapped = False,
+    include_unmapped_from_provider: UnmappedProvider = None,
+    from_: FromTimestamp = None,
     to: datetime | None = None,
-    limit: int = Query(default=MAX_NEWS_IDS_PAGE_SIZE, ge=1, le=MAX_NEWS_IDS_PAGE_SIZE),
+    limit: Annotated[int, Query(ge=1, le=MAX_NEWS_IDS_PAGE_SIZE)] = MAX_NEWS_IDS_PAGE_SIZE,
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
@@ -329,7 +328,7 @@ def list_news_ids(
     next_cursor = None
     if has_more and rows:
         last_id, _last_read_key, last_sort_ts = rows[-1]
-        next_cursor = encode_cursor(last_sort_ts or EPOCH_UTC, last_id)
+        next_cursor = encode_cursor(last_sort_ts, last_id)
     return NewsIdsResponse(ids=ids, read_keys=read_keys, next_cursor=next_cursor)
 
 
@@ -339,18 +338,12 @@ def list_news(
     source: str | None = None,
     provider: str | None = None,
     q: str | None = None,
-    include_unmapped: bool = Query(
-        default=False,
-        description="Include articles not mapped to any active ticker",
-    ),
-    include_unmapped_from_provider: str | None = Query(
-        default=None,
-        description="Include articles not mapped to any active ticker only from this provider while keeping active-ticker-mapped articles from all providers",
-    ),
-    from_: datetime | None = Query(default=None, alias="from"),
+    include_unmapped: IncludeUnmapped = False,
+    include_unmapped_from_provider: UnmappedProvider = None,
+    from_: FromTimestamp = None,
     to: datetime | None = None,
-    limit: int = Query(default=50, ge=1, le=100),
-    include_global_summary: bool = Query(default=False),
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    include_global_summary: bool = False,
     cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
@@ -376,7 +369,7 @@ def list_news(
     next_cursor = None
     if has_more and rows:
         last = rows[-1]
-        next_cursor = encode_cursor(_published_at_for_response(last), last.id)
+        next_cursor = encode_cursor(last.sort_ts, last.id)
 
     global_summary = _build_global_summary(db) if include_global_summary else None
 

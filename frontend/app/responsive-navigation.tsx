@@ -18,7 +18,7 @@ export function ResponsiveNavigation({ sidebar }: { sidebar: WatchlistSidebarMod
       </button>
     </header>
     <div id="watchlist-navigation" className="watchlist-navigation" data-open={open}
-      onKeyDown={event => { if (open && event.key === "Escape" && !event.defaultPrevented) close() }}>
+      onKeyDown={event => { if (open && !sidebar.contextMenu && event.key === "Escape" && !event.defaultPrevented) close() }}>
       <WatchlistSidebar sidebar={{ ...sidebar, selectWatchlist: (...args) => {
         sidebar.selectWatchlist(...args)
         if (open) close()

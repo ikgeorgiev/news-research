@@ -1,4 +1,5 @@
-import { NewsItem, Watchlist } from "@/lib/types"
+import type { NewsFilterParams } from "@/lib/api"
+import { NewsItem } from "@/lib/types"
 
 export const GENERAL_NEWS_PROVIDER = "Business Wire"
 
@@ -81,86 +82,36 @@ export function mergeUniqueIds<T>(...groups: T[][]): T[] {
   return merged
 }
 
-export function buildFetchParams(
-  activeWatchlist: Watchlist | undefined,
-  activeWatchlistId: string,
-  ticker: string
-): {
-  fetchTickers: string[] | undefined
-  includeGeneralFromProvider: string | undefined
-} {
-  let fetchTickers: string[] | undefined = undefined
-  if (ticker) {
-    fetchTickers = [ticker]
-  } else if (activeWatchlist && activeWatchlist.tickers.length > 0) {
-    fetchTickers = [...activeWatchlist.tickers]
-  }
-
-  const watchlistParams = buildWatchlistQueryParams(activeWatchlist)
-  const includeGeneralFromProvider =
-    !fetchTickers && activeWatchlistId === "all"
-      ? GENERAL_NEWS_PROVIDER
-      : !fetchTickers
-        ? watchlistParams.includeUnmappedFromProvider
-        : undefined
+export function buildNewsFilters(
+  watchlistId: string,
+  { tickers, provider, q }: NewsFilterParams = {},
+  savedProvider?: string
+): NewsFilterParams {
+  const symbols = tickers?.length ? tickers : undefined
+  const source = provider?.trim() || undefined
+  const allowGeneral = watchlistId === "all" || [source, savedProvider].some(
+    name => name?.trim().toLowerCase() === GENERAL_NEWS_PROVIDER.toLowerCase()
+  )
   return {
-    fetchTickers,
-    includeGeneralFromProvider,
+    tickers: symbols,
+    provider: source,
+    q: q?.trim() || undefined,
+    includeUnmappedFromProvider: !symbols && allowGeneral ? GENERAL_NEWS_PROVIDER : undefined,
   }
 }
 
-export function isGeneralNewsProvider(provider: string | null | undefined): boolean {
-  return (provider || "").trim().toLowerCase() === GENERAL_NEWS_PROVIDER.toLowerCase()
-}
-
-export function buildWatchlistQueryParams(watchlist: Watchlist | undefined): {
-  tickers: string[] | undefined
-  provider: string | undefined
-  q: string | undefined
-  includeUnmappedFromProvider: string | undefined
-} {
-  const tickers = watchlist?.tickers.length ? [...watchlist.tickers] : undefined
-  const provider = watchlist?.provider?.trim() || undefined
-  const q = watchlist?.q?.trim() || undefined
-
-  return {
-    tickers,
-    provider,
-    q,
-    includeUnmappedFromProvider:
-      !tickers && isGeneralNewsProvider(provider) ? GENERAL_NEWS_PROVIDER : undefined,
-  }
-}
-
-export function newsItemMatchesQuery(
-  item: Pick<NewsItem, "tickers" | "title">,
-  query: string
-): boolean {
-  const queryText = query.trim().toLowerCase()
-  const haystack = [item.title, ...item.tickers].join(" ").toLowerCase()
-  return haystack.includes(queryText)
-}
-
-export function watchlistMatchesItem(item: NewsItem, watchlist: Watchlist): boolean {
-  if (watchlist.tickers.length > 0) {
-    const hasTickerMatch = item.tickers?.some((ticker) => watchlist.tickers.includes(ticker)) ?? false
-    if (!hasTickerMatch) {
-      return false
-    }
-  }
-
-  if (watchlist.provider) {
-    const providerText = watchlist.provider.trim().toLowerCase()
-    if (item.provider.trim().toLowerCase() !== providerText) {
-      return false
-    }
-  }
-
-  if (watchlist.q && !newsItemMatchesQuery(item, watchlist.q)) {
+// Mirror the news and news/ids endpoints for local counts and offline read actions.
+export function matchesNewsFilters(item: NewsItem, filters: NewsFilterParams): boolean {
+  const provider = item.provider.trim().toLowerCase()
+  if (filters.provider && provider !== filters.provider.toLowerCase()) return false
+  if (filters.tickers?.length) {
+    if (!filters.tickers.some(ticker => item.tickers.includes(ticker))) return false
+  } else if (!item.tickers.length && provider !== filters.includeUnmappedFromProvider?.toLowerCase()) {
     return false
   }
-
-  return true
+  const query = filters.q?.toLowerCase()
+  return !query || item.title.toLowerCase().includes(query)
+    || item.tickers.some(ticker => ticker.toLowerCase().includes(query))
 }
 
 export function dedupeById<T extends { id: number }>(existing: T[], incoming: T[]): T[] {

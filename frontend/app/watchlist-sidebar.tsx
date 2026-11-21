@@ -3,7 +3,7 @@
 import { KeyboardEvent, useMemo } from "react"
 
 import { BellIcon } from "./page-icons"
-import { watchlistMatchesItem } from "./page-helpers"
+import { buildNewsFilters, matchesNewsFilters } from "./page-helpers"
 import { WatchlistSidebarModel } from "./use-page-controller"
 
 function renderUnreadBadge(active: boolean, count: number) {
@@ -61,6 +61,7 @@ export function WatchlistSidebar({
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") handleFinishRename()
     if (event.key === "Escape") {
+      event.preventDefault()
       setRenamingWatchlistId(null)
       setRenameValue("")
     }
@@ -69,18 +70,11 @@ export function WatchlistSidebar({
   const unreadCountByWatchlist = useMemo(() => {
     const counts = new Map<string, number>()
     for (const watchlist of customWatchlists) {
-      counts.set(watchlist.id, 0)
-    }
-
-    for (const item of trackedUnreadItems) {
-      if (readKeys.has(item.read_key)) {
-        continue
-      }
-      for (const watchlist of customWatchlists) {
-        if (watchlistMatchesItem(item, watchlist)) {
-          counts.set(watchlist.id, (counts.get(watchlist.id) || 0) + 1)
-        }
-      }
+      const filters = buildNewsFilters(watchlist.id, watchlist)
+      const unread = trackedUnreadItems.filter(item =>
+        !readKeys.has(item.read_key) && matchesNewsFilters(item, filters)
+      )
+      counts.set(watchlist.id, unread.length)
     }
 
     return counts
@@ -97,8 +91,11 @@ export function WatchlistSidebar({
         className={`watchlist-item all-news-item ${activeWatchlistId === "all" ? "active" : ""}`}
         onClick={() => selectWatchlist("all")}
         onContextMenu={(event) => handleWatchlistContextMenu(event, "all")}
+        onKeyDown={(event) => handleWatchlistContextMenu(event, "all")}
       >
-        <span>All News</span>
+        <button type="button" className="watchlist-select" aria-current={activeWatchlistId === "all" ? "true" : undefined}>
+          All News
+        </button>
         <div className="watchlist-item-actions">
           <button
             className={`icon-button icon-button-tight ${alertIncludeAllNews ? "icon-button-active" : ""}`}
@@ -138,6 +135,7 @@ export function WatchlistSidebar({
               className={`watchlist-item ${activeWatchlistId === watchlist.id ? "active" : ""}`}
               onClick={() => selectWatchlist(watchlist.id, watchlist)}
               onContextMenu={(event) => handleWatchlistContextMenu(event, watchlist.id)}
+              onKeyDown={(event) => handleWatchlistContextMenu(event, watchlist.id)}
             >
               {renamingWatchlistId === watchlist.id ? (
                 <input
@@ -151,7 +149,9 @@ export function WatchlistSidebar({
                   onClick={(event) => event.stopPropagation()}
                 />
               ) : (
-                <span>{watchlist.name}</span>
+                <button type="button" className="watchlist-select" aria-current={activeWatchlistId === watchlist.id ? "true" : undefined}>
+                  {watchlist.name}
+                </button>
               )}
               <div className="watchlist-item-actions">
                 <button
@@ -257,7 +257,7 @@ export function WatchlistSidebar({
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div
+          <button type="button" autoFocus
             className="context-menu-item"
             onClick={() => {
               togglePushScope(contextMenu.watchlistId)
@@ -265,23 +265,23 @@ export function WatchlistSidebar({
             }}
           >
             {isPushScopeEnabled(contextMenu.watchlistId) ? "Disable Push" : "Enable Push"}
-          </div>
+          </button>
           <div className="context-menu-separator" />
-          <div className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
+          <button type="button" className="context-menu-item" onClick={() => handleMarkAllRead(contextMenu.watchlistId)}>
             Mark All Items as Read
-          </div>
+          </button>
           {contextMenu.watchlistId !== "all" && (
             <>
-              <div className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
+              <button type="button" className="context-menu-item" onClick={() => handleStartRename(contextMenu.watchlistId)}>
                 Rename
-              </div>
+              </button>
               <div className="context-menu-separator" />
-              <div
+              <button type="button"
                 className="context-menu-item delete"
                 onClick={() => handleContextDelete(contextMenu.watchlistId)}
               >
                 Delete
-              </div>
+              </button>
             </>
           )}
         </div>

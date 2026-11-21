@@ -62,6 +62,10 @@ def normalize_title(value: str) -> str:
     return normalized
 
 
+def article_content_hash(title_hash: str, summary: str | None) -> str:
+    return sha256_str(f"{title_hash}|{normalize_title(summary or '')[:300]}")
+
+
 def clean_summary_text(value: str | None) -> str | None:
     if value is None:
         return None

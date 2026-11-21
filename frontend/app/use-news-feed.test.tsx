@@ -329,7 +329,9 @@ describe("useNewsFeed auto refresh", () => {
         expect(result.current.items.map((item) => item.id)).toEqual([...firstPage, ...secondPage].map((item) => item.id))
         expect(result.current.pendingNewItems).toEqual([newRelease])
         const enrichedNewRelease = { ...newRelease, summary: "New release full summary", tickers: ["PDI"] }
-        mockedApi.fetchNews.mockResolvedValue({ ...baseline, items: [enrichedNewRelease, refreshed, ...firstPage.slice(1, 39)] })
+        mockedApi.fetchNews.mockResolvedValue({
+          ...baseline, items: [enrichedNewRelease, refreshed, ...firstPage.slice(1, 39)], next_cursor: "new-head-cursor",
+        })
         now += 2_100
         await act(async () => { sseEventListener?.() })
         expect(result.current.pendingNewItems).toEqual([enrichedNewRelease])
@@ -343,6 +345,92 @@ describe("useNewsFeed auto refresh", () => {
       expect(new Set(result.current.items.map((item) => item.id)).size).toBe(81)
     }
   )
+
+  it.each(["top", "scrolled"])("drops reclassified articles when a paginated watchlist returns a complete snapshot while %s", async position => {
+    const baseline = await mockedApi.fetchNews.getMockImplementation()!({})
+    const article = (id: number) => ({ ...baseline.items[0], id, tickers: ["UTF"] })
+    const page = (latest: number) => Array.from({ length: 40 }, (_, index) => article(latest - index))
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(100), next_cursor: "older" })
+    const { result } = renderHook(() => useNewsFeed({ activeWatchlistId: "utf", provider: "", searchQuery: "", ticker: "UTF" }))
+    await waitFor(() => expect(result.current.nextCursor).toBe("older"))
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(60), next_cursor: "another" })
+    await act(async () => { await result.current.loadMore() })
+    const container = document.createElement("section")
+    const scrollTo = vi.fn()
+    container.scrollTo = scrollTo
+    result.current.feedContainerRef.current = container
+    container.scrollTop = position === "scrolled" ? 200 : 0
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(102), next_cursor: "new-head" })
+    await act(async () => { result.current.triggerRefresh("auto") })
+    const latest = [article(102), { ...article(96), title: "Updated story" }, article(25)]
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: latest, next_cursor: null })
+    now += 2_100
+    await act(async () => { result.current.triggerRefresh("auto") })
+    expect(result.current.nextCursor).toBeNull()
+    expect(scrollTo).not.toHaveBeenCalled()
+    if (position === "scrolled") {
+      expect(result.current.items).toEqual(latest.slice(1))
+      expect(result.current.pendingNewItems).toEqual(latest.slice(0, 1))
+      act(() => { result.current.loadPendingArticles() })
+    }
+    expect(result.current.items).toEqual(latest)
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: [], next_cursor: null })
+    now += 2_100
+    await act(async () => { result.current.triggerRefresh("auto") })
+    expect(result.current.items).toEqual([])
+    expect(result.current.pendingNewItems).toEqual([])
+  })
+
+  it("queues live stories while reading down the initial page", async () => {
+    const baseline = await mockedApi.fetchNews.getMockImplementation()!({})
+    const page = (latest: number) => Array.from({ length: 40 }, (_, index) => ({ ...baseline.items[0], id: latest - index }))
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(40), next_cursor: "original-tail" })
+    const { result } = renderHook(() => useNewsFeed({ activeWatchlistId: "all", provider: "", searchQuery: "", ticker: "" }))
+    await waitFor(() => expect(result.current.nextCursor).toBe("original-tail"))
+    const container = document.createElement("section")
+    result.current.feedContainerRef.current = container
+    container.scrollTop = 200
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(41), next_cursor: "new-head" })
+    await act(async () => { result.current.triggerRefresh("auto") })
+    expect(result.current.items).toEqual(page(40))
+    expect(result.current.pendingNewItems.map(item => item.id)).toEqual([41])
+    container.scrollTop = 0
+    now += 2_100
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(42), next_cursor: "newer-head" })
+    await act(async () => { result.current.triggerRefresh("auto") })
+    expect(result.current.items.map(item => item.id)).toEqual(Array.from({ length: 42 }, (_, n) => 42 - n))
+    expect(result.current.pendingNewItems).toHaveLength(0)
+    expect(result.current.nextCursor).toBe("original-tail")
+  })
+
+  it.each(["top", "scrolled"])("can page through a disjoint snapshot after a long outage while %s", async (position) => {
+    const baseline = await mockedApi.fetchNews.getMockImplementation()!({})
+    const page = (latest: number) => Array.from({ length: 40 }, (_, index) => ({ ...baseline.items[0], id: latest - index }))
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(80), next_cursor: "below-41" })
+    const { result } = renderHook(() => useNewsFeed({ activeWatchlistId: "all", provider: "", searchQuery: "", ticker: "" }))
+    await waitFor(() => expect(result.current.nextCursor).toBe("below-41"))
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(40) })
+    await act(async () => { await result.current.loadMore() })
+    result.current.feedContainerRef.current = {
+      scrollTop: position === "scrolled" ? 200 : 0, scrollTo: vi.fn(),
+    } as unknown as HTMLElement
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(140), next_cursor: "below-101" })
+    await act(async () => { result.current.triggerRefresh("auto") })
+    if (position === "scrolled") {
+      expect(result.current.items[0].id).toBe(80)
+      expect(result.current.pendingNewItems).toHaveLength(40)
+      // Another overlapping head must retain the cursor after the queued page.
+      now += 2_100
+      mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(141), next_cursor: "below-102" })
+      await act(async () => { result.current.triggerRefresh("auto") })
+      act(() => { result.current.loadPendingArticles() })
+    }
+    expect(result.current.nextCursor).toBe("below-101")
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(100), next_cursor: "below-61" })
+    await act(async () => { await result.current.loadMore() })
+    const first = position === "scrolled" ? 141 : 140
+    expect(result.current.items.map(item => item.id)).toEqual(Array.from({ length: first - 60 }, (_, n) => first - n))
+  })
 
   it("keeps queued releases that roll off the first page before a reader scrolls to the top", async () => {
     const baseline = await mockedApi.fetchNews.getMockImplementation()!({})
@@ -358,13 +446,13 @@ describe("useNewsFeed auto refresh", () => {
     result.current.feedContainerRef.current = container
     container.scrollTop = 200
     for (const latest of [100, 120]) {
-      mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(latest) })
+      mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(latest), next_cursor: "head-" + latest })
       now += 2_100
       await act(async () => { result.current.triggerRefresh("auto") })
     }
     expect(result.current.pendingNewItems).toHaveLength(40)
     container.scrollTop = 0
-    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(140) })
+    mockedApi.fetchNews.mockResolvedValueOnce({ ...baseline, items: page(140), next_cursor: "head-140" })
     now += 2_100
     await act(async () => { result.current.triggerRefresh("auto") })
     expect(result.current.pendingNewItems).toHaveLength(0)

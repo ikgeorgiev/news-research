@@ -73,6 +73,18 @@ describe("in-app article reader", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
   })
 
+  it.each(["publisher URL", "publisher citation"])("uses saved text when a same-headline archive conflicts with the %s", async (source) => {
+    const original = "https://www.businesswire.com/news/home/20261106529638/en/"
+    const release = source === "publisher URL" ? { ...item, url: original }
+      : { ...item, summary: item.summary + " View source version on businesswire.com: " + original }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => document }))
+    renderReader(release)
+    fireEvent.click(screen.getByRole("button", { name: "Read in app" }))
+    await screen.findByText(/Reading the saved text/)
+    expect(screen.queryByText("A separate opening paragraph.")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Business Wire" })).toHaveAttribute("href", original)
+  })
+
   it("uses the verified original publisher, preserves attribution, and remembers reading preferences", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => document }))
     const openArticle = vi.fn()
@@ -150,5 +162,8 @@ describe("reader document validation", () => {
   it.each([0, 41, Infinity, "2"])("rejects invalid spans %s", colspan => {
     const blocks = [{ type: "table", caption: "", rows: [[{ text: "x", header: false, rowspan: 1, colspan }]] }]
     expect(parseArticleBody({ ...document, blocks }, 1634)).toBeNull()
+  })
+  it("rejects a nonnumeric archive heading level", () => {
+    expect(parseArticleBody({ ...document, blocks: [{ type: "heading", level: "02", text: "Distributions" }] }, 1634)).toBeNull()
   })
 })

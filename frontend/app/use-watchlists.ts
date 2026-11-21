@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react"
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react"
 
 import { persistJson, readJson } from "@/lib/local-storage"
 import { Watchlist } from "@/lib/types"
@@ -62,6 +62,7 @@ export function useWatchlists({
   const [newWatchlistQuery, setNewWatchlistQuery] = useState("")
   const [selectedTickers, setSelectedTickers] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
+  const contextTrigger = useRef<HTMLButtonElement | null>(null)
   const [renamingWatchlistId, setRenamingWatchlistId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [hydrated, setHydrated] = useState(false)
@@ -94,6 +95,7 @@ export function useWatchlists({
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setContextMenu(null)
+        contextTrigger.current?.focus()
       }
     }
 
@@ -154,13 +156,23 @@ export function useWatchlists({
     })
   }
 
-  const handleWatchlistContextMenu = (event: MouseEvent, watchlistId: string) => {
+  const handleWatchlistContextMenu = (event: MouseEvent | ReactKeyboardEvent, watchlistId: string) => {
+    if ("key" in event && event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return
     event.preventDefault()
     event.stopPropagation()
-    setContextMenu({ watchlistId, x: event.clientX, y: event.clientY })
+    const row = event.currentTarget
+    contextTrigger.current = row.querySelector<HTMLButtonElement>(".watchlist-select")
+    const rect = (contextTrigger.current ?? row).getBoundingClientRect()
+    const point = "clientX" in event && (event.clientX || event.clientY)
+      ? { x: event.clientX, y: event.clientY }
+      : { x: rect.left, y: rect.bottom }
+    setContextMenu({ watchlistId, ...point })
   }
 
-  const closeContextMenu = () => setContextMenu(null)
+  const closeContextMenu = () => {
+    setContextMenu(null)
+    contextTrigger.current?.focus()
+  }
 
   const handleStartRename = (watchlistId: string) => {
     const watchlist = customWatchlists.find((item) => item.id === watchlistId)

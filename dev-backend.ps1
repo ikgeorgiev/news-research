@@ -3,7 +3,7 @@ param(
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8001,
     [string]$DbHost = "localhost",
-    [int]$DbPort = 5433,
+    [ValidateRange(1, 65535)][int]$DbPort,
     [switch]$DisableScheduler
 )
 
@@ -109,20 +109,23 @@ for requirements_file in (Path("requirements.txt"), Path("requirements-dev.txt")
     # Capture the JSON rather than echoing either secret to the terminal.
     $readConfigScript = @'
 import json
+import sys
 
 from app.config import get_settings
+from scripts.local_database import published_postgres_port
 
 settings = get_settings()
 print(
     json.dumps(
         {
             "database_url": settings.database_url,
+            "database_port": int(sys.argv[1]) or published_postgres_port(),
             "admin_api_key": settings.admin_api_key,
         }
     )
 )
 '@
-    $resolvedConfigJson = (& $venvPython -c $readConfigScript | Out-String).Trim()
+    $resolvedConfigJson = (& $venvPython -c $readConfigScript $DbPort | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to load DATABASE_URL and ADMIN_API_KEY from the root .env file."
     }
@@ -133,7 +136,7 @@ print(
     # instead of inheriting a potentially remote DATABASE_URL from the caller.
     # Connecting elsewhere requires an explicit -DbHost/-DbPort choice.
     $databaseUri.Host = $DbHost
-    $databaseUri.Port = $DbPort
+    $databaseUri.Port = $resolvedConfig.database_port
     $env:DATABASE_URL = $databaseUri.Uri.AbsoluteUri
 
     $resolvedAdminApiKey = [string]$resolvedConfig.admin_api_key

@@ -16,11 +16,16 @@ function Write-LocalConnectionInfo {
         [string]$ContainerId
     )
 
-    $portLine = (docker compose port db 5432 2>$null | Select-Object -First 1)
-    if ($portLine -notmatch ":(\d+)\s*$") {
-        return
+    $published = @(docker port $ContainerId 5432/tcp)
+    if ($LASTEXITCODE -ne 0 -or $published.Count -eq 0) {
+        throw "Cannot verify the database container's published port."
     }
-    $hostPort = $matches[1]
+    Write-Host "Published PostgreSQL bindings: $($published -join ', ')"
+    foreach ($binding in $published) {
+        if ($binding -notmatch '^(?:127\.\d+\.\d+\.\d+|\[::1\]):\d+$') {
+            Write-Warning "PostgreSQL binding $binding is outside loopback. Compare the running container with docker-compose.yml."
+        }
+    }
 
     # Read only non-secret identity fields from the container so the report
     # matches Compose's resolved environment without exposing the password.
@@ -33,13 +38,16 @@ function Write-LocalConnectionInfo {
     }
 
     Write-Host (
-        "Local database: host=127.0.0.1 port=$hostPort " +
+        "Database identity: " +
         "user=$($databaseIdentity[0]) database=$($databaseIdentity[1]) (password omitted)"
     )
 }
 
 Write-Host "Starting PostgreSQL container (service: db)..."
 docker compose up -d db
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker Compose could not start the database."
+}
 
 $containerId = (docker compose ps -q db).Trim()
 if (-not $containerId) {

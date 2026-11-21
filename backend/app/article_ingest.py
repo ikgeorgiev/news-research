@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import feedparser
 import httpx
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -64,7 +64,7 @@ from app.ticker_extraction import (
     _source_page_fetch_requires_network,
     _verified_ticker_hits,
 )
-from app.utils import GENERAL_SOURCE_CODE, canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_utc
+from app.utils import GENERAL_SOURCE_CODE, article_content_hash, canonicalize_url, clean_summary_text, normalize_title, parse_datetime, sha256_str, to_utc
 
 
 def _extract_retry_after_seconds(exc: BaseException) -> float | None:
@@ -167,7 +167,7 @@ def _find_title_window_match(
     summary: str | None = None,
 ) -> Article | None:
     conditions = [
-        Article.title_normalized_hash == title_hash,
+        or_(Article.title_normalized_hash == title_hash, Article.cluster_key == title_hash),
         Article.published_at >= window_start,
         Article.published_at <= window_end,
     ]
@@ -194,9 +194,10 @@ def _find_title_window_match(
         )
         conditions.append(has_any_raw)
         conditions.append(~has_excluded_source)
-    candidates = list(db.scalars(
-        select(Article).where(and_(*conditions)).order_by(desc(Article.id))
-    ))
+    # Older exact-URL corrections updated cluster_key but left the former title
+    # hash. Check the stored headline before using either index as a title match.
+    rows = db.scalars(select(Article).where(and_(*conditions)).order_by(desc(Article.id)))
+    candidates = [article for article in rows if sha256_str(normalize_title(article.title)) == title_hash]
     return select_release_candidate(db, candidates, identity=identity, summary=summary)
 
 
@@ -215,9 +216,6 @@ def _upsert_article(
 ) -> tuple[Article, bool, bool]:
     url_hash = sha256_str(canonical_url)
     title_hash = sha256_str(normalize_title(title))
-    summary_norm = normalize_title(summary or "")
-    content_hash = sha256_str(f"{title_hash}|{summary_norm[:300]}")
-    cluster_key = title_hash
 
     source_name = _clamp_label(source_name)
     provider_name = _clamp_label(provider_name)
@@ -250,9 +248,9 @@ def _upsert_article(
             published_at=published_at,
             source_name=source_name,
             provider_name=provider_name,
-            content_hash=content_hash,
+            content_hash=article_content_hash(title_hash, summary),
             title_normalized_hash=title_hash,
-            cluster_key=cluster_key,
+            cluster_key=title_hash,
         )
         try:
             with db.begin_nested():
@@ -280,34 +278,22 @@ def _upsert_article(
     if article is None:
         raise RuntimeError("article upsert failed to resolve target row")
 
-    if not created:
-        if matched_by_url and allow_url_match_overwrite:
+    if not created and (not matched_by_url or allow_url_match_overwrite):
+        if matched_by_url:
             # Same URL, exact source — safe to overwrite all fields.
             article.title = title
             article.source_name = source_name
             article.provider_name = provider_name
-            article.content_hash = content_hash
-            article.cluster_key = cluster_key
             if summary:
                 article.summary = summary
-            article_published = article.published_at
-            if article_published is None or to_utc(published_at) > to_utc(
-                article_published
-            ):
-                article.published_at = published_at
-        elif not matched_by_url:
-            # Title-window match from a different feed entry.  Only enrich
-            # — do NOT overwrite source_name/provider_name/title to avoid
-            # a cross-source attribution swap (e.g. PRN → BW).
-            if summary and (
-                not article.summary or len(summary) > len(article.summary)
-            ):
-                article.summary = summary
-            article_published = article.published_at
-            if article_published is None or to_utc(published_at) > to_utc(
-                article_published
-            ):
-                article.published_at = published_at
+        elif summary and len(summary) > len(article.summary or ""):
+            # Syndicated copies can enrich the summary while retaining attribution.
+            article.summary = summary
+        article.title_normalized_hash = title_hash
+        article.cluster_key = title_hash
+        article.content_hash = article_content_hash(title_hash, article.summary)
+        if article.published_at is None or to_utc(published_at) > to_utc(article.published_at):
+            article.published_at = published_at
 
     return article, created, matched_by_url
 

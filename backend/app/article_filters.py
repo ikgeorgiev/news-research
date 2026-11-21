@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Article, ArticleTicker, RawFeedItem, Source, Ticker
 from app.query_utils import active_ticker_mapped_exists, contains_literal_pattern
+from app.utils import to_utc
 
 GENERAL_UNMAPPED_PROVIDER = "Business Wire"
+EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def article_sort_timestamp():
+    return func.coalesce(Article.published_at, Article.created_at, Article.first_seen_at, EPOCH_UTC)
 
 
 def _normalized_ticker_symbols(
@@ -89,98 +95,31 @@ def article_source_exists(
     )
 
 
-def article_canonical_source_id(
-    *,
-    article_id_col=Article.id,
-    canonical_url_col=Article.canonical_url,
-):
-    return (
-        select(RawFeedItem.source_id)
-        .where(
-            and_(
-                RawFeedItem.article_id == article_id_col,
-                RawFeedItem.raw_link == canonical_url_col,
-            )
-        )
-        .order_by(RawFeedItem.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
-def article_latest_source_id(
-    *,
-    article_id_col=Article.id,
-):
-    return (
-        select(RawFeedItem.source_id)
-        .where(RawFeedItem.article_id == article_id_col)
-        .order_by(RawFeedItem.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
-def _article_recorded_source_value(
-    value_col,
-    *,
-    article_id_col,
-    provider_name_col,
-):
-    # Tracking parameters can prevent an exact raw/canonical URL match.
-    # Keep the article's recorded provider when its raw provenance supports it,
-    # instead of allowing a later syndicated copy to change the badge/filter.
-    return (
-        select(value_col)
-        .select_from(RawFeedItem)
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(
-            RawFeedItem.article_id == article_id_col,
-            func.lower(Source.name) == func.lower(provider_name_col),
-        )
-        .order_by(RawFeedItem.id.asc())
-        .limit(1)
-        .scalar_subquery()
-    )
-
-
 def article_resolved_provider_name(
     *,
     article_id_col=Article.id,
     canonical_url_col=Article.canonical_url,
     fallback_provider_name_col=Article.provider_name,
 ):
-    canonical_provider = (
-        select(Source.name)
-        .select_from(RawFeedItem)
-        .join(Source, Source.id == RawFeedItem.source_id)
-        .where(
-            and_(
-                RawFeedItem.article_id == article_id_col,
-                RawFeedItem.raw_link == canonical_url_col,
-            )
-        )
-        .order_by(RawFeedItem.id.desc())
-        .limit(1)
-        .scalar_subquery()
-    )
-    latest_provider = (
+    provenance = (
         select(Source.name)
         .select_from(RawFeedItem)
         .join(Source, Source.id == RawFeedItem.source_id)
         .where(RawFeedItem.article_id == article_id_col)
-        .order_by(RawFeedItem.id.desc())
+    )
+    latest = provenance.order_by(RawFeedItem.id.desc()).limit(1)
+    canonical = latest.where(RawFeedItem.raw_link == canonical_url_col)
+    # A tracking parameter can prevent an exact URL match. Prefer the recorded
+    # provider when provenance supports it before considering a later mirror.
+    recorded = (
+        provenance.where(func.lower(Source.name) == func.lower(fallback_provider_name_col))
+        .order_by(RawFeedItem.id.asc())
         .limit(1)
-        .scalar_subquery()
     )
     return func.coalesce(
-        canonical_provider,
-        _article_recorded_source_value(
-            Source.name,
-            article_id_col=article_id_col,
-            provider_name_col=fallback_provider_name_col,
-        ),
-        latest_provider,
+        canonical.scalar_subquery(),
+        recorded.scalar_subquery(),
+        latest.scalar_subquery(),
         fallback_provider_name_col,
     )
 
@@ -207,43 +146,21 @@ def mapped_or_provider_unmapped_condition(
     )
     return or_(
         mapped_exists,
-        and_(~mapped_exists, include_provider_exists),
-        and_(~mapped_exists, ~has_any_raw, rawless_provider_match),
+        include_provider_exists,
+        and_(~has_any_raw, rawless_provider_match),
     )
 
 
-def provider_filter_condition(
-    provider_name: str,
-    *,
-    source_ids=None,
-    article_id_col=Article.id,
-    canonical_url_col=Article.canonical_url,
-    provider_name_col=Article.provider_name,
-):
-    if source_ids is None:
-        return article_provider_name_matches(
-            provider_name,
-            provider_name_col=provider_name_col,
-        )
+def provider_filter_condition(provider_name: str, *, registered: bool):
+    resolved = article_resolved_provider_name()
+    if not registered:
+        return article_provider_name_matches(provider_name, provider_name_col=resolved)
 
-    has_raw_provenance = article_has_any_raw_provenance(article_id_col=article_id_col)
-    canonical_source_id = article_canonical_source_id(
-        article_id_col=article_id_col,
-        canonical_url_col=canonical_url_col,
-    )
-    latest_source_id = article_latest_source_id(article_id_col=article_id_col)
-    recorded_source_id = _article_recorded_source_value(
-        Source.id,
-        article_id_col=article_id_col,
-        provider_name_col=provider_name_col,
-    )
-    provider_name_match = article_provider_name_matches(
-        provider_name,
-        provider_name_col=provider_name_col,
-    )
+    # A registered provider selects that exact source. Historical articles
+    # with no raw provenance can still carry a longer, free-form label.
     return or_(
-        func.coalesce(canonical_source_id, recorded_source_id, latest_source_id).in_(source_ids),
-        and_(~has_raw_provenance, provider_name_match),
+        func.lower(resolved) == provider_name.lower(),
+        and_(~article_has_any_raw_provenance(), article_provider_name_matches(provider_name)),
     )
 
 
@@ -261,11 +178,6 @@ def build_article_query(
     to: datetime | None = None,
 ):
     query = select(Article)
-    publish_sort_key = func.coalesce(
-        Article.published_at,
-        Article.created_at,
-        Article.first_seen_at,
-    )
     ticker_symbols = _normalized_ticker_symbols(ticker=ticker, tickers=tickers)
     ticker_filter_supplied = ticker is not None or tickers is not None
 
@@ -320,10 +232,7 @@ def build_article_query(
         if provider_text:
             has_source = find_source_by_name(db, provider_text) is not None
             query = query.where(
-                provider_filter_condition(
-                    provider_text,
-                    source_ids=source_id_by_name_subquery(provider_text) if has_source else None,
-                )
+                provider_filter_condition(provider_text, registered=has_source)
             )
 
     if q:
@@ -353,9 +262,9 @@ def build_article_query(
             query = query.where(or_(title_match, ticker_q_match))
 
     if from_:
-        query = query.where(publish_sort_key >= from_)
+        query = query.where(article_sort_timestamp() >= to_utc(from_))
 
     if to:
-        query = query.where(publish_sort_key <= to)
+        query = query.where(article_sort_timestamp() <= to_utc(to))
 
     return query

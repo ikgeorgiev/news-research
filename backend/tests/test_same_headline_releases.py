@@ -89,6 +89,40 @@ def test_exact_url_update_keeps_existing_identity(db_session):
  a,created,by_url=upsert(db,'businesswire',original.canonical_url,'Verified updated coverage')
  assert a.id==1626 and not created and by_url
 
+
+def test_legacy_corrected_headline_matches_only_its_current_title(db_session):
+    from app.utils import normalize_title, sha256_str
+
+    db = db_session
+    article, _, _ = upsert(db, "yahoo", "https://example.com/original", "Updated notice.")
+    article.title = "Corrected Quarterly Distribution Notice"
+    corrected_hash = sha256_str(normalize_title(article.title))
+    # Earlier releases updated the stored title and cluster but left the old title index.
+    article.cluster_key = corrected_hash
+    db.commit()
+
+    _, created, _ = upsert(db, "yahoo", "https://example.com/another-release", "Different release.")
+    assert created
+    match, created, _ = _upsert_article(db, source_code="yahoo", canonical_url="https://example.com/mirror",
+                                       title=article.title, summary=None, published_at=PUB,
+                                       source_name="Yahoo Finance", provider_name="Yahoo Finance")
+    assert not created and match.id == article.id
+    assert match.title_normalized_hash == corrected_hash
+
+
+def test_content_hash_tracks_summary_kept_after_replay_and_syndication(db_session):
+    from app.utils import normalize_title, sha256_str
+
+    db = db_session
+    url = "https://example.com/original"
+    article, _, _ = upsert(db, "yahoo", url, "Original summary")
+    original_hash = article.content_hash
+    replay, _, _ = upsert(db, "yahoo", url, None)
+    assert replay.summary == "Original summary" and replay.content_hash == original_hash
+    summary = "A syndicated copy with a more complete summary"
+    mirror, created, _ = upsert(db, "yahoo", "https://example.com/another-copy", summary)
+    assert not created
+    assert mirror.content_hash == sha256_str(f"{mirror.title_normalized_hash}|{normalize_title(summary)}")
 @pytest.mark.parametrize(('url','guid','source','expected'),[
  ('https://www.businesswire.com/news/home/20261030159147/en/Title?feedref=x',None,'yahoo',('businesswire','20261030159147','en')),
  ('https://www.businesswire.com/news/home/20261030159147/fr/Title',None,'businesswire',('businesswire','20261030159147','fr')),

@@ -58,6 +58,7 @@ def _validate_manage_token(
 
 
 def _apply_subscription_update(
+    db: Session,
     subscription: PushSubscription,
     *,
     endpoint: str,
@@ -65,16 +66,24 @@ def _apply_subscription_update(
     auth: str,
     expiration_time: int | None,
     scopes: dict[str, object],
-    watermarks: dict[str, int],
-) -> None:
+) -> dict[str, int]:
+    watermarks, seeded = seed_last_notified_watermarks(
+        db,
+        scopes=scopes,
+        existing=subscription.last_notified_json,
+        subscription_context=_subscription_log_context(endpoint=endpoint, subscription_id=subscription.id),
+    )
     subscription.endpoint = endpoint
     subscription.key_p256dh = p256dh
     subscription.key_auth = auth
     subscription.expiration_time = expiration_time
     subscription.alert_scopes_json = scopes
     subscription.last_notified_json = watermarks
+    if not subscription.active:
+        subscription.failure_count = 0
     subscription.active = True
     subscription.last_error = None
+    return seeded
 
 
 @push_router.get("/push/vapid-key", response_model=PushVapidKeyResponse)
@@ -103,7 +112,8 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
 
     submitted_manage_token = (payload.manage_token or "").strip() or None
     scopes = normalize_scopes(payload.scopes.model_dump())
-    existing = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+    lookup = select(PushSubscription).where(PushSubscription.endpoint == endpoint).with_for_update()
+    existing = db.scalar(lookup)
 
     created = existing is None
     manage_token = submitted_manage_token
@@ -119,38 +129,30 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
             manage_token_hash=hash_manage_token(manage_token),
             active=True,
         )
-        db.add(subscription)
     else:
         manage_token = _validate_manage_token(
             subscription=subscription,
             submitted_manage_token=submitted_manage_token,
         )
 
-    next_watermarks, seeded = seed_last_notified_watermarks(
-        db,
-        scopes=scopes,
-        existing=subscription.last_notified_json if not created else None,
-        subscription_context=_subscription_log_context(
-            endpoint=endpoint,
-            subscription_id=subscription.id,
-        ),
-    )
-
-    _apply_subscription_update(
-        subscription,
+    updates = dict(
         endpoint=endpoint,
         p256dh=p256dh,
         auth=auth,
         expiration_time=payload.subscription.expiration_time,
         scopes=scopes,
-        watermarks=next_watermarks,
     )
+    seeded = _apply_subscription_update(db, subscription, **updates)
+    if created:
+        db.add(subscription)
 
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        subscription = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+        if not created:
+            raise
+        subscription = db.scalar(lookup)
         if subscription is None:
             raise
 
@@ -160,18 +162,11 @@ def upsert_push_subscription(payload: PushUpsertRequest, db: Session = Depends(g
                 subscription=subscription,
                 submitted_manage_token=submitted_manage_token,
             )
-            _apply_subscription_update(
-                subscription,
-                endpoint=endpoint,
-                p256dh=p256dh,
-                auth=auth,
-                expiration_time=payload.subscription.expiration_time,
-                scopes=scopes,
-                watermarks=next_watermarks,
-            )
+            seeded = _apply_subscription_update(db, subscription, **updates)
             db.commit()
         else:
             manage_token = None
+            seeded = {}
 
     db.refresh(subscription)
 

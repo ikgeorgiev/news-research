@@ -6,9 +6,8 @@ import { usePushSubscription } from "@/hooks/usePushSubscription"
 import { Watchlist } from "@/lib/types"
 
 import {
-  buildWatchlistQueryParams,
-  GENERAL_NEWS_PROVIDER,
-  newsItemMatchesQuery,
+  buildNewsFilters,
+  matchesNewsFilters,
   STATIC_PROVIDER_OPTIONS,
 } from "./page-helpers"
 import { useFeedPreferences } from "./use-feed-preferences"
@@ -27,7 +26,7 @@ export type WatchlistSidebarModel = {
   handleMarkAllRead: (watchlistId: string) => void
   handleStartRename: (watchlistId: string) => void
   handleTogglePushScope: (watchlistId: string, event?: MouseEvent) => void
-  handleWatchlistContextMenu: (event: MouseEvent, watchlistId: string) => void
+  handleWatchlistContextMenu: ReturnType<typeof useWatchlists>["handleWatchlistContextMenu"]
   isCreatingWatchlist: boolean
   isPushScopeEnabled: (watchlistId: string) => boolean
   newWatchlistName: string
@@ -50,95 +49,6 @@ export type WatchlistSidebarModel = {
   toggleTickerSelection: (symbol: string) => void
   trackedUnreadItems: ReturnType<typeof useFeedPreferences>["trackedUnreadItems"]
   unreadCount: number
-}
-
-type MarkAllReadQueryParams = {
-  tickers?: string[]
-  provider?: string
-  q?: string
-  includeUnmappedFromProvider?: string
-}
-
-function buildMarkAllReadQueryParams({
-  activeWatchlist,
-  activeWatchlistId,
-  currentProvider,
-  currentSearchQuery,
-  currentTicker,
-  targetWatchlistId,
-  watchlist,
-}: {
-  activeWatchlist?: Watchlist
-  activeWatchlistId: string
-  currentProvider: string
-  currentSearchQuery: string
-  currentTicker: string
-  targetWatchlistId: string
-  watchlist?: Watchlist
-}): MarkAllReadQueryParams | null {
-  if (targetWatchlistId === "all" && activeWatchlistId !== "all") {
-    return { includeUnmappedFromProvider: GENERAL_NEWS_PROVIDER }
-  }
-
-  if (targetWatchlistId !== activeWatchlistId && watchlist) {
-    const savedParams = buildWatchlistQueryParams(watchlist)
-    return savedParams
-  }
-
-  const provider = currentProvider.trim() || undefined
-  const q = currentSearchQuery.trim() || undefined
-  const tickers = currentTicker ? [currentTicker] : undefined
-
-  if (activeWatchlistId === "all") {
-    return {
-      ...(tickers ? { tickers } : {}),
-      ...(provider ? { provider } : {}),
-      ...(q ? { q } : {}),
-      includeUnmappedFromProvider: !tickers ? GENERAL_NEWS_PROVIDER : undefined,
-    }
-  }
-
-  const activeParams = buildWatchlistQueryParams(activeWatchlist)
-  return {
-    tickers: tickers ?? activeParams.tickers,
-    ...(provider ? { provider } : {}),
-    ...(q ? { q } : {}),
-    includeUnmappedFromProvider: !tickers ? activeParams.includeUnmappedFromProvider : undefined,
-  }
-}
-
-function markAllReadMatchesItem(
-  item: { provider: string; tickers: string[]; title: string },
-  params: MarkAllReadQueryParams
-): boolean {
-  // Best-effort fallback for API failures; keep this aligned with backend read-query filtering.
-  if (params.tickers && params.tickers.length > 0) {
-    const hasTickerMatch = item.tickers.some((ticker) => params.tickers?.includes(ticker))
-    if (!hasTickerMatch) {
-      return false
-    }
-  }
-
-  if (params.provider) {
-    const providerText = params.provider.trim().toLowerCase()
-    if (item.provider.trim().toLowerCase() !== providerText) {
-      return false
-    }
-  }
-
-  if (params.includeUnmappedFromProvider) {
-    const providerText = params.includeUnmappedFromProvider.trim().toLowerCase()
-    const isMapped = item.tickers.length > 0
-    if (!isMapped && item.provider.trim().toLowerCase() !== providerText) {
-      return false
-    }
-  }
-
-  if (params.q && !newsItemMatchesQuery(item, params.q)) {
-    return false
-  }
-
-  return true
 }
 
 export function usePageController() {
@@ -194,23 +104,16 @@ export function usePageController() {
   const handleMarkAllRead = (watchlistId: string) => {
     watchlists.closeContextMenu()
 
-    const activeWatchlist = watchlists.activeWatchlist
     const watchlist = watchlists.customWatchlists.find((item) => item.id === watchlistId)
-    const params = buildMarkAllReadQueryParams({
-      activeWatchlist,
-      activeWatchlistId: watchlists.activeWatchlistId,
-      currentProvider: provider,
-      currentSearchQuery: searchQuery,
-      currentTicker: ticker,
-      targetWatchlistId: watchlistId,
-      watchlist,
-    })
-    if (!params) return
+    if (watchlistId !== "all" && !watchlist) return
+    const params = watchlistId === watchlists.activeWatchlistId
+      ? newsFeed.filters
+      : buildNewsFilters(watchlistId, watchlist)
 
     preferences.markReadByQuery(params)
       .catch(() => {
         const matchingKeys = preferences.trackedUnreadItems
-          .filter((item) => markAllReadMatchesItem(item, params))
+          .filter((item) => matchesNewsFilters(item, params))
           .map((item) => item.read_key)
         preferences.addReadKeys(matchingKeys)
       })

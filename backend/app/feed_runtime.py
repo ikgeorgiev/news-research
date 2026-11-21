@@ -415,26 +415,20 @@ def prune_raw_feed_items(
 
     current_time = now or datetime.now(timezone.utc)
     cutoff = current_time - timedelta(days=retention_days)
+    expired = (RawFeedItem.fetched_at < cutoff, RawFeedItem.article_id.is_(None))
+    batch = select(RawFeedItem.id).where(*expired).order_by(RawFeedItem.id).limit(batch_size)
     total_deleted = 0
 
     for _ in range(max_batches):
-        stale_ids = db.scalars(
-            select(RawFeedItem.id)
-            .where(
-                RawFeedItem.fetched_at < cutoff,
-                RawFeedItem.article_id.is_(None),
-            )
-            .order_by(RawFeedItem.id.asc())
-            .limit(batch_size)
+        # Ingestion may attach or refresh a candidate while the DELETE waits
+        # for its row lock. Check eligibility on the target row as well.
+        deleted = db.scalars(
+            delete(RawFeedItem).where(RawFeedItem.id.in_(batch), *expired).returning(RawFeedItem.id)
         ).all()
-        if not stale_ids:
-            break
-
-        db.execute(delete(RawFeedItem).where(RawFeedItem.id.in_(stale_ids)))
         db.commit()
-        total_deleted += len(stale_ids)
+        total_deleted += len(deleted)
 
-        if len(stale_ids) < batch_size:
+        if len(deleted) < batch_size:
             break
 
     return total_deleted

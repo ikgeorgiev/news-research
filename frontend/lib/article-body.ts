@@ -22,13 +22,14 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const text = (value: unknown): value is string => typeof value === "string" && value.length <= 60_000
 const span = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 40
 
-export function parseArticleBody(value: unknown, articleId: number, title?: string): ArticleBody | null {
+export function parseArticleBody(value: unknown, articleId: number, title?: string, expectedWireKey?: string): ArticleBody | null {
   if (!record(value) || value.version !== 1 || value.article_id !== articleId
     || !text(value.title) || (title !== undefined && value.title.trim() !== title.trim())
     || typeof value.wire_key !== "string" || !/^(?:(?:bw|gnw):\d+:[a-z]{2}|prn:\d+)$/.test(value.wire_key)
     || !text(value.source_url) || !text(value.original_url) || !text(value.published_at)
     || !Array.isArray(value.blocks) || value.blocks.length < 1 || value.blocks.length > 2000) return null
-  if (originalWireLink(value.original_url)?.wireKey !== value.wire_key
+  if ((expectedWireKey !== undefined && value.wire_key !== expectedWireKey)
+    || originalWireLink(value.original_url)?.wireKey !== value.wire_key
     || !/T.+(?:Z|[+-]\d{2}:\d{2})$/.test(value.published_at)
     || !Number.isFinite(Date.parse(value.published_at))) return null
   let cells = 0
@@ -36,7 +37,7 @@ export function parseArticleBody(value: unknown, articleId: number, title?: stri
     if (!record(block)) return null
     switch (block.type) {
       case "paragraph": if (!text(block.text)) return null; break
-      case "heading": if (!text(block.text) || ![2, 3, 4].includes(Number(block.level))) return null; break
+      case "heading": if (!text(block.text) || typeof block.level !== "number" || ![2, 3, 4].includes(block.level)) return null; break
       case "list":
         if (typeof block.ordered !== "boolean" || !Array.isArray(block.items)
           || block.items.length > 2000 || !block.items.every(text)) return null

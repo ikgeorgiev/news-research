@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -55,9 +54,9 @@ def _configure_yahoo_race_io(monkeypatch, feed_entries: dict[str, list[dict]]) -
 
 
 def test_concurrent_yahoo_mirror_ingests_share_one_article_and_two_raw_rows(
-    monkeypatch,
+    monkeypatch, scratch_dir,
 ):
-    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_article_race.db"
+    db_path = scratch_dir / "ingestion.db"
     engine, session_factory = build_sqlite_session_factory(db_path)
     setup_db = session_factory()
     try:
@@ -135,12 +134,10 @@ def test_concurrent_yahoo_mirror_ingests_share_one_article_and_two_raw_rows(
     finally:
         setup_db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()
 
 
-def test_concurrent_yahoo_same_raw_identity_keeps_one_raw_row(monkeypatch):
-    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_raw_race.db"
+def test_concurrent_yahoo_same_raw_identity_keeps_one_raw_row(monkeypatch, scratch_dir):
+    db_path = scratch_dir / "ingestion.db"
     engine, session_factory = build_sqlite_session_factory(db_path)
     setup_db = session_factory()
     try:
@@ -207,12 +204,10 @@ def test_concurrent_yahoo_same_raw_identity_keeps_one_raw_row(monkeypatch):
     finally:
         setup_db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()
 
 
-def test_concurrent_yahoo_same_raw_identity_preserves_alt_feed_urls(monkeypatch):
-    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_raw_alt_race.db"
+def test_concurrent_yahoo_same_raw_identity_preserves_alt_feed_urls(monkeypatch, scratch_dir):
+    db_path = scratch_dir / "ingestion.db"
     engine, session_factory = build_sqlite_session_factory(db_path)
     setup_db = session_factory()
     try:
@@ -288,12 +283,10 @@ def test_concurrent_yahoo_same_raw_identity_preserves_alt_feed_urls(monkeypatch)
     finally:
         setup_db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()
 
 
-def test_concurrent_yahoo_different_guids_same_link_pubdate_merges(monkeypatch):
-    db_path = Path(__file__).resolve().parent / ".tmp_yahoo_guid_pair_race.db"
+def test_concurrent_yahoo_different_guids_same_link_pubdate_merges(monkeypatch, scratch_dir):
+    db_path = scratch_dir / "ingestion.db"
     engine, session_factory = build_sqlite_session_factory(db_path)
     setup_db = session_factory()
     try:
@@ -373,5 +366,3 @@ def test_concurrent_yahoo_different_guids_same_link_pubdate_merges(monkeypatch):
     finally:
         setup_db.close()
         engine.dispose()
-        if db_path.exists():
-            db_path.unlink()

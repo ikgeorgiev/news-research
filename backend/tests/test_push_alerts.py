@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -9,13 +10,13 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
+from app.config import Settings
 from app.ingestion import _run_push_alerts, run_ingestion_cycle
 from app.routes.push import (
     delete_push_subscription,
@@ -25,6 +26,7 @@ from app.routes.push import (
 )
 from app.models import Article, ArticleTicker, PushSubscription, Ticker
 from app.push_alerts import (
+    MAX_PUSH_PLAINTEXT_BYTES,
     PushAlertDispatcher,
     check_and_send_alerts,
     check_and_send_alerts_locked,
@@ -411,8 +413,9 @@ def test_delete_push_subscription_works_when_push_runtime_is_disabled(db_session
     assert db.scalar(select(PushSubscription).where(PushSubscription.id == sub.id)) is None
 
 
+@pytest.mark.parametrize("manage_token", [None, "existing-token"], ids=["no-token", "valid-token"])
 def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, manage_token,
 ):
     with tempfile.TemporaryDirectory() as tmp_dir:
         engine = create_engine(f"sqlite:///{(Path(tmp_dir) / 'push-subscriptions.db').as_posix()}")
@@ -422,6 +425,9 @@ def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
         try:
             monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
 
+            prior_cursor = _seed_article_with_ticker(db, slug="delivered").id
+            pending_id = _seed_article_with_ticker(db, slug="pending").id
+            assert pending_id > prior_cursor
             original_commit = db.commit
             conflict_inserted = {"done": False}
 
@@ -435,21 +441,20 @@ def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
                             key_p256dh="existing-p256dh",
                             key_auth="existing-auth",
                             expiration_time=None,
-                            alert_scopes_json={"include_all_news": False, "watchlists": []},
-                            last_notified_json={},
+                            alert_scopes_json={"include_all_news": True, "watchlists": []},
+                            last_notified_json={"all": prior_cursor},
                             manage_token_hash=sha256_str("existing-token"),
                             active=True,
                         )
                     )
                     conflict_db.commit()
                     conflict_db.close()
-                    raise IntegrityError("INSERT", {}, Exception("unique endpoint conflict"))
                 return original_commit()
 
             monkeypatch.setattr(db, "commit", commit_with_conflict)
 
             response = upsert_push_subscription(
-                _push_payload(endpoint="https://fcm.googleapis.com/sub-race"),
+                _push_payload(endpoint="https://fcm.googleapis.com/sub-race", manage_token=manage_token),
                 db=db,
             )
 
@@ -458,11 +463,13 @@ def test_upsert_push_subscription_recovers_from_unique_endpoint_conflict(
             )
 
             assert response.created is False
-            assert response.manage_token is None
+            assert response.manage_token == manage_token
+            assert response.seeded_last_notified == {}
             assert subscription is not None
             assert subscription.active is True
-            assert subscription.key_p256dh == "existing-p256dh"
-            assert subscription.key_auth == "existing-auth"
+            assert subscription.last_notified_json == {"all": prior_cursor}
+            assert subscription.key_p256dh == ("p256dh-key" if manage_token else "existing-p256dh")
+            assert subscription.key_auth == ("auth-key" if manage_token else "existing-auth")
         finally:
             db.close()
             engine.dispose()
@@ -562,7 +569,7 @@ def test_check_and_send_alerts_deactivates_unsafe_legacy_endpoint_without_sendin
     assert second.id > first.id
 
 
-def test_check_and_send_alerts_processes_every_subscription_across_batches(
+def test_check_and_send_alerts_processes_every_subscription_in_snapshot_order(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -586,7 +593,6 @@ def test_check_and_send_alerts_processes_every_subscription_across_batches(
     db.add_all(subscriptions)
     db.commit()
 
-    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
     send_order: list[int] = []
 
     def _send(*_args, **kwargs):
@@ -638,7 +644,6 @@ def test_check_and_send_alerts_continues_after_mid_scan_deactivation(
     db.add_all(subscriptions)
     db.commit()
 
-    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
     send_order: list[int] = []
 
     def _send(*_args, **kwargs):
@@ -674,6 +679,54 @@ def test_check_and_send_alerts_continues_after_mid_scan_deactivation(
         assert int(sub.last_notified_json.get("all", 0) or 0) == second.id
 
 
+@pytest.mark.parametrize("change", ["disable", "delete"])
+def test_dispatch_skips_subscription_removed_after_snapshot(scratch_dir, monkeypatch, change):
+    engine = create_engine(f"sqlite:///{(scratch_dir / 'push.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _: True)
+    settings = Settings(_env_file=None, vapid_public_key="public", vapid_private_key="private",
+                        vapid_contact_email="alerts@example.com")
+    sent = []
+
+    def send(_settings, *, subscription, payload):
+        sent.append(subscription.id)
+        return "success", None
+
+    monkeypatch.setattr("app.push_alerts._send_push_notification", send)
+    try:
+        with Session(engine) as setup:
+            first, removed, third = [
+                upsert_push_subscription(_push_payload(endpoint=f"https://fcm.googleapis.com/member-{i}"), db=setup)
+                for i in range(3)
+            ]
+            article_id = _seed_article_with_ticker(setup, slug="new-for-all-three").id
+
+        with Session(engine) as dispatch:
+            @event.listens_for(dispatch, "after_commit", once=True)
+            def unsubscribe_after_first_delivery(_):
+                with Session(engine) as other:
+                    subscription = other.get(PushSubscription, removed.id)
+                    if change == "disable":
+                        subscription.active = False
+                    else:
+                        other.delete(subscription)
+                    other.commit()
+
+            stats = check_and_send_alerts(dispatch, settings)
+
+        assert stats == {"scanned": 2, "sent": 2, "failed": 0, "deactivated": 0}
+        assert sent == [first.id, third.id]
+        with Session(engine) as verify:
+            assert verify.get(PushSubscription, third.id).last_notified_json == {"all": article_id}
+            removed_row = verify.get(PushSubscription, removed.id)
+            if change == "disable":
+                assert not removed_row.active and removed_row.last_notified_json == {"all": 0}
+            else:
+                assert removed_row is None
+    finally:
+        engine.dispose()
+
+
 def test_check_and_send_alerts_defers_new_higher_id_subscriptions_until_next_run(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -702,7 +755,6 @@ def test_check_and_send_alerts_defers_new_higher_id_subscriptions_until_next_run
     db.add_all(subscriptions)
     db.commit()
 
-    monkeypatch.setattr("app.push_alerts._SUBSCRIPTION_BATCH_SIZE", 1)
     send_order: list[int] = []
     inserted = {"done": False, "subscription_id": None}
 
@@ -781,7 +833,7 @@ def test_seed_last_notified_watermarks_logs_and_reseeds_invalid_values(
 
     assert next_watermarks == {"all": article.id}
     assert seeded == {"all": article.id}
-    assert len(warning_messages) == 5
+    assert len(warning_messages) == 4
     assert all("subscription_id=123" in message for message in warning_messages)
 
 
@@ -808,6 +860,51 @@ def test_seed_last_notified_watermarks_does_not_warn_for_valid_values(
     assert next_watermarks == {"all": article.id}
     assert seeded == {}
     assert not warning_messages
+
+
+@pytest.mark.parametrize("scope_count", [1, MAX_PUSH_WATCHLISTS])
+def test_first_watchlist_match_is_delivered_even_with_large_push_details(db_session, monkeypatch, scope_count):
+    settings = Settings(_env_file=None, vapid_public_key="public", vapid_private_key="private",
+                        vapid_contact_email="contact@example.com")
+    monkeypatch.setattr("app.routes.push.push_runtime_enabled", lambda _settings: True)
+    payload = _push_payload(endpoint="https://fcm.googleapis.com/empty-watchlist")
+    payload.scopes = PushAlertScopes(include_all_news=False, watchlists=[
+        PushWatchlistScope(id=f"{i}-" + "a" * 110, tickers=["GOF"]) for i in range(scope_count)
+    ])
+    created = upsert_push_subscription(payload, db=db_session)
+    assert len(created.seeded_last_notified) == scope_count
+    assert set(created.seeded_last_notified.values()) == {0}
+
+    article = _seed_article_with_ticker(db_session, slug="first-watchlist-match")
+    article.title = "📣" * 2400
+    db_session.commit()
+    messages = []
+    monkeypatch.setattr("app.push_alerts.webpush", lambda **kwargs: messages.append(kwargs["data"]))
+    assert check_and_send_alerts(db_session, settings)["sent"] == 1
+    assert len(messages) == 1 and len(messages[0]) <= MAX_PUSH_PLAINTEXT_BYTES
+    notice = json.loads(messages[0])
+    assert notice["body"].startswith("GOF\n📣") and notice["title"] == "CEF News: 1 new article"
+    assert article.first_alert_sent_at is not None
+    subscription = db_session.get(PushSubscription, created.id)
+    assert set(subscription.last_notified_json.values()) == {article.id}
+    assert check_and_send_alerts(db_session, settings)["sent"] == 0
+
+
+def test_quiet_feed_retries_pending_push_work(monkeypatch):
+    settings = Settings(_env_file=None, vapid_public_key="public", vapid_private_key="private",
+                        vapid_contact_email="contact@example.com")
+    dispatcher = PushAlertDispatcher("postgresql://localhost/test", settings, FakeSessionContext)
+    calls = []
+
+    def dispatch(db, configured):
+        calls.append(configured)
+        dispatcher._shutdown.set()
+        return {"sent": 1}
+
+    monkeypatch.setattr(dispatcher._wake, "wait", lambda timeout: False)
+    monkeypatch.setattr("app.push_alerts.check_and_send_alerts_locked", dispatch)
+    dispatcher._worker_loop()
+    assert calls == [settings]
 
 
 def test_run_ingestion_cycle_continues_when_push_alerts_fail(db_session: Session, monkeypatch: pytest.MonkeyPatch):

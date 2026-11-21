@@ -230,6 +230,27 @@ def test_dedupe_articles_by_title_merges_duplicates(db_session):
     assert len(raw_items) == 2
 
 
+def test_title_maintenance_preserves_distinct_original_wire_ids_on_mirrors(db_session):
+    db = db_session
+    source = seed_source(db, code="financialcontent", name="FinancialContent")
+    published = datetime(2026, 3, 1, 12, tzinfo=timezone.utc)
+    ids = []
+    for number in ("20260301001111", "20260301002222"):
+        article = seed_article(db, canonical_url=f"https://example.com/mirror/{number}",
+                               title="Availability of Distribution Notices", published_at=published)
+        ids.append(article.id)
+        db.add(build_raw_feed_item(source=source, article=article, feed_url="https://example.com/feed",
+                                   raw_guid=f"bw:{number}:en", raw_link=article.canonical_url,
+                                   raw_pub_date=published))
+    db.commit()
+
+    result = dedupe_articles_by_title(db)
+
+    assert result["merged_articles"] == 0
+    assert set(db.scalars(select(Article.id))) == set(ids)
+    assert set(db.scalars(select(RawFeedItem.article_id))) == set(ids)
+
+
 def test_upsert_article_tickers_force_update_lowers_confidence(db_session):
     db = db_session
     article = seed_article(

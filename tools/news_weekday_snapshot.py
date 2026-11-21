@@ -100,20 +100,11 @@ def snapshot(minutes):
             raise ValueError('Health response exceeds 256 KiB')
         out['health'] = json.loads(health)
     from app.config import get_settings
-    from sqlalchemy.engine import make_url
-    import psycopg
-    from psycopg.rows import dict_row
+    from scripts.local_database import local_report_database
     settings = get_settings()
-    dsn = make_url(settings.database_url)
-    # The verified local production mapping is cef_news on loopback:5433.
-    # Do not print credentials or follow a changed database to another host.
-    if dsn.database != 'cef_news' or dsn.host not in {'localhost', '127.0.0.1', 'db'}:
-        raise ValueError('Production database identity changed; review the local mapping')
-    with psycopg.connect(host='127.0.0.1', port=5433, user=dsn.username, password=dsn.password,
-                         dbname=dsn.database, connect_timeout=5, row_factory=dict_row,
-                         options='-c statement_timeout=5000 -c lock_timeout=5000') as db:
-        db.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    with local_report_database(settings.database_url) as db:
         out['database_identity'] = db.execute('SELECT current_database() AS database,inet_server_port() AS server_port').fetchone()
+        out['database_identity']['published_port'] = db.info.port
         out['articles'] = db.execute('''SELECT id,title,canonical_url,provider_name,source_name,
             published_at,first_seen_at,created_at,first_alert_sent_at,left(summary,6000) AS summary
             FROM articles WHERE first_seen_at >= %s AND first_seen_at < %s

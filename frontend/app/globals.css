@@ -134,6 +134,16 @@ body {
   gap: 0.5rem;
 }
 
+.watchlist-select, .watchlist-select:hover:not(:disabled) {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
 .sidebar-section-header {
   display: flex;
   justify-content: space-between;
@@ -294,6 +304,9 @@ button:disabled {
 
 /* New articles banner */
 .new-articles-banner {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
   position: sticky;
   top: 0;
   z-index: 50;
@@ -308,7 +321,7 @@ button:disabled {
   transition: background-color 0.15s ease;
 }
 
-.new-articles-banner:hover {
+.new-articles-banner:hover:not(:disabled) {
   background: var(--accent-blue-hover);
 }
 
@@ -641,6 +654,12 @@ button:disabled {
 }
 
 .context-menu-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
   padding: 8px 16px;
   cursor: pointer;
   font-size: 0.85rem;
@@ -649,7 +668,7 @@ button:disabled {
   white-space: nowrap;
 }
 
-.context-menu-item:hover {
+.context-menu-item:hover:not(:disabled) {
   background: var(--accent-blue);
   color: var(--text-solid);
 }
@@ -658,7 +677,7 @@ button:disabled {
   color: #f23645;
 }
 
-.context-menu-item.delete:hover {
+.context-menu-item.delete:hover:not(:disabled) {
   background: #f23645;
   color: var(--text-solid);
 }

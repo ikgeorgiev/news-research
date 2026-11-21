@@ -29,7 +29,9 @@ _active_dispatcher_count = 0
 
 ALL_SCOPE_KEY = "all"
 MAX_ERROR_TEXT_LEN = 500
-_SUBSCRIPTION_BATCH_SIZE = 500
+# RFC 8291 section 4 reserves 103 bytes of the 4096-byte record for encryption.
+MAX_PUSH_PLAINTEXT_BYTES = 3993
+_PUSH_RECONCILE_SECONDS = 60
 
 try:
     from pywebpush import WebPushException, webpush
@@ -193,6 +195,7 @@ def _coerce_normalized_scopes(
         watchlists=tuple(watchlists),
     )
 
+
 def normalize_scopes(payload: dict[str, Any] | None) -> dict[str, Any]:
     return _coerce_normalized_scopes(payload).to_payload()
 
@@ -242,17 +245,17 @@ def _normalize_last_notified(
     for key, value in payload.items():
         try:
             parsed = int(value)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             logger.warning(
-                "Ignoring invalid push watermark for scope=%s: value=%r is not a positive integer%s",
+                "Ignoring invalid push watermark for scope=%s: value=%r is not an integer%s",
                 key,
                 value,
                 context_suffix,
             )
             continue
-        if parsed <= 0:
+        if parsed < 0 or isinstance(value, (bool, float)):
             logger.warning(
-                "Ignoring invalid push watermark for scope=%s: value=%r must be > 0%s",
+                "Ignoring invalid push watermark for scope=%s: value=%r must be a nonnegative integer%s",
                 key,
                 value,
                 context_suffix,
@@ -278,7 +281,7 @@ def seed_last_notified_watermarks(
     next_state: dict[str, int] = {}
     for scope_query in normalized_scopes.scope_queries():
         prev = previous.get(scope_query.key)
-        if isinstance(prev, int) and prev > 0:
+        if prev is not None:
             next_state[scope_query.key] = prev
             continue
         max_id = _scope_max_article_id(db, scope_query)
@@ -335,8 +338,8 @@ def _build_payload(db: Session, *, article_ids: list[int], scope_keys: list[str]
         "url": "/",
         "article_ids": [row.id for row in rows],
         "scope_keys": scope_keys,
-        "dedupe_key": f"push:{max(row.id for row in rows)}",
-        "tag": f"cef-news-{max(row.id for row in rows)}",
+        "dedupe_key": f"push:{newest.id}",
+        "tag": f"cef-news-{newest.id}",
     }
 
 
@@ -404,6 +407,28 @@ def _build_vapid_sub_claim(raw: str) -> str:
     return value
 
 
+def _encode_push_payload(payload: dict[str, Any]) -> bytes:
+    def encode(message: dict[str, Any]) -> bytes:
+        return json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    data = encode(payload)
+    if len(data) <= MAX_PUSH_PLAINTEXT_BYTES:
+        return data
+
+    # The reader refreshes from the API on push. Keep the full delivery ledger
+    # on the server even when optional detail cannot fit in one notification.
+    preview = payload.copy()
+    body = preview["body"]
+    if len(body) > 240:
+        preview["body"] = body[:239] + "…"
+    for optional in ("scope_keys", "article_ids"):
+        data = encode(preview)
+        if len(data) <= MAX_PUSH_PLAINTEXT_BYTES:
+            return data
+        preview.pop(optional)
+    return encode(preview)
+
+
 def _send_push_notification(
     settings: Settings,
     *,
@@ -432,7 +457,7 @@ def _send_push_notification(
                     "auth": subscription.key_auth,
                 },
             },
-            data=json.dumps(payload, separators=(",", ":")),
+            data=_encode_push_payload(payload),
             vapid_private_key=vapid_private_key,
             vapid_claims={"sub": vapid_contact},
             timeout=settings.push_send_timeout_seconds,
@@ -493,6 +518,7 @@ def _process_subscription_alerts(
     try:
         dispatch = _prepare_subscription_dispatch(db, settings, subscription)
         if dispatch is None:
+            db.commit()
             return outcome
 
         subscription.alert_scopes_json = dispatch.scopes_payload
@@ -587,6 +613,7 @@ def check_and_send_alerts_locked(
                     logger.warning("Push advisory unlock returned false (key=%s)", lock_key)
             except Exception:
                 logger.exception("Failed to release push advisory lock")
+                lock_conn.invalidate()
 
 
 def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
@@ -617,25 +644,22 @@ def check_and_send_alerts(db: Session, settings: Settings) -> dict[str, int]:
         .order_by(PushSubscription.updated_at.asc(), PushSubscription.id.asc())
     ).all()
 
-    for offset in range(0, len(snapshot_ids), _SUBSCRIPTION_BATCH_SIZE):
-        chunk_ids = snapshot_ids[offset : offset + _SUBSCRIPTION_BATCH_SIZE]
-        batch = db.scalars(
+    for sub_id in snapshot_ids:
+        # A user may edit or remove this subscription while earlier ones send.
+        # Lock just this row until its delivery and watermark update finish.
+        subscription = db.scalar(
             select(PushSubscription)
-            .where(PushSubscription.id.in_(chunk_ids))
-        ).all()
-        # Preserve the updated_at ordering from the snapshot.
-        batch_by_id = {sub.id: sub for sub in batch}
-        for sub_id in chunk_ids:
-            subscription = batch_by_id.get(sub_id)
-            if subscription is None:
-                continue
-            scanned += 1
-            outcome = _process_subscription_alerts(
-                db, settings, subscription, max_consecutive_failures
-            )
-            sent += outcome.sent
-            failed += outcome.failed
-            deactivated += outcome.deactivated
+            .where(PushSubscription.id == sub_id, PushSubscription.active.is_(True))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if subscription is None:
+            continue
+        scanned += 1
+        outcome = _process_subscription_alerts(db, settings, subscription, max_consecutive_failures)
+        sent += outcome.sent
+        failed += outcome.failed
+        deactivated += outcome.deactivated
 
     active_after = db.scalar(
         select(func.count()).select_from(select(PushSubscription.id).where(PushSubscription.active.is_(True)).subquery())
@@ -742,8 +766,13 @@ class PushAlertDispatcher:
 
     def _worker_loop(self) -> None:
         while not self._shutdown.is_set():
-            self._wake.wait(timeout=1.0)
+            signaled = self._wake.wait(timeout=_PUSH_RECONCILE_SECONDS)
             self._wake.clear()
+            if not signaled and push_runtime_enabled(self._settings):
+                # A bounded batch or failed send may leave work after the last
+                # NOTIFY. Recheck even when no new article arrives to wake us.
+                with self._state_lock:
+                    self._dispatch_pending = True
             self._run_pending_dispatches()
 
     def _run_pending_dispatches(self) -> None:

@@ -55,10 +55,10 @@ export function NewsFeedSection({
   return (
     <section className="feed-container" ref={feedContainerRef}>
       {pendingNewItems.length > 0 && (
-        <div className="new-articles-banner" onClick={loadPendingArticles}>
+        <button type="button" className="new-articles-banner" onClick={loadPendingArticles}>
           {pendingNewItems.length} new article{pendingNewItems.length !== 1 ? "s" : ""} available
           {" "}click to load
-        </div>
+        </button>
       )}
       {!loading && items.length === 0 && (
         <div style={{ padding: "3rem 1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>

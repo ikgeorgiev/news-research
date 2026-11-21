@@ -1,6 +1,7 @@
 """Conservative disambiguation of releases that share a headline."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 import re
 import unicodedata
 from urllib.parse import urlparse
@@ -62,6 +63,21 @@ def _body_lead(summary: str | None) -> tuple[str, ...] | None:
     return tuple(words[:24]) if len(words) >= 24 else None
 
 
+def article_wire_identities(
+    articles: list[Article], raw_evidence: Iterable[tuple[int, str | None, str | None, str]],
+) -> dict[int, set[WireIdentity]]:
+    identities: dict[int, set[WireIdentity]] = {article.id: set() for article in articles}
+    for article in articles:
+        key = release_identity(article.canonical_url)
+        if key is not None:
+            identities[article.id].add(key)
+    for article_id, link, guid, source_code in raw_evidence:
+        key = release_identity(link, guid, source_code)
+        if key is not None:
+            identities[article_id].add(key)
+    return identities
+
+
 def select_release_candidate(
     db: Session, candidates: list[Article], *,
     identity: WireIdentity | None, summary: str | None,
@@ -69,21 +85,13 @@ def select_release_candidate(
     if not candidates:
         return None
     if identity is not None:
-        identities = {a.id: set() for a in candidates}
-        for article in candidates:
-            key = release_identity(article.canonical_url)
-            if key is not None:
-                identities[article.id].add(key)
         rows = db.execute(
             select(RawFeedItem.article_id, RawFeedItem.raw_link,
                    RawFeedItem.raw_guid, Source.code)
             .join(Source, Source.id == RawFeedItem.source_id)
-            .where(RawFeedItem.article_id.in_(identities))
+            .where(RawFeedItem.article_id.in_([article.id for article in candidates]))
         )
-        for article_id, link, guid, source_code in rows:
-            key = release_identity(link, guid, source_code)
-            if key is not None:
-                identities[article_id].add(key)
+        identities = article_wire_identities(candidates, rows)
         exact = [a for a in candidates if identities[a.id] == {identity}]
         if exact:
             return min(exact, key=lambda a: a.id)

@@ -78,3 +78,7 @@ def test_unsubstantiated_legacy_provider_still_uses_raw_provenance(db_session):
     ))
     db.commit()
     assert get_news_item(article.id, db=db).provider == 'Yahoo Finance'
+    options = dict(include_unmapped=True, include_unmapped_from_provider=None, limit=10, cursor=None, db=db)
+    assert list_news_ids(provider='yahoo', **options).ids == [article.id]
+    assert list_news_ids(provider='wire', **options).ids == []
+    assert [item.id for item in list_news(provider='yahoo', include_global_summary=False, **options).items] == [article.id]

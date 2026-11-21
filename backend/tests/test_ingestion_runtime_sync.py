@@ -1,50 +1,23 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
+from queue import Queue
+import time
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, func, select, update
 from sqlalchemy.orm import Session
 
-from app.article_ingest import ingest_feed
-from app.article_maintenance import (
-    _upsert_article_tickers,
-    dedupe_articles_by_title,
-    dedupe_businesswire_url_variants,
-    purge_token_only_articles,
-    remap_source_articles,
-    revalidate_stale_article_tickers,
-)
-from app.config import Settings
 from app.feed_runtime import (
-    _fetch_feed_with_retries,
-    _get_feed_conditional_headers,
     _load_tickers_from_csv_if_changed,
-    _update_feed_http_cache,
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
-from app.models import (
-    Article,
-    ArticleTicker,
-    FeedPollState,
-    IngestionRun,
-    RawFeedItem,
-    Source,
-    Ticker,
-)
-from app.constants import EXTRACTION_VERSION
-from app.utils import sha256_str
-from tests.helpers import (
-    FakeRssResponse,
-    call_ingest,
-    seed_article,
-    seed_article_with_raw,
-    seed_source,
-    seed_ticker,
-)
+from app.models import IngestionRun, RawFeedItem
+from tests.helpers import seed_article, seed_source, seed_ticker
+
 
 def test_reconcile_stale_ingestion_runs_marks_only_stale_running_rows(db_session):
     db = db_session
@@ -187,3 +160,62 @@ def test_prune_raw_feed_items_respects_retention_window(db_session):
     assert deleted == 1
     assert remaining_guids == {"attached-old-guid", "fresh-guid"}
     assert attached_after is not None
+
+
+def test_raw_prune_rechecks_rows_changed_by_ingestion_before_the_delete(db_session):
+    db = db_session
+    now = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    source = seed_source(db)
+    article_id = seed_article(db, slug="recovered-article").id
+    for guid in ("attached", "refreshed", "expired"):
+        db.add(RawFeedItem(source_id=source.id, feed_url="https://example.com/feed",
+                           raw_guid=guid, fetched_at=now - timedelta(days=40)))
+    db.commit()
+
+    # Simulate a competing ingestion transaction winning the race immediately
+    # before the pruning DELETE executes, independent of database lock timing.
+    @event.listens_for(db, "do_orm_execute")
+    def recover_rows(operation):
+        if operation.is_delete:
+            conn = db.connection()
+            conn.execute(update(RawFeedItem).where(RawFeedItem.raw_guid == "attached").values(article_id=article_id))
+            conn.execute(update(RawFeedItem).where(RawFeedItem.raw_guid == "refreshed").values(fetched_at=now))
+
+    deleted = prune_raw_feed_items(db, retention_days=30, batch_size=100, max_batches=1, now=now)
+
+    assert deleted == 1
+    assert set(db.scalars(select(RawFeedItem.raw_guid))) == {"attached", "refreshed"}
+
+
+def test_postgres_prune_retains_row_attached_while_waiting_for_lock(disposable_postgres_engine):
+    engine = disposable_postgres_engine
+    now = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    pids = Queue()
+
+    def prune():
+        with Session(engine) as db:
+            pids.put(db.scalar(select(func.pg_backend_pid())))
+            return prune_raw_feed_items(db, retention_days=30, batch_size=100, max_batches=1, now=now)
+
+    with Session(engine) as writer:
+        source_id = seed_source(writer).id
+        article_id = seed_article(writer, slug="resolved").id
+        row = RawFeedItem(source_id=source_id, feed_url="https://example.com/feed", raw_guid="resolved",
+                          fetched_at=now - timedelta(days=40))
+        writer.add(row)
+        writer.commit()
+        row_id = row.id
+        writer.execute(update(RawFeedItem).where(RawFeedItem.id == row_id).values(article_id=article_id))
+        writer_pid = writer.scalar(select(func.pg_backend_pid()))
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            deleted = executor.submit(prune)
+            try:
+                pruner_pid = pids.get(timeout=3)
+                deadline = time.monotonic() + 3
+                while writer_pid not in writer.scalar(select(func.pg_blocking_pids(pruner_pid))):
+                    assert time.monotonic() < deadline, "Pruning did not wait for the uncommitted attachment"
+                    time.sleep(0.01)
+            finally:
+                writer.commit()
+            assert deleted.result(timeout=3) == 0
+        assert writer.get(RawFeedItem, row_id).article_id == article_id

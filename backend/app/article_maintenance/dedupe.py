@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.constants import TITLE_DEDUP_WINDOW_HOURS
 from app.models import Article, ArticleTicker, RawFeedItem, Source
+from app.release_matching import article_wire_identities
 from app.ticker_extraction import _canonical_businesswire_article_url, _is_businesswire_article_url
-from app.utils import GENERAL_SOURCE_CODE, canonicalize_url, sha256_str, to_utc
+from app.utils import GENERAL_SOURCE_CODE, article_content_hash, canonicalize_url, normalize_title, sha256_str, to_utc
 
 
 class DedupeStats(TypedDict):
@@ -60,6 +61,7 @@ def _merge_duplicates_into_winner(
             not winner_summary or len(duplicate_summary) > len(winner_summary)
         ):
             winner.summary = duplicate.summary
+            winner.content_hash = article_content_hash(winner.title_normalized_hash, winner.summary)
         if duplicate.published_at and (
             winner.published_at is None
             or duplicate.published_at > winner.published_at
@@ -261,26 +263,23 @@ def dedupe_articles_by_title(
         for cluster in clusters:
             if len(cluster) <= 1:
                 continue
+            if len({normalize_title(article.title) for article in cluster}) > 1:
+                continue  # A historical headline correction can leave a stale index.
 
             article_ids = [row.id for row in cluster]
-            cluster_raw_rows = db.scalars(
-                select(RawFeedItem).where(RawFeedItem.article_id.in_(article_ids))
+            observations = db.execute(
+                select(RawFeedItem, Source.code).join(Source, Source.id == RawFeedItem.source_id)
+                .where(RawFeedItem.article_id.in_(article_ids))
             ).all()
-            raw_by_article: dict[int, set[int]] = {}
-            for raw_row in cluster_raw_rows:
-                raw_by_article.setdefault(raw_row.article_id, set()).add(
-                    raw_row.source_id
-                )
-            bw_source_id = db.scalar(
-                select(Source.id).where(Source.code == GENERAL_SOURCE_CODE)
-            )
-            has_bw_risk = False
-            for aid in article_ids:
-                source_ids = raw_by_article.get(aid, set())
-                if not source_ids or bw_source_id in source_ids:
-                    has_bw_risk = True
-                    break
-            if has_bw_risk:
+            raw_rows = [raw for raw, _ in observations]
+            if (len({raw.article_id for raw in raw_rows}) != len(cluster)
+                    or any(code == GENERAL_SOURCE_CODE for _, code in observations)):
+                continue
+            identities = article_wire_identities(cluster, (
+                (raw.article_id, raw.raw_link, raw.raw_guid, code) for raw, code in observations
+            ))
+            if len(set().union(*identities.values())) > 1:
+                # A shared title is insufficient to reconcile conflicting releases.
                 continue
 
             duplicate_groups += 1
@@ -292,8 +291,6 @@ def dedupe_articles_by_title(
                 ticker_rows_by_article.setdefault(ticker_row.article_id, []).append(
                     ticker_row
                 )
-
-            raw_rows = cluster_raw_rows
 
             def _rank(row: Article) -> tuple[int, int, float, int]:
                 ticker_count = len(ticker_rows_by_article.get(row.id, []))

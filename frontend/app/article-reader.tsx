@@ -3,7 +3,7 @@
 import { CSSProperties, MouseEvent, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { ArticleBody, parseArticleBody } from "@/lib/article-body"
-import { articleLink } from "@/lib/article-link"
+import { articleLink, itemWireLink } from "@/lib/article-link"
 import { readableParagraphs, readableTable } from "@/lib/article-layout"
 import { NewsItem } from "@/lib/types"
 
@@ -90,12 +90,12 @@ export function ArticleReader({ item, onClose, openArticle }: Props) {
     scroll.current?.scrollTo?.(0, 0)
     const timeout = setTimeout(() => { abort.abort(); setDocument(null); setLoading(false) }, 5000)
     fetch("/article-body/" + item.id, { signal: abort.signal })
-      .then(async response => response.ok ? parseArticleBody(await response.json(), item.id, item.title) : null)
+      .then(async response => response.ok ? parseArticleBody(await response.json(), item.id, item.title, itemWireLink(item)?.wireKey) : null)
       .then(body => { if (!abort.signal.aborted) setDocument(body) })
       .catch(() => { if (!abort.signal.aborted) setDocument(null) })
       .finally(() => { clearTimeout(timeout); if (!abort.signal.aborted) setLoading(false) })
     return () => { clearTimeout(timeout); abort.abort() }
-  }, [item.id, item.title])
+  }, [item])
 
   function resize(size: number) {
     setFontSize(size)

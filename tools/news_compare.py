@@ -130,17 +130,10 @@ def lookup_local_yahoo(rows,since,until):
     if not ids and not links:
         return out
     from app.config import get_settings
-    from sqlalchemy.engine import make_url
-    import psycopg
-    from psycopg.rows import dict_row
-    dsn=make_url(get_settings().database_url)
-    if dsn.database!='cef_news' or dsn.host not in {'localhost','127.0.0.1','db'}:
-        raise ValueError('Local production mapping changed; review before connecting')
-    with psycopg.connect(host='127.0.0.1',port=5433,user=dsn.username,password=dsn.password,
-                        dbname=dsn.database,connect_timeout=5,row_factory=dict_row,
-                        options='-c statement_timeout=5000 -c lock_timeout=5000') as db:
-        db.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+    from scripts.local_database import local_report_database
+    with local_report_database(get_settings().database_url) as db:
         out['database_identity']=db.execute('SELECT current_database() AS database,inet_server_port() AS server_port').fetchone()
+        out['database_identity']['published_port'] = db.info.port
         out['raw_rows']=db.execute('''SELECT r.id AS raw_id,r.article_id,r.feed_url,r.raw_guid,r.raw_title,
             r.raw_link,r.raw_pub_date,a.title AS article_title,a.canonical_url,a.published_at,
             a.first_seen_at AS stored_article_first_seen,a.created_at AS stored_article_created,

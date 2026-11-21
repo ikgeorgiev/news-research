@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
-from sqlalchemy import event, func, select
+from sqlalchemy import MetaData, event, func, select, update
 from sqlalchemy.orm import Session
 
-from app.article_filters import build_article_query
 from app.config import get_settings
 from app.deps import require_admin_api_key
 from app.main import health
@@ -652,16 +651,22 @@ def test_get_news_item_returns_unmapped_article_by_id(db_session: Session):
     assert result.tickers == []
 
 
-def test_build_article_query_uses_first_seen_fallback_for_date_filters(db_session: Session):
-    query = build_article_query(
-        db_session,
-        from_=datetime(2025, 1, 1, tzinfo=timezone.utc),
+def test_date_range_with_offsets_uses_the_same_utc_instants_on_both_feed_routes(db_session):
+    instant = datetime(2025, 1, 3, 10, tzinfo=timezone.utc)
+    selected = seed_article(db_session, slug="inside-offset-range", published_at=instant)
+    seed_article(db_session, slug="outside-offset-range", published_at=instant + timedelta(hours=2))
+    offset = timezone(timedelta(hours=2))
+    options = dict(
+        include_unmapped=True, include_unmapped_from_provider=None, limit=10, cursor=None, db=db_session,
+        from_=instant.astimezone(offset), to=(instant + timedelta(hours=1)).astimezone(offset),
     )
-
-    assert (
-        "coalesce(articles.published_at, articles.created_at, articles.first_seen_at)"
-        in str(query)
-    )
+    assert list_news_ids(**options).ids == [selected.id]
+    selected.first_alert_sent_at = instant
+    db_session.commit()
+    page = list_news(**options)
+    assert [row.id for row in page.items] == [selected.id]
+    assert page.items[0].published_at == page.items[0].alert_sent_at == instant
+    assert page.items[0].first_seen_at.utcoffset() == timedelta(0)
 
 
 def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
@@ -673,6 +678,30 @@ def test_timestamp_fallback_helpers_return_epoch_for_fully_legacy_rows():
 
     assert _published_at_for_response(row) == EPOCH_UTC
     assert _first_seen_at_for_response(row) == EPOCH_UTC
+
+
+def test_both_news_cursors_traverse_legacy_rows_without_any_timestamps(db_session: Session):
+    # Older databases can contain rows that predate the timestamp constraints.
+    engine = db_session.get_bind()
+    legacy = Article.__table__.to_metadata(MetaData())
+    for column in (legacy.c.published_at, legacy.c.created_at, legacy.c.first_seen_at):
+        column.nullable = True
+    Article.__table__.drop(engine)
+    legacy.create(engine)
+    older_id = seed_article(db_session, slug="undated-one").id
+    newer_id = seed_article(db_session, slug="undated-two").id
+    dated_id = seed_article(db_session, slug="dated").id
+    db_session.execute(update(Article).where(Article.id.in_([older_id, newer_id])).values(
+        published_at=None, created_at=None, first_seen_at=None,
+    ))
+    for route in (list_news, list_news_ids):
+        cursor = None
+        for expected_id in (dated_id, newer_id, older_id):
+            page = route(db=db_session, limit=1, include_unmapped=True, cursor=cursor)
+            ids = page.ids if route is list_news_ids else [item.id for item in page.items]
+            assert ids == [expected_id]
+            cursor = page.next_cursor
+            assert (cursor is None) == (expected_id == older_id)
 
 
 def test_list_news_ids_supports_cursor_pagination(db_session: Session):

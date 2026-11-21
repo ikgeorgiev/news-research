@@ -18,7 +18,6 @@ from app.constants import (
     CONFIDENCE_TABLE_VALIDATED,
     CONFIDENCE_UNVALIDATED,
     CONFIDENCE_VALIDATED_TOKEN,
-    EXTRACTION_VERSION,
     MIN_PERSIST_CONFIDENCE,
     NO_KEYWORDS_CONFIDENCE,
 )
@@ -506,17 +505,6 @@ def _has_ambiguous_acronym_table_support(
     return bool(table_phrase_matches or table_term_matches)
 
 
-def _combined_text_lower(
-    title_summary_text_lower: str,
-    body_text_lower: str | None,
-) -> str:
-    if not body_text_lower:
-        return title_summary_text_lower
-    if not title_summary_text_lower:
-        return body_text_lower
-    return f"{title_summary_text_lower} {body_text_lower}"
-
-
 def _accept_candidate(
     candidate: CandidateEvidence,
     *,
@@ -545,7 +533,6 @@ def _accept_candidate(
         else frozenset()
     )
     combined_matches = title_summary_matches | body_matches
-    combined_text = _combined_text_lower(title_summary_text_lower, body_text_lower)
 
     if candidate.channel == EVIDENCE_CHANNEL_CONTEXT:
         return ("context", CONFIDENCE_CONTEXT)
