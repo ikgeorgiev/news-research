@@ -41,7 +41,7 @@ groups:
 
       - alert: NoArticlesInsertedRecently
         expr: |
-          max by (instance) (max_over_time(ingestion_last_cycle_items_inserted{job="backend"}[6h])) == 0
+          sum by (instance) (increase(news_articles_committed_total{job="backend"}[6h])) == 0
           and on (instance)
           sum by (instance) (increase(ingestion_cycle_total{job="backend",status="success"}[6h])) > 0
         for: 30m

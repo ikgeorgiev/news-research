@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Ticker
+from app.reviewed_table_rows import reviewed_table_names
 
 
 _FUND_KEYWORD_STOPWORDS = frozenset(
@@ -24,6 +25,9 @@ _FUND_KEYWORD_STOPWORDS = frozenset(
         "total",
         "return",
         "global",
+        # Investment categories cannot establish a fund identity.
+        "emerging",
+        "markets",
         "equity",
         "premium",
         "credit",
@@ -101,6 +105,7 @@ class SymbolKeywordProfile:
     all_keywords: frozenset[str] = frozenset()
     timezone_safe_terms: frozenset[str] = frozenset()
     timezone_safe_phrases: frozenset[str] = frozenset()
+    reviewed_table_names: frozenset[str] = frozenset()
 
     def __contains__(self, item: object) -> bool:
         return item in self.all_keywords
@@ -127,6 +132,7 @@ class SymbolKeywordProfile:
                 and self.all_keywords == other.all_keywords
                 and self.timezone_safe_terms == other.timezone_safe_terms
                 and self.timezone_safe_phrases == other.timezone_safe_phrases
+                and self.reviewed_table_names == other.reviewed_table_names
             )
         if isinstance(other, (set, frozenset)):
             return self.all_keywords == frozenset(other)
@@ -161,6 +167,7 @@ def _profile_from_keyword_groups(
     sponsor_phrases: AbstractSet[str] | None = None,
     fund_title_phrases: AbstractSet[str] | None = None,
     override_keywords: AbstractSet[str] | None = None,
+    reviewed_table_names: AbstractSet[str] | None = None,
 ) -> SymbolKeywordProfile:
     fund_title_phrases_frozen = frozenset(fund_title_phrases or ())
     if override_keywords is not None:
@@ -192,6 +199,7 @@ def _profile_from_keyword_groups(
         all_keywords=all_terms | all_phrases,
         timezone_safe_terms=all_terms,
         timezone_safe_phrases=_timezone_safe_phrases(all_phrases),
+        reviewed_table_names=frozenset(reviewed_table_names or ()),
     )
 
 
@@ -308,6 +316,30 @@ def _fund_title_phrase_variants(fund_name: str | None) -> frozenset[str]:
     )
 
 
+# The issuer identifies these two funds by their Franklin names. Their active
+# registry rows still use the older Putnam names (BW 20260731601239).
+_FRANKLIN_ANNOUNCEMENT_NAMES = {
+    ("PMM", "Putnam Managed Muni Income", "Franklin Advisers, Inc."): "Franklin Managed Municipal Income Trust",
+    ("PMO", "Putnam Muni Opportunities", "Franklin Advisers, Inc."): "Franklin Municipal Opportunities Trust",
+}
+
+
+def _reviewed_announcement_phrases(symbol, fund_name, sponsor, ticker_rows):
+    name = _FRANKLIN_ANNOUNCEMENT_NAMES.get((symbol, fund_name, sponsor))
+    if name is None:
+        return frozenset()
+    phrase = _normalize_fund_title_phrase(name)
+    if any(
+        len(other) > 2 and other[1].upper() != symbol
+        and phrase in _fund_title_phrase_variants(other[2])
+        for other in ticker_rows
+    ):
+        return frozenset()
+    # Require the complete subject immediately followed by the issuer verb.
+    # A similarly named series or a partial municipal-fund name cannot qualify.
+    return frozenset({f"{phrase} announces"})
+
+
 def _build_symbol_keywords(
     ticker_rows: list,
 ) -> dict[str, SymbolKeywordProfile]:
@@ -403,7 +435,11 @@ def _build_symbol_keywords(
             sponsor_terms=sponsor_terms,
             fund_phrases=fund_phrases,
             sponsor_phrases=sponsor_phrases,
-            fund_title_phrases=_fund_title_phrase_variants(fund_name),
+            fund_title_phrases=(
+                _fund_title_phrase_variants(fund_name)
+                | _reviewed_announcement_phrases(symbol.upper(), fund_name, sponsor, ticker_rows)
+            ),
+            reviewed_table_names=reviewed_table_names(symbol.upper(), fund_name, sponsor),
         )
     return result
 

@@ -1,0 +1,25 @@
+{
+    email {$ACME_EMAIL}
+    admin off
+}
+
+{$SITE_ADDRESS} {
+    # Preserve live SSE delivery; only compress ordinary responses.
+    @ordinary not path /api/v1/events/*
+    encode @ordinary zstd gzip
+    route {
+        @private path /api/v1/admin* /metrics* /docs* /redoc* /openapi.json*
+        respond @private 404
+        basic_auth {
+            {$READER_USERNAME} {$READER_PASSWORD_HASH}
+        }
+        handle /api/* {
+            reverse_proxy backend:8000 {
+                flush_interval -1
+            }
+        }
+        handle {
+            reverse_proxy frontend:3000
+        }
+    }
+}

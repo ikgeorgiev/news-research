@@ -199,7 +199,8 @@ except Exception as target_error:
     Write-Host "Starting backend on http://${BindHost}:$Port"
     $databaseName = $databaseUri.Path.TrimStart("/")
     Write-Host "Database target: $($databaseUri.Host):$($databaseUri.Port)/$databaseName (credentials omitted)"
-    & $venvPython -m uvicorn app.main:app --reload --host $BindHost --port $Port
+    # Open SSE streams otherwise keep reload waiting indefinitely for shutdown.
+    & $venvPython -m uvicorn app.main:app --reload --host $BindHost --port $Port --timeout-graceful-shutdown 5
 }
 finally {
     Pop-Location

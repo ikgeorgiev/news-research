@@ -118,6 +118,8 @@ export function useFeedPreferences({
     })
   }
 
+  const markAsRead = (item: NewsItem) => addReadKeys([item.read_key])
+
   const markAsReadAndOpen = (item: NewsItem, event: MouseEvent) => {
     event.stopPropagation()
     const safeUrl = toSafeExternalUrl(item.url)
@@ -125,7 +127,7 @@ export function useFeedPreferences({
       event.preventDefault()
       return
     }
-    addReadKeys([item.read_key])
+    markAsRead(item)
   }
 
   const toggleSummary = (item: NewsItem) => {
@@ -152,6 +154,7 @@ export function useFeedPreferences({
   return {
     addReadKeys,
     expandedIds,
+    markAsRead,
     markAsReadAndOpen,
     markReadByQuery,
     mounted,

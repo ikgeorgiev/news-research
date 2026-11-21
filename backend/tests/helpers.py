@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
@@ -248,6 +248,16 @@ def build_sqlite_session_factory(db_path: Path) -> tuple[Any, sessionmaker[Sessi
         f"sqlite:///{db_path.as_posix()}",
         connect_args={"check_same_thread": False, "timeout": 5},
     )
+
+    @event.listens_for(engine, "savepoint")
+    def begin_outer_write_transaction(connection, _name):
+        # sqlite3 legacy mode does not BEGIN before SAVEPOINT. Ensure these
+        # writer tests have a real outer transaction, reserving SQLite's sole
+        # writer before a read-to-write upgrade can fail with SQLITE_BUSY.
+        # Actual overlapping transaction locks are covered by PostgreSQL tests.
+        if not connection.connection.driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+
     Base.metadata.create_all(bind=engine)
     return engine, sessionmaker(autoflush=False, autocommit=False, bind=engine)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, Response, status
@@ -10,15 +10,20 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.article_enrichment import ArticleEnrichmentWorker
+from app.financialcontent.runtime import FinancialContentWorker
+from app.free_news import FreeDiscoveryWorker
+from app.research_timing import configure_research_timing, research_timing_status
 from app.database import db_health_check, get_session_factory
 from app.ingestion import sync_runtime_state
 from app.monitoring import observe_http_request, render_metrics
+from app.page_access import PageAccessStore, configure_page_access
 from app.push_alerts import PushAlertDispatcher
 from app.routes.admin import admin_router
 from app.routes.news import news_router
 from app.routes.push import push_router
 from app.routes.sse import sse_router
-from app.scheduler import IngestionScheduler, set_scheduler
+from app.scheduler import IngestionScheduler, get_scheduler, set_scheduler
 from app.sse import SSEBroadcaster, SSEConnectionLimiter
 from app.ticker_loader import load_tickers_from_csv
 from migrate import assert_schema_at_head
@@ -56,40 +61,65 @@ async def lifespan(app: FastAPI):
     _warn_if_ingestion_pool_capacity_low(settings)
 
     assert_schema_at_head(settings.database_url)
+    with ExitStack() as cleanup:
+        research_handler = configure_research_timing(settings)
+        if research_handler is not None:
+            cleanup.callback(research_handler.close)
+            cleanup.callback(logging.getLogger().removeHandler, research_handler)
 
-    with get_session_factory()() as db:
-        runtime_sync = sync_runtime_state(
-            db,
-            settings,
-            ticker_loader=load_tickers_from_csv,
-        )
-        logger.info("Ticker load stats: %s", runtime_sync["ticker_sync"])
-        stale_runs_fixed = runtime_sync["stale_runs_fixed"]
-        if stale_runs_fixed:
-            logger.warning("Marked %s stale ingestion runs as failed at startup", stale_runs_fixed)
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            runtime_sync = sync_runtime_state(db, settings, ticker_loader=load_tickers_from_csv)
+            logger.info("Ticker load stats: %s", runtime_sync["ticker_sync"])
+            stale_runs_fixed = runtime_sync["stale_runs_fixed"]
+            if stale_runs_fixed:
+                logger.warning("Marked %s stale ingestion runs as failed at startup", stale_runs_fixed)
 
-    session_factory = get_session_factory()
-    scheduler = IngestionScheduler(settings, session_factory)
-    set_scheduler(scheduler)
-    scheduler.start()
-    broadcaster = SSEBroadcaster(settings.database_url)
-    broadcaster.start()
-    push_dispatcher = PushAlertDispatcher(
-        settings.database_url,
-        settings,
-        session_factory,
-    )
-    push_dispatcher.start()
-    app.state.sse_broadcaster = broadcaster
-    app.state.sse_connection_limiter = SSEConnectionLimiter(settings.sse_max_connections_per_ip)
-    app.state.push_alert_dispatcher = push_dispatcher
+        page_access_store = PageAccessStore.for_database(settings.database_url)
+        cleanup.callback(page_access_store.close)
+        configure_page_access(page_access_store)
+        cleanup.callback(configure_page_access, None)
 
-    yield
+        # Start consumers first so they remain available while producers drain.
+        # Register each stop before start, which may launch a thread and then fail.
+        broadcaster = SSEBroadcaster(settings.database_url)
+        cleanup.callback(broadcaster.stop)
+        broadcaster.start()
+        push_dispatcher = PushAlertDispatcher(settings.database_url, settings, session_factory)
+        cleanup.callback(push_dispatcher.stop)
+        push_dispatcher.start()
 
-    push_dispatcher.stop()
-    broadcaster.stop()
-    scheduler.shutdown()
-    set_scheduler(None)
+        if settings.scheduler_enabled and settings.postcommit_enrichment_enabled:
+            enrichment_worker = ArticleEnrichmentWorker(
+                session_factory, timeout_seconds=settings.ingest_source_page_timeout_seconds,
+                archive_directory=settings.article_body_archive_dir,
+            )
+            cleanup.callback(enrichment_worker.stop)
+            enrichment_worker.start()
+
+        scheduler = IngestionScheduler(settings, session_factory)
+        set_scheduler(scheduler)
+        cleanup.callback(set_scheduler, None)
+        cleanup.callback(scheduler.shutdown)
+        scheduler.start()
+        financialcontent_worker = FinancialContentWorker(settings, session_factory)
+        cleanup.callback(financialcontent_worker.stop)
+        financialcontent_worker.start()
+        free_discovery = FreeDiscoveryWorker(settings)
+        cleanup.callback(free_discovery.stop)
+        free_discovery.start()
+
+        for name, resource in (
+            ("financialcontent_worker", financialcontent_worker),
+            ("free_discovery_worker", free_discovery),
+            ("sse_broadcaster", broadcaster),
+            ("sse_connection_limiter", SSEConnectionLimiter(settings.sse_max_connections_per_ip)),
+            ("push_alert_dispatcher", push_dispatcher),
+        ):
+            setattr(app.state, name, resource)
+            cleanup.callback(delattr, app.state, name)
+
+        yield
 
 
 app = FastAPI(title="CEF News Feed API", lifespan=lifespan)
@@ -142,7 +172,17 @@ def health():
     payload = {
         "status": "ok" if ok else "degraded",
         "time": datetime.now(timezone.utc).isoformat(),
+        "timing": research_timing_status(),
     }
+    fc = getattr(app.state, "financialcontent_worker", None)
+    if fc is not None:
+        payload["financialcontent"] = fc.snapshot()
+    scheduler = get_scheduler()
+    if scheduler is not None:
+        payload["ingestion"] = scheduler.snapshot()
+    discovery = getattr(app.state, "free_discovery_worker", None)
+    if discovery is not None:
+        payload["free_discovery"] = discovery.snapshot()
     return JSONResponse(
         content=payload,
         status_code=status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE,

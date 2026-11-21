@@ -29,10 +29,11 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run backend tests
-        # Ratchet this upward as backend coverage improves. The current
-        # measured baseline is ~21%, so keep the floor just below that to
-        # prevent regressions without breaking every build immediately.
         run: pytest -q --cov=app --cov-report=term-missing --cov-fail-under=20
+
+      - name: Run reporting and receiver tests
+        working-directory: .
+        run: python -m pytest -q tools/tests
 
   backend-postgres:
     name: Backend Tests (Postgres)
@@ -41,18 +42,19 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: sec_research
-          POSTGRES_USER: postgres
+          POSTGRES_DB: cef_study_disposable
+          POSTGRES_USER: cef_test
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U postgres -d sec_research"
+          --health-cmd="pg_isready -U cef_test -d cef_study_disposable"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/sec_research
+      DATABASE_URL: postgresql+psycopg://cef_test:postgres@127.0.0.1:5432/cef_study_disposable
+      CEF_DISPOSABLE_TEST_URL: postgresql+psycopg://cef_test:postgres@127.0.0.1:5432/cef_study_disposable
     defaults:
       run:
         working-directory: backend
@@ -76,7 +78,10 @@ jobs:
         run: python migrate.py
 
       - name: Run Postgres integration tests
-        run: pytest -q tests/test_postgres_ci.py
+        run: >-
+          pytest -q tests/test_postgres_ci.py tests/test_postgres_ingestion_latency.py
+          tests/test_article_enrichment.py tests/test_fc_postgres.py
+          tests/test_page_access.py tests/test_source_scheduler_postgres.py
 
   frontend:
     name: Frontend Tests and Build
@@ -100,6 +105,10 @@ jobs:
 
       - name: Run frontend tests
         run: npm run test
+
+      - name: Run browser bridge unit tests
+        working-directory: .
+        run: node --test tools/tests/test_*.cjs
 
       - name: Run frontend build
         run: npm run build

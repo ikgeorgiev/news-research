@@ -10,6 +10,7 @@ from feedparser import FeedParserDict
 from sqlalchemy import select
 
 from app.feed_runtime import (
+    _compute_feed_failure_backoff_seconds,
     _fetch_feed_with_retries,
     _get_feed_conditional_headers,
     _update_feed_http_cache,
@@ -241,6 +242,21 @@ def test_update_feed_http_cache_reads_requests_case_insensitive_headers(db_sessi
 
     assert headers["If-None-Match"] == '"abc123"'
     assert headers["If-Modified-Since"] == "Tue, 03 Mar 2026 10:00:00 GMT"
+
+
+def test_replacing_a_feed_drops_obsolete_validators():
+    state = FeedPollState(feed_url="https://example.com/feed.xml", etag='"old-tag"',
+                          last_modified="Tue, 03 Mar 2026 10:00:00 GMT")
+    _update_feed_http_cache(state, httpx.Response(304, headers={"etag": '"old-tag"'}))
+    assert _get_feed_conditional_headers(state) == {
+        "If-None-Match": '"old-tag"', "If-Modified-Since": "Tue, 03 Mar 2026 10:00:00 GMT",
+    }
+    _update_feed_http_cache(state, httpx.Response(200))
+    assert _get_feed_conditional_headers(state) == {}
+
+
+def test_long_running_feed_outage_stays_at_the_configured_cap():
+    assert _compute_feed_failure_backoff_seconds(1025, base_seconds=10.0, max_seconds=600.0) == 600.0
 
 
 def test_ingest_feed_persists_conditional_headers_across_runs(db_session, monkeypatch):

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, TypedDict
 
@@ -119,6 +117,7 @@ def _run_feed_ingestion(
     settings: Settings,
     *,
     source_feeds: list[SourceFeed],
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> tuple[list[IngestFeedResult], int, int, int, bool]:
     source_map = {
         source.code: source
@@ -134,6 +133,8 @@ def _run_feed_ingestion(
     ticker_context = load_ticker_context(db)
     max_workers = settings.ingestion_max_workers
     feed_ingest_kwargs = {
+        "reader_archive_directory": getattr(settings, "article_body_archive_dir", None),
+        "postcommit_enrichment_enabled": getattr(settings, "postcommit_enrichment_enabled", True),
         "known_symbols": ticker_context.known_symbols,
         "symbol_to_id": ticker_context.symbol_to_id,
         "timeout_seconds": settings.request_timeout_seconds,
@@ -182,8 +183,6 @@ def _run_feed_ingestion(
             continue
         for feed_def in source_item.feeds:
             tasks.append((source_row.id, source_row.code, feed_def))
-    source_task_locks = {source_id: threading.Lock() for source_id, _, _ in tasks}
-
     def _serialize_source(source_code: str) -> bool:
         return not (
             source_code == "yahoo"
@@ -201,68 +200,78 @@ def _run_feed_ingestion(
             feed_url=feed_def.url,
             persistence_policy_override=feed_def.persistence_policy_override,
             article_source_name=feed_def.article_source_name,
+            **({"issuer_feed_start": feed_def.published_after, "issuer_baseline_required": True}
+               if feed_def.published_after is not None else {}),
             **feed_ingest_kwargs,
         )
 
     def _ingest_task(
         source_id: int, source_code: str, feed_def: FeedDef
     ) -> IngestFeedResult:
-        source_task_lock = source_task_locks[source_id]
-        lock_context = (
-            source_task_lock
-            if _serialize_source(source_code)
-            else nullcontext()
-        )
-        # Same-source feeds remain serialized by default. Yahoo can opt out once
-        # the raw-item path is hardened by DB-backed uniqueness and upserts.
-        with lock_context:
-            if max_workers <= 1:
-                source_row = source_map.get(source_code)
-                if source_row is None:
-                    return _failed_feed_result(
-                        source_code,
-                        feed_def.url,
-                        "Source row missing (unexpected)",
-                    )
-                return _ingest_with_source(db, source_row, feed_def)
+        if max_workers <= 1:
+            source_row = source_map.get(source_code)
+            if source_row is None:
+                return _failed_feed_result(
+                    source_code,
+                    feed_def.url,
+                    "Source row missing (unexpected)",
+                )
+            return _ingest_with_source(db, source_row, feed_def)
 
-            # Parallel workers: each task uses its own DB session.
-            if bind is None:
-                raise RuntimeError(
-                    "DB bind is missing; cannot create per-worker sessions"
+        # Parallel workers: each feed retains its own DB session.
+        if bind is None:
+            raise RuntimeError(
+                "DB bind is missing; cannot create per-worker sessions"
+            )
+        worker_factory = sessionmaker(autoflush=False, autocommit=False, bind=bind)
+        with worker_factory() as worker_db:
+            source_row = worker_db.scalar(
+                select(Source).where(Source.id == source_id)
+            )
+            if source_row is None:
+                return _failed_feed_result(
+                    source_code,
+                    feed_def.url,
+                    f"Source id {source_id} not found",
                 )
-            worker_factory = sessionmaker(autoflush=False, autocommit=False, bind=bind)
-            with worker_factory() as worker_db:
-                source_row = worker_db.scalar(
-                    select(Source).where(Source.id == source_id)
-                )
-                if source_row is None:
-                    return _failed_feed_result(
-                        source_code,
-                        feed_def.url,
-                        f"Source id {source_id} not found",
-                    )
-                return _ingest_with_source(worker_db, source_row, feed_def)
+            return _ingest_with_source(worker_db, source_row, feed_def)
+
+    def _ingest_group(
+        group: list[tuple[int, str, FeedDef]],
+    ) -> list[IngestFeedResult]:
+        group_results: list[IngestFeedResult] = []
+        for source_id, source_code, feed_def in group:
+            if should_stop():
+                break
+            try:
+                group_results.append(_ingest_task(source_id, source_code, feed_def))
+            except Exception as exc:
+                group_results.append(_failed_feed_result(source_code, feed_def.url, str(exc)))
+        return group_results
 
     results: list[IngestFeedResult] = []
     if max_workers <= 1:
         for source_id, source_code, feed_def in tasks:
+            if should_stop():
+                break
             results.append(_ingest_task(source_id, source_code, feed_def))
     else:
+        # Serialize a source in one job instead of occupying other worker slots
+        # with jobs blocked on its lock. Independent wires can start immediately.
+        serial_groups: dict[int, list[tuple[int, str, FeedDef]]] = {}
+        parallel_groups: list[list[tuple[int, str, FeedDef]]] = []
+        for task in tasks:
+            source_id, source_code, _ = task
+            if _serialize_source(source_code):
+                serial_groups.setdefault(source_id, []).append(task)
+            else:
+                parallel_groups.append([task])
+        # Give each serial source a slot before queuing optional Yahoo fan-out.
+        groups = [*serial_groups.values(), *parallel_groups]
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_task = {
-                executor.submit(_ingest_task, source_id, source_code, feed_def): (
-                    source_code,
-                    feed_def.url,
-                )
-                for source_id, source_code, feed_def in tasks
-            }
-            for future in as_completed(future_to_task):
-                source_code, feed_url = future_to_task[future]
-                try:
-                    results.append(future.result())
-                except Exception as exc:
-                    results.append(_failed_feed_result(source_code, feed_url, str(exc)))
+            futures = [executor.submit(_ingest_group, group) for group in groups]
+            for future in as_completed(futures):
+                results.extend(future.result())
 
     per_feed = sorted(
         results, key=lambda r: (r.get("source", ""), r.get("feed_url", ""))

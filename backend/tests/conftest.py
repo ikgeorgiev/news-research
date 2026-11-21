@@ -1,16 +1,77 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import os
 from pathlib import Path
+import socket
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.database import Base
+from app.models import SourcePageControl
+from app.page_access import PageAccessStore, configure_page_access, reset_page_outcome
 from tests.helpers import FakeRssResponse
+
+
+@pytest.fixture(autouse=True)
+def isolated_page_controls(monkeypatch):
+    """Keep publisher access decisions and HTTP requests isolated in each test."""
+    original_connect = socket.socket.connect
+
+    def test_network_only(self, address):
+        # Windows asyncio implements socketpair on an ephemeral loopback port.
+        assert (
+            address[0] in {'127.0.0.1', 'localhost'} and address[1] >= 49152
+        ), 'Unexpected network connection'
+        return original_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, 'connect', test_network_only)
+    engine = create_engine('sqlite:///:memory:')
+    SourcePageControl.__table__.create(engine)
+    factory = sessionmaker(bind=engine)
+    configure_page_access(PageAccessStore(factory))
+    reset_page_outcome()
+    yield
+    configure_page_access(None)
+    reset_page_outcome()
+    engine.dispose()
+
+
+@pytest.fixture
+def disposable_postgres_engine():
+    """Isolate real row-lock and notification tests from all other tables."""
+    database_url = os.getenv("CEF_DISPOSABLE_TEST_URL")
+    if not database_url:
+        pytest.skip("Set CEF_DISPOSABLE_TEST_URL to run disposable PostgreSQL tests")
+    url = make_url(database_url)
+    assert (url.drivername, url.host, url.database, url.username) == (
+        "postgresql+psycopg", "127.0.0.1", "cef_study_disposable", "cef_test",
+    )
+    schema = "cef_test_" + uuid4().hex
+    admin = create_engine(url)
+    engine = create_engine(url, connect_args={
+        "connect_timeout": 5,
+        "options": f"-c search_path={schema} -c statement_timeout=5000 -c lock_timeout=4000",
+    })
+    try:
+        with admin.begin() as conn:
+            conn.execute(CreateSchema(schema))
+        try:
+            Base.metadata.create_all(engine)
+            yield engine
+        finally:
+            engine.dispose()
+            with admin.begin() as conn:
+                conn.execute(DropSchema(schema, cascade=True))
+    finally:
+        admin.dispose()
 
 
 @pytest.fixture()

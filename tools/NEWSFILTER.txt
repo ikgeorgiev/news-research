@@ -1,0 +1,134 @@
+Newsfilter browser comparison — prepared November 8, 2026
+
+This is a separate, user-started comparison connector. It does not insert
+production articles, assign CEF tickers, fetch article bodies or send alerts.
+The prior anonymous homepage 403 stays in the historical record. The user
+explicitly supplied an account and requested this signed-in assessment.
+Normal UI login and the native signed-in news request succeeded November 8.
+No password, session cookie or account token is stored by this implementation.
+
+Install the separate extension in Chrome:
+  chrome://extensions -> Developer mode -> Load unpacked
+  C:\Project\sec-research\tools\newsfilter_bridge
+Its name is CEF Newsfilter news bridge, version 0.3.1.
+The separate Godel extension uses port 8766.
+
+On an authorized November 9–13 weekday, from the project directory:
+  pwsh -NoProfile -File tools/start-newsfilter-bridge.ps1 -UntilClose
+Inspect without starting anything:
+  pwsh -NoProfile -File tools/start-newsfilter-bridge.ps1 -UntilClose -CheckOnly
+The launcher preserves the store and holds, checks matching processes and the
+listener, starts a hidden bounded receiver and prints only its connection code.
+Omit -UntilClose to retain the original 20-minute session. The daily mode is
+limited to November 9–13, 10:00–24:00 Kyiv, with a hard 22:00 UTC deadline.
+The underlying cross-platform command is:
+  backend\.venv\Scripts\python.exe tools/newsfilter_live.py --store .tmp/realtime-research-20261109/newsfilter-comparison serve --until-close
+The receiver prints an eight-character code valid for ten minutes. On the
+signed-in Newsfilter search/latest-news tab, use Chrome's puzzle-piece Extensions
+menu to open CEF Newsfilter news bridge, enter that code and click Connect &
+start. The code goes in the extension popup, not Newsfilter's search box.
+After pairing, a daily session keeps its midnight deadline even when that code
+expires. Browse/search the paired tab normally; no automatic source refresh is
+added. Do not restart a healthy receiver or start a duplicate for a fresh code.
+
+The receiver is bound to 127.0.0.1:8767. There is no remote listener or cloud
+deployment. Short-lived pairing, origin checks, 1-MiB limits, 20 events/minute
+and bounded socket reads reuse the tested comparison receiver. Only one
+receiver can bind that port. Keep the same store to preserve refusal controls.
+Stop shuts down that receiver. Closing the paired tab or leaving the news
+pages also stops the session. The short mode expires within 20 minutes; daily
+mode expires at the same weekday's 22:00 UTC cutoff. An unpaired receiver closes
+after its ten-minute pairing window; a daily receiver closes after five minutes
+without its authenticated extension heartbeat/capture. Nothing starts on browser
+or application startup. Keep Chrome, the paired tab and the computer awake.
+Outside the authorized window, a deliberate implementation check requires
+--compatibility-check; every resulting item is compatibility_history.
+
+The extension observes only native POST https://api.newsfilter.io/actions
+requests with type filterArticles, from=0 and size 1–100. It copies only news
+ID, title, publication label, source name/ID, ticker tags and article links.
+It sends NO Newsfilter requests, reloads, searches or pagination. Login and
+account actions, cookies, Authorization headers and private fields are ignored.
+Native refusals/errors stop capture. The receiver holds the source after a
+refusal or schema failure, including 429 (no automatic retry; retain Retry-After).
+Version 0.2.2 reads only response headers Chrome exposes to the page. Hidden
+Date, Age and Retry-After headers stay absent; they are never probed, bypassed
+or inferred. An exposed Retry-After is retained, and 429 still stops capture
+and holds the source even when that header is unavailable. This removes the
+"Refused to get unsafe header" console errors without changing page requests.
+After updating, reload this extension in chrome://extensions, then reload the
+Newsfilter page before starting a new bounded session. Historical Chrome error
+entries may remain in its Errors view; compare timestamps and the new version.
+
+Newsfilter searches perform a full navigation. Version 0.2 installs a dormant
+request observer at document_start, before the site's page scripts. The
+background must confirm an existing unexpired session for that exact tab and
+document before any response body is copied. Other tabs remain inactive.
+Request starts may be noticed during that short handshake; requests before
+the user's original Start are excluded. Unpaired preparation expires after
+15 seconds. No source request is initiated, delayed, blocked or replayed.
+Each new document gets a fresh capture ID/baseline without extending the
+original deadline. Version 0.2.1 also handles an XHR response that completes
+while the extension background is busy: at most 20 references to the page's
+existing completed requests wait for the lease. No body is read before that
+lease; Stop, preparation expiry and reuse of the XHR discard stale references.
+The native XHR completion timestamp stays separate from the later body-copy
+and local-receiver timestamps. Fetch responses consumed by the page before
+activation can still be unobserved; they are not an empty success or a speed
+sample. Previous saved-update counts stay visible while a new page waits.
+Continuous native auto-updates were not established by the weekend check.
+Version 0.3.0 checks only the local receiver once per minute; it sends no source
+request. LIVE means a recent native response was copied, while GAP / No recent
+updates means there has been no native copy for three minutes. A daily lease
+cannot make a static search page update. Automation may read saved copies but
+must not start a receiver/browser capture or change the site's filters.
+Version 0.3.1 also displays navigation/attachment stop reasons and sends a small
+allowlisted stop reason to the local receiver. A final supported page URL alone
+does not reconstruct a previously unrecorded navigation or explain a stop.
+
+The selected search expression is retained up to 8192 characters, enough for the
+prepared 367-symbol CEF query. Native acceptance remains a separate requirement.
+Only narrowly recognized query templates receive an eligible-symbol count;
+unknown filters remain unverified. Eligibility is not validated release coverage.
+The source still returns at most 100 rows. Full pages, overlap, new documents
+and native gaps are recorded; a gap or full-page turnover resets the baseline.
+Use tools/news_browser_report.py as described in tools/NEWS_LIVE.txt for bounded
+read-only daily summaries of both browser sources and unobserved periods.
+
+Development checks no longer require the user's Chrome:
+  cd tools/browser-tests
+  npm ci
+  npx playwright install chromium
+  npm test
+The pinned Playwright Chromium loads the actual unpacked Newsfilter and Godel
+extensions in separate temporary profiles, pairs with real bounded Python
+receivers, and uses only intercepted synthetic source pages/responses. Tests
+cover CORS-visible/hidden headers, 429 holds, navigation, a busy background,
+XHR/fetch, ignored login/pagination,
+unpaired tabs, refusal holds, expiry, lost receiver, reload/resume and Stop.
+See tools/browser-tests/README.txt for evidence locations and limits. These
+development checks do not establish real Newsfilter/Godel coverage or latency.
+
+Review results:
+  backend\.venv\Scripts\python.exe tools/newsfilter_live.py --store .tmp/realtime-research-20261109/newsfilter-comparison report
+tools/news_compare.py can cross-reference this same store against saved cases.
+Use the dated case evidence for that week; the closed study is historical only.
+
+November 8 evidence: a 50-row OXLC native response was captured by the exact
+observer code and imported as compatibility history. Three title/date matches
+refer to releases already in the historical 73-case archive. The other 47 are
+unmatched in that archive, not proven new releases or coverage misses.
+The first OXLC GNW sourceUrl fields point back to Newsfilter, not the original
+wire. Related symbols include preferreds/notes; none are validated fund tickers.
+The general news page also carried an old SEC story with a future December 16
+publication label. Future labels are flagged and excluded from newly-observed
+speed candidates; publisher labels are never treated as exact arrival times.
+
+Direct API option: published docs describe POST /search with an API key and
+a separate stream. A website password is not an API key. No standalone
+Newsfilter request was sent, no API key obtained, no plan purchased, and no
+API entitlement or paid stream availability is assumed from the website login.
+https://developers.newsfilter.io/docs/news-query-api-authentication.html
+
+The November 9–13 automation may read saved comparison evidence but does not
+start this browser or receiver. Existing Yahoo/production scheduling is unchanged.

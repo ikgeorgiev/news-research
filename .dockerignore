@@ -16,3 +16,7 @@
 backend/tests
 backend/pytest-cache-files-*
 monitoring
+.tmp
+.playwright-mcp
+data/article-bodies
+data/*.sqlite*

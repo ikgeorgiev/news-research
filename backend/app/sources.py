@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import logging
 import threading
 import time
 from urllib.parse import quote_plus
@@ -12,8 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import http_client
+from app.page_access import PageOutcome, get_page_access, get_page_outcome, set_page_outcome
 from app.config import Settings
+from app.issuer_window import issuer_session
 from app.models import Source, Ticker
+from app.monitoring import observe_source_page_request
+
+logger = logging.getLogger(__name__)
 
 
 POLICY_GENERAL_ALLOWED = "general_allowed"
@@ -33,6 +41,7 @@ class FeedDef:
     url: str
     persistence_policy_override: str | None = None
     article_source_name: str = ""
+    published_after: datetime | None = None
 
 
 PRNEWSWIRE_FEEDS: list[str] = [
@@ -161,6 +170,16 @@ def _fetch_source_page_html(
         return None
 
     now = now_fn()
+    store = get_page_access()
+    set_page_outcome(None)
+    if store is None:
+        set_page_outcome(PageOutcome("control_unavailable", retry_at=datetime.fromtimestamp(now+60, timezone.utc)))
+        return None
+    try:
+        gate = store.inspect(fetch_url, config, datetime.fromtimestamp(now, timezone.utc))
+    except Exception:
+        set_page_outcome(PageOutcome("control_unavailable", retry_at=datetime.fromtimestamp(now+60, timezone.utc)))
+        return None
     with cache_lock:
         cached = cache.get(fetch_url)
         if cached is not None:
@@ -169,10 +188,30 @@ def _fetch_source_page_html(
                 cache_ttl_seconds if cached_html is not None else failure_cache_ttl_seconds
             )
             if now - fetched_at <= ttl_seconds:
-                cache.move_to_end(fetch_url)
-                return cached_html
+                if cached_html is not None:
+                    cache.move_to_end(fetch_url)
+                    set_page_outcome(PageOutcome("cached_body"))
+                    return cached_html
+                if gate is None:
+                    set_page_outcome(PageOutcome("cached_failure", retry_at=datetime.fromtimestamp(fetched_at+ttl_seconds, timezone.utc)))
+                    return None
+    if gate is not None:
+        set_page_outcome(gate)
+        return None
+    try:
+        permit = store.claim(fetch_url, config, datetime.fromtimestamp(now_fn(), timezone.utc), timeout_seconds)
+    except Exception:
+        set_page_outcome(PageOutcome("control_unavailable", retry_at=datetime.fromtimestamp(now_fn()+60, timezone.utc)))
+        return None
+    if isinstance(permit, PageOutcome):
+        set_page_outcome(permit)
+        return None
 
+    retry_after = None
     html_text: str | None = None
+    status_code: int | None = None
+    request_error: str | None = None
+    request_started = time.perf_counter()
     try:
         response = http_client.get_http_client().get(
             fetch_url,
@@ -180,10 +219,39 @@ def _fetch_source_page_html(
             headers=headers,
             follow_redirects=False,
         )
+        status_code = getattr(response, "status_code", None)
+        retry_after = getattr(response, "headers", {}).get("Retry-After")
         if response.is_success and response.text:
             html_text = response.text
-    except (httpx.RequestError, httpx.HTTPStatusError):
+    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+        request_error = type(exc).__name__
         html_text = None
+
+    request_seconds = time.perf_counter() - request_started
+    try:
+        outcome = store.finish(permit, status=status_code, retry_after=retry_after,
+                               error=request_error, now=datetime.fromtimestamp(now_fn(), timezone.utc),
+                               usable=html_text is not None)
+        set_page_outcome(outcome)
+    except Exception:
+        # The committed lease remains. Never retry an uncertain in-flight request.
+        set_page_outcome(PageOutcome("unknown_in_flight", attempted=True, status=status_code))
+
+    # Include rejected/unmapped entries: article_latency alone cannot explain
+    # network work that delays the next poll without creating an article.
+    # Cache hits return above; nonempty HTML does not imply a validated page.
+    observe_source_page_request(config.source_code, status_code, request_seconds)
+    logger.info("source_page_latency %s", json.dumps({
+        "source": config.source_code,
+        "page_url": fetch_url,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "request_ms": round(request_seconds * 1000, 3),
+        "configured_timeout_seconds": timeout_seconds,
+        "status_code": status_code,
+        "request_error": request_error,
+        "page_access_outcome": get_page_outcome().kind,
+        "received_nonempty_html": html_text is not None,
+    }, sort_keys=True))
 
     _cache_source_page(
         cache,
@@ -268,7 +336,7 @@ def _build_feed_defs(
     ]
 
 
-def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
+def build_source_feeds(settings: Settings, db: Session, *, now: datetime | None = None) -> list[SourceFeed]:
     source_feeds: list[SourceFeed] = []
 
     if settings.source_enable_yahoo:
@@ -299,15 +367,20 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
         )
 
     if settings.source_enable_gn:
+        gnw_feeds = _build_feed_defs(GLOBENEWSWIRE_FEEDS, article_source_name="GlobeNewswire")
+        if (settings.guggenheim_issuer_feed_start is not None
+                and issuer_session(settings.guggenheim_issuer_feed_start, now)[0]):
+            gnw_feeds.append(FeedDef(
+                url="https://www.globenewswire.com/rssfeed/organization/tFnNZMqUlNlLAjnUc5umPA==",
+                article_source_name="GlobeNewswire",
+                published_after=settings.guggenheim_issuer_feed_start,
+            ))
         source_feeds.append(
             SourceFeed(
                 code="globenewswire",
                 name="GlobeNewswire",
                 base_url="https://rss.globenewswire.com",
-                feeds=_build_feed_defs(
-                    GLOBENEWSWIRE_FEEDS,
-                    article_source_name="GlobeNewswire",
-                ),
+                feeds=gnw_feeds,
             )
         )
 
@@ -320,6 +393,13 @@ def build_source_feeds(settings: Settings, db: Session) -> list[SourceFeed]:
                 feeds=BUSINESSWIRE_FEEDS,
             )
         )
+
+    if getattr(settings, 'source_enable_financialcontent', False):
+        # The application-owned FC worker handles bounded HTML discovery/body work.
+        source_feeds.append(SourceFeed(
+            code="financialcontent", name="FinancialContent",
+            base_url="https://markets.chroniclejournal.com", feeds=[],
+        ))
 
     return source_feeds
 

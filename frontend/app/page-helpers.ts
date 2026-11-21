@@ -6,6 +6,7 @@ export const STATIC_PROVIDER_OPTIONS = [
   "Yahoo Finance",
   "PR Newswire",
   "GlobeNewswire",
+  "FinancialContent",
   GENERAL_NEWS_PROVIDER,
 ]
 

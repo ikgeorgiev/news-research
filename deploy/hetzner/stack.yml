@@ -1,0 +1,127 @@
+# Reviewed single-host staging layout. Collection is OFF until a verified cutover.
+name: cef-news
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cef
+      POSTGRES_DB: cef_news
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a new server database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U cef -d cef_news']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: '5'}
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/hetzner/backend.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${APP_ENV_FILE:?Set an absolute path to the reviewed server application env file}
+    environment:
+      DATABASE_URL: postgresql+psycopg://cef:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/cef_news
+      TICKERS_CSV_PATH: /app/data/cef_tickers.csv
+      FINANCIALCONTENT_STATE_PATH: /var/lib/cef-news/financialcontent.sqlite
+      FREE_DISCOVERY_STATE_PATH: /var/lib/cef-news/free-discovery.sqlite
+      ARTICLE_BODY_ARCHIVE_DIR: /var/lib/cef-news/article-bodies
+      RESEARCH_TIMING_LOG_PATH: /var/lib/cef-news/logs/application-timing.jsonl
+      SCHEDULER_ENABLED: ${ENABLE_COLLECTION:-false}
+      BEHIND_PROXY: 'true'
+      TRUSTED_PROXY_IPS: ${CADDY_PRIVATE_IP:-172.30.82.2}/32
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:?Set the HTTPS origin}
+    volumes:
+      - news_state:/var/lib/cef-news
+    networks: [ingress, database]
+    depends_on:
+      db: {condition: service_healthy}
+    stop_grace_period: 60s
+    read_only: true
+    tmpfs: ['/tmp:uid=1000,gid=1000,mode=1770']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read(65536)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deploy/hetzner/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${PUBLIC_ORIGIN:?Set the HTTPS origin}
+    restart: unless-stopped
+    environment:
+      ARTICLE_BODY_ARCHIVE_DIR: /var/lib/cef-news/article-bodies
+    volumes:
+      - type: volume
+        source: news_state
+        target: /var/lib/cef-news/article-bodies
+        read_only: true
+        volume:
+          subpath: article-bodies
+          nocopy: true
+    depends_on:
+      backend: {condition: service_healthy}
+    networks: [ingress]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1770
+      - /app/.next/cache:uid=1000,gid=1000,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000', {signal:AbortSignal.timeout(3000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set the public hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate contact email}
+      READER_USERNAME: ${READER_USERNAME:?Set the private reader username}
+      READER_PASSWORD_HASH: ${READER_PASSWORD_HASH:?Set a bcrypt hash, not a plaintext password}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports: ['80:80', '443:443']
+    networks:
+      ingress:
+        ipv4_address: ${CADDY_PRIVATE_IP:-172.30.82.2}
+    depends_on:
+      frontend: {condition: service_healthy}
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+networks:
+  ingress:
+    ipam:
+      config:
+        - subnet: ${INGRESS_SUBNET:-172.30.82.0/24}
+          ip_range: ${INGRESS_IP_RANGE:-172.30.82.128/25}
+  database:
+    internal: true
+
+volumes:
+  postgres_data:
+  news_state:
+  caddy_data:
+  caddy_config:

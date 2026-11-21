@@ -1,9 +1,11 @@
 "use client"
 
+import { DeliveryCheckPanel } from "./delivery-check-panel"
+
 import { usePageController } from "./use-page-controller"
 import { NewsFeedSection } from "./news-feed-section"
 import { BellIcon } from "./page-icons"
-import { WatchlistSidebar } from "./watchlist-sidebar"
+import { ResponsiveNavigation } from "./responsive-navigation"
 
 export default function Page() {
   const controller = usePageController()
@@ -11,23 +13,23 @@ export default function Page() {
 
   return (
     <div className="deck-root">
-      <WatchlistSidebar sidebar={sidebar} />
+      <ResponsiveNavigation sidebar={sidebar} />
 
       {/* Main Content */}
       <main className="main-content">
         <section className="filter-rack">
-          <form onSubmit={filters.onSearchSubmit} style={{ display: "flex", gap: "0.5rem", flex: 1 }}>
+          <form className="news-search-form" onSubmit={filters.onSearchSubmit}>
             <input
               value={filters.searchInput}
               onChange={(event) => filters.setSearchInput(event.target.value)}
               placeholder="Search news..."
-              style={{ width: "300px" }}
+              aria-label="Search news"
             />
             <button className="primary" type="submit">Search</button>
           </form>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-            <select value={filters.ticker} onChange={(event) => filters.setTicker(event.target.value)}>
+          <div className="news-symbol-filter">
+            <select aria-label="Filter by symbol" value={filters.ticker} onChange={(event) => filters.setTicker(event.target.value)}>
               <option value="">All symbols</option>
               {newsFeed.tickers.map((item) => (
                 <option key={item.symbol} value={item.symbol}>{item.symbol}</option>
@@ -40,7 +42,7 @@ export default function Page() {
             )}
           </div>
 
-          <select value={filters.provider} onChange={(event) => filters.setProvider(event.target.value)}>
+          <select aria-label="Filter by source" value={filters.provider} onChange={(event) => filters.setProvider(event.target.value)}>
             <option value="">All sources</option>
             {filters.providerOptions.map((item) => (
               <option key={item} value={item}>{item}</option>
@@ -60,7 +62,7 @@ export default function Page() {
           </div>
           
           {preferences.mounted && (
-            <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+            <div className="status-actions">
               <button 
                 className="icon-button" 
                 onClick={() => triggerRefresh("manual")}
@@ -148,6 +150,7 @@ export default function Page() {
           )}
         </section>
 
+        <DeliveryCheckPanel items={newsFeed.items} />
         <NewsFeedSection
           expandedIds={preferences.expandedIds}
           feedContainerRef={newsFeed.feedContainerRef}
@@ -156,6 +159,7 @@ export default function Page() {
           loadPendingArticles={newsFeed.loadPendingArticles}
           loading={newsFeed.loading}
           loadingMore={newsFeed.loadingMore}
+          markAsRead={preferences.markAsRead}
           markAsReadAndOpen={preferences.markAsReadAndOpen}
           nextCursor={newsFeed.nextCursor}
           pendingNewItems={newsFeed.pendingNewItems}

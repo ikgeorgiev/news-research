@@ -1,0 +1,340 @@
+Yahoo Search and Godel browser comparison — November 9–13, 2026
+
+The production news application is separate and remains running. These live
+connectors write public-source observations to a separate SQLite store. They do
+not insert articles, assign CEF tickers, fetch article bodies or issue alerts.
+The original October 27–November 6 field study remains closed.
+
+Yahoo direct
+
+The user's working yf.Search example exposed the public search endpoint:
+https://query2.finance.yahoo.com/v1/finance/search
+The installed yfinance Search uses this endpoint. Its shared cache_get uses an
+LRU cache without a time expiry, so repeatedly calling Search in one process is
+not a reliable fresh-arrival measurement. The connector instead uses a fresh
+credential-free httpx client for each bounded request, without cookies, crumb
+negotiation, redirects, retries, impersonation or cache-busting parameters.
+
+November 7 checks: NVDA returned 20 news items and OXLC returned 14, both HTTP200.
+The NVDA response advertised public max-age=600, stale-while-revalidate=180.
+The runner honors the full advertised max-age, at least 600 seconds per query,
+and at least 60 seconds across queries. This is a coverage/comparison candidate;
+neither that cache nor these checks establish sub-minute availability.
+
+The weekday basket is OXLC, GOF, PDI and UTG: four selected queries, not all 367
+symbols. Yahoo search is ranked and may include unrelated stories. Related
+symbols remain tags, not validated CEF assignments. UUIDs remain Yahoo IDs.
+
+Start/inspect on an authorized weekday, from the repository:
+  powershell -NoProfile -File tools/start-news-comparison.ps1
+  powershell -NoProfile -File tools/start-news-comparison.ps1 -CheckOnly
+
+The launcher runs only November9–13, 08:00–22:00 UTC (10:00–24:00 Kyiv).
+It checks actual matching process commands, saved controls and app health.
+It starts at most one worker, hidden, with a hard same-day cutoff and request
+margin. No overnight worker. A later daily start retains the same store and
+controls. Restarts create a new baseline and explicitly lose fine absence bounds.
+An old lock is archived only after process verification. No app restart occurs.
+
+  backend/.venv/Scripts/python.exe tools/news_live.py --store .tmp/realtime-research-20261109/live-comparison report
+
+401/403/404 impose a durable hold. 429 honors Retry-After across all queries.
+Schema changes impose a hold. Errors are not successful empty feeds. The old
+Yahoo non-RSS/GraphQL refusals are preserved; this is the separately verified
+Search route, not a retry of those denied paths.
+
+Godel browser bridge
+
+The open anonymous terminal's native POST /api/news/items returns HTTP200.
+A single standalone HTTP compatibility check returned403: direct API access is
+held. Do not replay this request, imitate browser headers, or use another client
+to get around that refusal. The implementation has no Godel HTTP client.
+
+Instead, the bridge passively copies successful responses the terminal fetches
+itself. It sends no Godel requests, reads no cookies/passwords and never triggers
+refresh, navigation or pagination. Keep the terminal open with the intended CEF
+filter. The actual symbols, source selections, language and time range are saved.
+An all-news or another stock's filter is not CEF coverage. A paginated historical
+query is rejected. Native refusal stops capture for review.
+
+The approved unpacked extension directory is:
+  C:\Project\sec-research\tools\godel_bridge
+Chrome: chrome://extensions -> Developer mode -> Load unpacked -> that directory.
+It requests access only to app.godelterminal.com and localhost:8766, plus the
+ability to inject the capture on the selected tab and retain session settings.
+No new capture session starts automatically on browser startup. A user-started
+daily Godel session can resume its existing lease after ordinary page navigation
+within the terminal; leaving the supported terminal ends capture.
+
+Version 0.3.0 adds a user-started daily session for November 9–13 only.
+Start its local receiver during 10:00–24:00 Kyiv:
+  pwsh -NoProfile -File tools/start-godel-bridge.ps1 -UntilClose
+Inspect without starting:
+  pwsh -NoProfile -File tools/start-godel-bridge.ps1 -UntilClose -CheckOnly
+Omit -UntilClose for the original 20-minute session. A daily receiver and
+extension both end at 22:00 UTC (midnight Kyiv); they cannot extend overnight.
+The launcher checks complete process commands, the listener and saved holds.
+Never start a second receiver or restart a healthy one to refresh its code.
+
+The eight-character connection code expires after ten minutes. A successfully
+connected daily session retains its original midnight deadline after that code
+expires. An unpaired receiver closes when the code expires. Godel version0.5.0
+keeps a paired daily receiver available until that ORIGINAL deadline through a
+missing heartbeat. The receiver makes no source requests while waiting. Missing
+browser/capture intervals remain unobserved. Newsfilter retains its five-minute
+heartbeat lease; its saved refusal is unchanged.
+Open Chrome's puzzle-piece Extensions menu, choose CEF Godel news bridge, enter
+that code in Connection code and click Connect & start. This is the Chrome popup,
+not either News panel inside Godel. No file or clipboard transfer is required.
+Existing pairing JSON remains available under Advanced connection.
+
+The popup shows saved updates, headlines in the last response, the last response's
+actual filter, last receipt and time remaining. Multiple terminal panels can have
+different filters. The label describes only the last captured response. The token
+stays in extension session storage, is never sent to Godel, and expires with the local receiver. The receiver
+binds only127.0.0.1, requires that token, limits bodies/rates/timeouts and disallows
+arbitrary website origins. It makes no network requests. In Godel0.5.0 daily mode,
+temporary loopback transport/5xx failures pause capture, then the minute alarm
+resumes the same lease with a fresh capture ID after a healthy local status.
+An ordinary terminal reload also resumes within that lease, without another code
+or an extra source request. Short sessions still require explicit Resume.
+Stop targets the paired tab even if another tab is active, and requests shutdown
+of that session's local receiver. The popup distinguishes confirmed receiver
+shutdown from an unconfirmed stop. Closing the paired tab, leaving the terminal,
+terminal local HTTP/schema errors, or a native refusal stops capture. Source
+refusals and copy failures are also retained locally when delivery to the receiver
+fails. No failed capture POST is replayed. A new session never clears a hold.
+Only the user starts a browser session. Automation may inspect its saved data,
+but must not open/reload the terminal, change filters or start capture itself.
+Keep Chrome, the paired terminal tab and the computer awake during a daily
+session. Sleep, a lost receiver or a stale native feed is a recorded gap.
+Ordinary Chrome service-worker suspension preserves the daily pairing; a full
+browser restart or extension reload clears session storage and requires pairing
+again. There is no automatic next-day or overnight authorization.
+
+Selected Godel transport diagnostics (no tokens, account data or article bodies)
+are bounded to128 entries in chrome.storage.local, with up to6 pending records
+copied on an authenticated local status check to bridge_diagnostics in the
+comparison SQLite store. They record status codes, worker revival and recovery
+gap durations. A pending ring can truncate during a long outage; the local ring
+and gap counters must be considered when reviewing incomplete diagnostics.
+
+Receiver rejection diagnostics added November9 after a native0.5.0 copy was
+rejected with local HTTP400 invalid_capture at14:53:21UTC. The earlier receiver
+discarded the failing rule, so that original payload's exact cause is unknown.
+The new receiver keeps bounded selected metadata in rejections/*.json and
+bridge_diagnostics: known validator reason, record index, types/lengths and
+parsed clock values. No raw rejected body, token, account data or article text
+is archived. Validation and stop rules are unchanged; this is diagnostic
+instrumentation, not proof the native failure has been repaired.
+The Godel popup's Connection diagnostics exports selected local reply/event
+metadata. Reopening the unpacked popup loads this view without an extension
+reload and preserves session evidence. Do not reload a failed session before
+recovering those details.
+
+Godel0.5.1 timing repair, November9
+The instrumented native session reproduced local400 at15:21:21UTC: a correctly
+ordered worker copy waited57.405 seconds before local batch dispatch, exceeding
+our30-second validation gate. This confirms the repeated timing failure; the
+original14:53 payload was not retained and cannot be individually reconstructed.
+Background page scheduling is consistent with the delay. The earlier Playwright
+defaults disabled background timer throttling; current regression launches remove
+those three background-timing override flags.
+
+Worker batches now also drain on native message arrival once five seconds have
+elapsed since the previous dispatch. This adds no source requests and retains
+the existing local batch cadence. The timer remains only a trailing fallback.
+Fully validated, correctly ordered copies delayed over30 seconds are archived as
+delayed_browser_copy_review_only. They add no items or ordinary observations,
+do not advance the stream cursor, and cannot become speed/availability samples.
+The following valid copy starts a new baseline; no absence bound crosses the gap.
+Malformed data, unordered clocks, stale batch clocks, source refusals and original
+cutoffs still apply. The receiver returns a review-only receipt so the current
+session survives an ordinary local delivery delay. No failed earlier POST is
+replayed, and original rejection rows/archives remain unchanged.
+Version0.5.1 requires one extension reload and terminal refresh to load the new
+document-start worker observer. Once paired, that day's original cutoff remains.
+
+The extension checks only its local receiver once per minute. This neither
+refreshes the terminal nor requests news. LIVE means a recent native response
+was copied; GAP means none arrived in the last three minutes. A connected local
+receiver alone does not establish a working native news stream. The popup also
+ages its status while open. The daily mode does not make a static source refresh.
+
+Actual request filters, page capacity, overlap and capture IDs are retained.
+The selected-symbol parser can preserve all 367 current symbols, but the native
+terminal must accept that selection before it counts as eligible scope. An
+unfiltered query is potentially eligible for all symbols; its finite page can
+still miss releases. New captures, gaps over three minutes and complete full-page
+turnover create new baselines. No fine absence bound is carried across them.
+
+Code pairing accepts at most five incorrect attempts and pins a successful code
+to the first extension client for that session. Codes and tokens are short-lived;
+no browser password, cookie, credential or Godel account setting is used.
+
+Compatibility checks on Saturday were explicitly requested implementation tests,
+retained as compatibility_history. They never become weekday speed samples.
+
+Installed bridge verification completed November 7: two natural responses at
+21:28:55 and 21:29:55 UTC reached the local receiver through the installed Chrome
+extension. Both contained20 news rows under the user's GOOG filter:40 preserved
+observations,20 unique IDs, no capture errors. This verifies transport and source-ID
+deduplication, not CEF-wide coverage or original-wire timing. The temporary receiver
+was verified and stopped at21:30:47 UTC. The production backend was not restarted.
+
+Version 0.2.0 was reloaded by the user and verified with the short code on November7.
+Two natural updates at21:54:55 and21:55:55 UTC saved40 observations/20 unique IDs,
+again under GOOG, with no capture errors. The user clicked Stop: actual receiver
+PID43868 and wrapper37288 exited at21:56:51 UTC and port8766 closed. The separate
+MSFT News panel visible in the screenshot was not established as captured by this
+test. These captures verify the connection and controls, not CEF-wide news coverage.
+
+Interpretation and evidence
+
+live.sqlite retains immutable raw-response files and hashes, original local IDs,
+first observations, each subsequent copy, status/errors and durable holds. Items
+with exact original BW/GNW/PRN URLs retain that wire identity. Missing original
+URLs are explicit; local Godel IDs and provider names do not establish identity.
+No credentials are stored in response archives.
+
+Godel publicationTime (milliseconds), its vendor receivedTime, browser request
+observation, browser body-copy completion and local receiver receipt are separate.
+The passive copy is not claimed to be an exact network-completion event. The
+browser clock must be within two minutes of the receiver; this bounds gross clock
+errors, not precise synchronization. Physical screen delivery stays unmeasured.
+
+Daily and session baselines, filter changes, long gaps, historical/unknown dates,
+duplicate records and updated local IDs have separate classifications. A preceding
+finite query result is a sampled response, not proof of global absence. New speed
+comparisons still require reviewed original identity/title and primary fund body
+evidence; newly_observed alone is not a validated release or latency guarantee.
+
+Saved Nov7 evidence and validation:
+  .tmp/realtime-research-20261107/live-connectors-20261107T2054
+Offline parser/transport/continuity tests, real loopback receiver tests, and
+browser-code tests cover the implemented paths. See results.json for counts.
+  backend/.venv/Scripts/python.exe -m unittest discover -s tools/tests -p test_news_live*.py -q
+  node --test tools/tests/test_godel_bridge.cjs
+
+Article cross-reference
+
+tools/news_compare.py reads the live stores without writes and matches them to
+a retained case archive by exact title/publication date and original wire URL,
+the same archived Yahoo URL, or a verified stored Yahoo article association.
+Only the known Yahoo ?.tsrc=rss tracking alias is removed. A title/date match alone
+remains a candidate. Conflicting or ambiguous identities stay review-only.
+Legacy numeric PRN IDs require a matching original PRN URL; IDs alone are not proof.
+
+Example (replace the bounds and output with a new timestamped pass):
+  backend/.venv/Scripts/python.exe tools/news_compare.py --store .tmp/realtime-research-20261109/live-comparison --cases .tmp/realtime-research-20261107/final-close-20261107T1040/all-release-cases.json --since 2026-11-09T08:00:00Z --until 2026-11-09T09:00:00Z --with-local-db --output .tmp/realtime-research-20261109/production-validation/comparison-20261109T0900.json
+
+--with-local-db makes one bounded, read-only local production lookup using exact
+captured Yahoo IDs/URLs, a maximum21-day publication window, and five-second
+statement/lock timeouts. It does not select mutable raw fetched_at. Stored article
+times and ticker associations are labelled as such, not transaction commit or
+primary-body validation. Omitting the flag makes the report fully offline.
+The observation window is limited to7 days/5000 rows per store, at most4 stores.
+
+Until a new reviewed archive exists, the October/November case archive is only a
+historical reference. Unmatched current items are not proven gaps or new releases.
+This tool preserves observation/receiver clocks and calculates no speed winner.
+Missing original identity/body evidence must be resolved before latency comparison.
+
+November7 result: the14-item OXLC Search response contained all three OXLC releases
+in the closed study. All three already existed in production. Three newer editorial
+summaries also matched existing database articles. The remaining8 OXLC results
+predate the original study. No extra CEF release or speed advantage was established.
+
+Current follow-up evidence:
+  .tmp/realtime-research-20261107/connector-followup-20261107T2133
+  backend/.venv/Scripts/python.exe -m unittest discover -s tools/tests -q
+  node --test tools/tests/test_godel_bridge.cjs tools/tests/test_godel_lifecycle.cjs tools/tests/test_godel_popup.cjs
+
+Daily passive-browser report (new output path each time):
+  backend/.venv/Scripts/python.exe tools/news_browser_report.py --store .tmp/realtime-research-20261109/live-comparison --store .tmp/realtime-research-20261109/newsfilter-comparison --date 2026-11-09 --output .tmp/new-browser-report.json
+This reads only the comparison stores with a five-second SQLite deadline. It
+separates sampled intervals, session/filter changes, finite pages, holds and
+unobserved periods. It makes no source requests and does not renew a browser
+lease. Sampled intervals are not proof of complete coverage or a latency winner.
+
+November 9 daily-mode implementation and acceptance evidence:
+  .tmp/realtime-research-20261109/day-bridges-20261109T0800
+Native continuous updates and adequate CEF scope must be checked in genuine
+saved responses; fixture tests alone cannot establish either.
+
+Version 0.3.1 copies filters from native fetch(Request) as well as fetch(url,
+options) and XHR. Request bodies are cloned before the page consumes them,
+bounded to64KiB/two seconds and reduced to selected filter fields. Headers,
+cookies and account fields are not copied. Unreadable filters remain unknown.
+Selected field-type diagnostics explain future scope failures without archiving
+unselected request data. No new source request or request replay is introduced.
+
+An exact manual review of the November9 HTTP200 missing-filter copy is retained
+under godel-browser:hold_review; the original godel-browser:hold and failed row
+remain intact. Only that specific locally caused technical failure may admit a
+fresh baseline after the tested repair. effective_browser_holds reports whether
+a hold still blocks admission. Every later failure and all401/403/404/429 holds
+remain active. The old standalone Godel403 is separate and is never released.
+
+Version 0.3.2 preserves an omitted symbols field in native broad-news requests.
+The receiver accepts this only with the observer's selected-field diagnostic;
+omission stays distinct from an explicit empty array. Its CEF filter eligibility
+remains unverified. Lost filters in prior failed captures are not reconstructed.
+No source requests, broader permissions or automatic page refreshes are added.
+
+Version 0.3.3 labels omitted ticker filters as unverified in the popup too.
+Godel market-roundup metadata may contain more than250 related symbols. Its
+receiver now permits at most1000 tags per row under the existing1MiB response
+bound. Tags remain unvalidated metadata; Yahoo's250-tag cap is unchanged.
+Blank Godel security IDs are counted as missing metadata and excluded from
+related tickers; the unchanged original response retains every entry.
+
+November9 native Newsfilter full-universe search remains unaccepted. The normal
+search box wraps input in title/description/symbol text clauses. Its separate
+Symbol(s) field generated a367-ticker comma query that received HTTP400. The
+failed response5 and its durable hold remain; do not retry or switch methods.
+The prepared Lucene query file is not a verified paste-into-basic-search recipe.
+Latest News and a normal OXLC search did each save50-row baselines, which prove
+transport only and not continuous full-universe monitoring.
+
+November9 live Godel worker acceptance (0.4.1)
+
+Evidence: .tmp/realtime-research-20261109/watchlist-stream-20261109T1218
+The terminal runs its news WebSocket inside STOMPWebWorker. Watching only the
+main page WebSocket missed those updates. The new document-start observer
+follows the terminal's existing worker subscriptions and copies only allowlisted
+news messages after explicit connection. It creates no worker, subscription,
+source request or reconnect and never reads INIT/authentication/debug payloads.
+Each copy retains its actual source/ticker filter and worker-to-page observation
+time. That time is not network completion, vendor receipt or screen delivery.
+
+Real Chrome acceptance at12:54UTC:13 pushed records (9 Godel headlines and4
+records during a brief broad-panel check), plus the357-symbol CEF baseline.
+The CEF watchlist was restored at12:45UTC. A new CEF-filtered push had not yet
+arrived; rare CEF news and no messages cannot establish uninterrupted coverage.
+The single manually connected receiver remains bounded to November9 22:00UTC.
+
+The terminal automatically prefetches a second historical page. Fully validated
+HTTP200 history pages are now archived as native_history_excluded, with no
+ordinary observation, absence bound, cursor movement or fatal source hold.
+The old failed row146 and its exact reviewed hold remain preserved. This review
+does not release any access refusal. Direct Godel403 remains held.
+
+The saved CEF watchlist contains357 symbols:353 match the367-row registry and4
+extra labels remain unvalidated. All14 registry omissions overlap the existing
+15 lifecycle flags. It includes all352 symbols outside those flags, plus FCO.
+This is a reconciliation to saved evidence, not a fresh listing-status audit;
+neither the registry nor the user's watchlist contents was changed.
+
+The popup reports the last response's filter, not a global terminal setting.
+An omitted ticker filter now says coverage unknown instead of displaying0/367.
+General Godel headline messages do not replace the CEF panel's watchlist.
+Compatibility push fixtures are explicitly excluded from live report counts;
+the metadata hardening applies on the receiver's next normal start. The healthy
+receiver was not restarted to apply this fixture-only reporting refinement.
+
+Newsfilter's public form implementation confirms it builds symbols: followed
+by the whitespace-stripped comma list and redirects to / after a failed query.
+The server's400 body was not retained, so its underlying reason remains unknown.
+The failed367-symbol query was not retried, the hold was not cleared, and no
+Newsfilter receiver was started. Do not describe that full-universe search as ready.

@@ -6,12 +6,24 @@ import { buildNewsRequestParams, fetchNews, fetchTickers, type NewsFilterParams 
 import { buildApiUrl } from "@/lib/api-base"
 import { NewsItem, TickerItem, Watchlist } from "@/lib/types"
 import { useEventSource } from "@/hooks/useEventSource"
+import { deliveryCheck } from "@/lib/delivery-check"
 
-import { buildFetchParams, dedupeById } from "./page-helpers"
+import { buildFetchParams, dedupeById, mergeUniqueNewsItems } from "./page-helpers"
 
 const AUTO_REFRESH_POLL_MS = 30_000
 const AUTO_REFRESH_SSE_MS = 120_000
 const AUTO_REFRESH_DEDUPE_MS = 2_000
+const NEWS_REQUEST_TIMEOUT_MS = 15_000
+
+function startFeedRequest() {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException("Feed request timed out", "TimeoutError"))
+  }, NEWS_REQUEST_TIMEOUT_MS)
+  const clearDeadline = () => clearTimeout(timeout)
+  controller.signal.addEventListener("abort", clearDeadline, { once: true })
+  return { controller, clearDeadline }
+}
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError"
@@ -19,6 +31,11 @@ function isAbortError(error: unknown): boolean {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+function refreshExistingItems(previous: NewsItem[], fetched: NewsItem[]): NewsItem[] {
+  const latestById = new Map(fetched.map((item) => [item.id, item]))
+  return previous.map((item) => latestById.get(item.id) ?? item)
 }
 
 export function useNewsFeed({
@@ -37,9 +54,10 @@ export function useNewsFeed({
   const [tickers, setTickers] = useState<TickerItem[]>([])
   const [globalTrackedReadKeys, setGlobalTrackedReadKeys] = useState<string[]>([])
   const [totalCount, setTotalCount] = useState(0)
-  const [items, setItems] = useState<NewsItem[]>([])
+  const [{ items, pendingNewItems }, setFeed] = useState<{ items: NewsItem[]; pendingNewItems: NewsItem[] }>({
+    items: [], pendingNewItems: [],
+  })
   const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [pendingNewItems, setPendingNewItems] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,22 +65,16 @@ export function useNewsFeed({
   const [refreshTick, setRefreshTick] = useState(0)
   const [runtimeReady, setRuntimeReady] = useState(false)
 
-  const feedGenerationRef = useRef(0)
+  const pageControllerRef = useRef<AbortController | null>(null)
+  const hasLoadedMoreRef = useRef(false)
   const feedContainerRef = useRef<HTMLElement | null>(null)
   const refreshReasonRef = useRef<"auto" | "manual">("manual")
-  const itemsRef = useRef<NewsItem[]>([])
-  const pendingNewItemsRef = useRef<NewsItem[]>([])
   const lastQueryKeyRef = useRef("")
   const lastRefreshAtRef = useRef<number | null>(null)
+  const pendingRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeRefreshControllerRef = useRef<AbortController | null>(null)
+  const pendingAutoRefreshRef = useRef(false)
   const backgroundRefreshErrorLoggedRef = useRef(false)
-
-  useEffect(() => {
-    itemsRef.current = items
-  }, [items])
-
-  useEffect(() => {
-    pendingNewItemsRef.current = pendingNewItems
-  }, [pendingNewItems])
 
   const buildCurrentNewsRequest = (
     overrides: Partial<Parameters<typeof fetchNews>[0]> = {}
@@ -83,7 +95,14 @@ export function useNewsFeed({
     return buildNewsRequestParams(filters, overrides)
   }
 
-  const triggerRefresh = useCallback((reason: "auto" | "manual") => {
+  const triggerRefresh = useCallback(function refresh(reason: "auto" | "manual") {
+    if (reason === "auto" && activeRefreshControllerRef.current !== null) {
+      // Let a slow request finish. Repeated events must not abort every
+      // response before it can reach the screen; keep one catch-up request.
+      pendingAutoRefreshRef.current = true
+      return
+    }
+
     const now = Date.now()
     const lastRefreshAt = lastRefreshAtRef.current
     if (
@@ -91,14 +110,46 @@ export function useNewsFeed({
       && lastRefreshAt !== null
       && now - lastRefreshAt < AUTO_REFRESH_DEDUPE_MS
     ) {
+      // Keep one trailing refresh: a later commit may not be in the snapshot
+      // fetched by the first event in this burst.
+      if (pendingRefreshTimerRef.current === null) {
+        pendingRefreshTimerRef.current = setTimeout(() => {
+          pendingRefreshTimerRef.current = null
+          refresh("auto")
+        }, AUTO_REFRESH_DEDUPE_MS - (now - lastRefreshAt))
+      }
       return
     }
 
+    if (pendingRefreshTimerRef.current !== null) {
+      clearTimeout(pendingRefreshTimerRef.current)
+      pendingRefreshTimerRef.current = null
+    }
     // Manual refreshes always run immediately, but reset the gate so a nearby
     // automatic event does not start a duplicate fetch.
+    pendingAutoRefreshRef.current = false
     lastRefreshAtRef.current = now
     refreshReasonRef.current = reason
     setRefreshTick((previous) => previous + 1)
+  }, [])
+
+  const finishRefresh = useCallback((controller: AbortController) => {
+    if (activeRefreshControllerRef.current !== controller) return
+    activeRefreshControllerRef.current = null
+    if (pendingAutoRefreshRef.current) {
+      pendingAutoRefreshRef.current = false
+      triggerRefresh("auto")
+    }
+  }, [triggerRefresh])
+
+  useEffect(() => () => {
+    pageControllerRef.current?.abort()
+    pageControllerRef.current = null
+    pendingAutoRefreshRef.current = false
+    if (pendingRefreshTimerRef.current !== null) {
+      clearTimeout(pendingRefreshTimerRef.current)
+      pendingRefreshTimerRef.current = null
+    }
   }, [])
   const sseUrl = buildApiUrl("/api/v1/events/news")
 
@@ -124,7 +175,7 @@ export function useNewsFeed({
     return () => clearTimeout(id)
   }, [])
 
-  const sseConnected = useEventSource(sseUrl, () => triggerRefresh("auto"), runtimeReady)
+  const sseConnected = useEventSource(sseUrl, () => { deliveryCheck.signal("sse"); triggerRefresh("auto") }, runtimeReady)
 
   useEffect(() => {
     if (!runtimeReady) return
@@ -210,63 +261,42 @@ export function useNewsFeed({
     refreshReasonRef.current = "manual"
 
     const feedEl = feedContainerRef.current
-    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && itemsRef.current.length > 40
+    const isReadingDeep = !!feedEl && feedEl.scrollTop > 160 && items.length > 40
     const isAutoRefresh = sameQueryAsPrevious && refreshReason === "auto"
+    const checkRequest = deliveryCheck.beginRequest(!sameQueryAsPrevious ? "initial"
+      : isAutoRefresh ? isReadingDeep ? "queued" : "automatic" : "manual")
 
-    if (isAutoRefresh && isReadingDeep) {
-      const bgGeneration = feedGenerationRef.current
-      const controller = new AbortController()
-
-      fetchNews(buildCurrentNewsRequest({
-        includeGlobalSummary: true,
-        limit: 40,
-        signal: controller.signal,
-      }))
-        .then((data) => {
-          if (bgGeneration !== feedGenerationRef.current) return
-          backgroundRefreshErrorLoggedRef.current = false
-          if (data.global_summary) {
-            setGlobalTrackedReadKeys(data.global_summary.tracked_read_keys)
-            setTotalCount(data.global_summary.total)
-          }
-          const fetchedItems = data.items
-          const newOnes = dedupeById(itemsRef.current, fetchedItems)
-          const freshOnes = dedupeById(pendingNewItemsRef.current, newOnes)
-          if (freshOnes.length > 0) {
-            setPendingNewItems((previous) => {
-              const uniqueFresh = dedupeById(previous, freshOnes)
-              return uniqueFresh.length > 0 ? [...uniqueFresh, ...previous] : previous
-            })
-          }
-        })
-        .catch((error: unknown) => {
-          if (bgGeneration !== feedGenerationRef.current) return
-          if (isAbortError(error)) return
-          if (backgroundRefreshErrorLoggedRef.current) return
-          backgroundRefreshErrorLoggedRef.current = true
-          console.warn("Background feed refresh failed", error)
-        })
-
-      return () => controller.abort()
+    // This request includes events received before it started. A new filter or
+    // manual refresh also supersedes a queued update for the old request.
+    pendingAutoRefreshRef.current = false
+    if (pendingRefreshTimerRef.current !== null) {
+      clearTimeout(pendingRefreshTimerRef.current)
+      pendingRefreshTimerRef.current = null
+    }
+    const { controller, clearDeadline } = startFeedRequest()
+    activeRefreshControllerRef.current = controller
+    const cancelRequest = () => {
+      if (activeRefreshControllerRef.current === controller) {
+        activeRefreshControllerRef.current = null
+      }
+      controller.abort()
     }
 
     if (!sameQueryAsPrevious) {
-      itemsRef.current = []
-      pendingNewItemsRef.current = []
-      setItems([])
-      setPendingNewItems([])
+      hasLoadedMoreRef.current = false
+      setFeed({ items: [], pendingNewItems: [] })
       setNextCursor(null)
     }
 
     lastQueryKeyRef.current = queryKey
-    const controller = new AbortController()
-    const showLoading = !isAutoRefresh
-    if (showLoading) {
+    const queueNewItems = isAutoRefresh && isReadingDeep
+    if (!isAutoRefresh) {
+      pageControllerRef.current?.abort()
+      pageControllerRef.current = null
+      setLoadingMore(false)
       setLoading(true)
     }
-    setError(null)
-
-    const requestGeneration = ++feedGenerationRef.current
+    if (!queueNewItems) setError(null)
 
     fetchNews(buildCurrentNewsRequest({
       includeGlobalSummary: true,
@@ -274,37 +304,54 @@ export function useNewsFeed({
       signal: controller.signal,
     }))
       .then((data) => {
-        if (requestGeneration !== feedGenerationRef.current) return
+        if (controller.signal.aborted) return
+        deliveryCheck.response(checkRequest, data.items)
+        backgroundRefreshErrorLoggedRef.current = false
         if (data.global_summary) {
           setGlobalTrackedReadKeys(data.global_summary.tracked_read_keys)
           setTotalCount(data.global_summary.total)
         }
         const fetchedItems = data.items
-        setPendingNewItems([])
-        if (isAutoRefresh && itemsRef.current.length > data.items.length) {
-          setItems((previous) => {
-            const prepend = dedupeById(previous, fetchedItems)
-            return prepend.length > 0 ? [...prepend, ...previous] : previous
-          })
-          setNextCursor((previous) => previous ?? data.next_cursor)
+        if (queueNewItems) {
+          // Update enriched rows in place so the reader keeps their position.
+          setFeed((previous) => ({
+            items: refreshExistingItems(previous.items, fetchedItems),
+            pendingNewItems: mergeUniqueNewsItems(dedupeById(previous.items, fetchedItems), previous.pendingNewItems),
+          }))
           return
         }
-        setItems(fetchedItems)
+        if (isAutoRefresh && (pageControllerRef.current || hasLoadedMoreRef.current)) {
+          // Load More owns the cursor from the moment a reader asks for the
+          // next page. A live head refresh can finish on either side of it.
+          setFeed((previous) => ({
+            items: mergeUniqueNewsItems(fetchedItems, previous.pendingNewItems, previous.items),
+            pendingNewItems: [],
+          }))
+          return
+        }
+        hasLoadedMoreRef.current = false
+        setFeed({ items: fetchedItems, pendingNewItems: [] })
         setNextCursor(data.next_cursor)
       })
       .catch((err: unknown) => {
-        if (requestGeneration !== feedGenerationRef.current) return
-        if (isAbortError(err)) return
+        if (activeRefreshControllerRef.current !== controller || isAbortError(err)) return
+        if (queueNewItems) {
+          if (!backgroundRefreshErrorLoggedRef.current) console.warn("Background feed refresh failed", err)
+          backgroundRefreshErrorLoggedRef.current = true
+          return
+        }
         const message = getErrorMessage(err, "Failed to load feed")
         setError(message)
       })
       .finally(() => {
-        if (showLoading && requestGeneration === feedGenerationRef.current) {
+        clearDeadline()
+        if (!isAutoRefresh && activeRefreshControllerRef.current === controller) {
           setLoading(false)
         }
+        finishRefresh(controller)
       })
 
-    return () => controller.abort()
+    return cancelRequest
   }, [
     activeWatchlist,
     activeWatchlistId,
@@ -312,43 +359,48 @@ export function useNewsFeed({
     refreshTick,
     searchQuery,
     ticker,
+    finishRefresh,
   ])
 
   const loadMore = async () => {
-    if (!nextCursor || loadingMore) return
+    if (!nextCursor || loading || pageControllerRef.current) return
+    const checkRequest = deliveryCheck.beginRequest("more")
+    const { controller, clearDeadline } = startFeedRequest()
+    pageControllerRef.current = controller
 
     setLoadingMore(true)
     setError(null)
-    const requestGeneration = feedGenerationRef.current
 
     try {
       const data = await fetchNews(buildCurrentNewsRequest({
         limit: 40,
         cursor: nextCursor,
+        signal: controller.signal,
       }))
-      if (requestGeneration !== feedGenerationRef.current) return
+      if (controller.signal.aborted) return
+      deliveryCheck.response(checkRequest, data.items)
+      hasLoadedMoreRef.current = true
       const fetchedItems = data.items
-      setItems((previous) => {
-        const append = dedupeById(previous, fetchedItems)
-        return append.length > 0 ? [...previous, ...append] : previous
-      })
+      setFeed((previous) => ({ ...previous, items: mergeUniqueNewsItems(previous.items, fetchedItems) }))
       setNextCursor(data.next_cursor)
     } catch (err: unknown) {
-      if (requestGeneration !== feedGenerationRef.current) return
-      if (isAbortError(err)) return
+      if (pageControllerRef.current !== controller || isAbortError(err)) return
       const message = getErrorMessage(err, "Failed to load more")
       setError(message)
     } finally {
-      setLoadingMore(false)
+      clearDeadline()
+      if (pageControllerRef.current === controller) {
+        pageControllerRef.current = null
+        setLoadingMore(false)
+      }
     }
   }
 
   const loadPendingArticles = () => {
-    setItems((previous) => {
-      const newOnes = dedupeById(previous, pendingNewItems)
-      return newOnes.length > 0 ? [...newOnes, ...previous] : previous
-    })
-    setPendingNewItems([])
+    setFeed((previous) => ({
+      items: mergeUniqueNewsItems(previous.pendingNewItems, previous.items),
+      pendingNewItems: [],
+    }))
     feedContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })
   }
 

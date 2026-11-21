@@ -119,6 +119,24 @@ class RawFeedItem(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class ArticleEnrichment(Base):
+    """One durable full-page coverage check per accepted article."""
+
+    __tablename__ = "article_enrichment"
+    __table_args__ = (Index("ix_article_enrichment_due", "status", "available_at"),)
+
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
+    page_url: Mapped[str] = mapped_column(Text)
+    feed_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    lease_token: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 
@@ -199,3 +217,17 @@ Index(
         & RawFeedItem.raw_pub_date.is_(None)
     ),
 )
+
+
+class SourcePageControl(Base):
+    __tablename__ = "source_page_controls"
+    key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    refusal_status: Mapped[int | None] = mapped_column(Integer)
+    refused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(String(80))
+    next_allowed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_token: Mapped[str | None] = mapped_column(String(32))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[int | None] = mapped_column(Integer)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    network_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -1,0 +1,14 @@
+{
+  "name": "cef-connector-browser-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Isolated Chromium integration tests for the CEF browser bridges",
+  "scripts": {
+    "test": "node run.cjs",
+    "test:newsfilter": "node bridge.e2e.cjs navigation",
+    "test:godel": "node bridge.e2e.cjs godel"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}

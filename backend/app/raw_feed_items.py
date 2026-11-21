@@ -372,6 +372,7 @@ def _persist_raw_feed_item(
     raw_summary: str | None,
     entry_source_name: str,
     existing_row: RawFeedItem | None = None,
+    enrichment_retry: dict | None = None,
 ) -> None:
     payload = {
         "title": prepared.raw_title,
@@ -382,6 +383,8 @@ def _persist_raw_feed_item(
         "source": entry_source_name,
         "language": prepared.language,
     }
+    if enrichment_retry is not None and article is None:
+        payload["_page_enrichment"] = enrichment_retry
     row = existing_row or _find_existing_raw_feed_item(
         db,
         source_id=source_id,

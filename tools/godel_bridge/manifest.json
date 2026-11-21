@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "CEF Godel news bridge",
+  "version": "0.5.1",
+  "description": "Copies news the open Godel terminal already receives into a bounded local comparison session.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://app.godelterminal.com/*",
+    "http://127.0.0.1:8766/*"
+  ],
+  "content_scripts": [{"matches":["https://app.godelterminal.com/*"],"js":["stream-observer.js","worker-observer.js"],"run_at":"document_start","world":"MAIN"}],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CEF Newsfilter bridge</title><link rel="stylesheet" href="popup.css"></head>
+<body>
+<header><span>CEF RESEARCH / SOURCE CHECK</span><span id="bridge-version" class="edition">—</span></header>
+<main>
+  <p class="eyebrow">NEWSFILTER NEWS BRIDGE</p>
+  <h1>Newsfilter <em>news.</em></h1>
+  <p class="intro">Compare incoming news with our CEF feed.</p>
+  <section class="session" aria-labelledby="session-label">
+    <div class="status-line"><span id="lamp" class="lamp"></span><h2 id="session-label">Ready to connect</h2><span id="remaining">MANUAL SESSION</span></div>
+    <p id="status" role="status" aria-live="polite">Open Newsfilter, enter the connection code, then start.</p>
+    <div class="metrics"><div><strong id="frames">0</strong><span>updates saved</span></div><div><strong id="headlines">—</strong><span>headlines in last update</span></div></div>
+    <div class="scope"><span>LAST RESPONSE FILTER</span><p id="filter">Appears after the first update</p></div>
+    <p id="coverage" class="received">CEF filter coverage awaits the first response.</p>
+    <p id="session-note" class="received"></p>
+    <p id="received" class="received">Waiting for a connection</p>
+  </section>
+  <section class="connect">
+    <label for="code">Connection code <span>from your local receiver</span></label>
+    <input id="code" type="text" maxlength="12" placeholder="ABCD-EFGH" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-describedby="code-help">
+    <p id="code-help" class="hint">Eight characters. No file or JSON needed.</p>
+    <div class="actions"><button id="start" type="button">Connect &amp; start <span aria-hidden="true">↗</span></button><button id="stop" type="button" disabled>Stop</button></div>
+    <p id="message" class="message" role="alert"></p>
+    <details><summary>Advanced connection</summary><label for="pairing">Existing pairing JSON</label><textarea id="pairing" rows="3" spellcheck="false" aria-label="Existing pairing JSON"></textarea></details>
+  </section>
+</main>
+<footer><span class="footmark" aria-hidden="true">↳</span><p>Browse Newsfilter normally in this tab. Each page starts a fresh baseline. No automatic refresh. Short checks last 20 minutes. Daily sessions end at midnight Kyiv.</p></footer>
+<script src="session-policy.js"></script><script src="popup.js"></script>
+</body></html>

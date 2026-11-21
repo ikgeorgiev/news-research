@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -60,6 +61,63 @@ INGESTION_SCHEDULER_STARTED_AT = Gauge(
     "ingestion_scheduler_started_at_unix_seconds",
     "UNIX timestamp when the ingestion scheduler was started",
 )
+
+# Keep labels bounded; article URLs, IDs and arbitrary provider names belong in
+# the structured traces, never in Prometheus time-series labels.
+NEWS_SOURCES = ("businesswire", "prnewswire", "globenewswire", "yahoo", "other")
+NEWS_DISCOVERY_KINDS = ("feed_response", "pending_enrichment")
+ARTICLE_STAGES = (
+    "wait_before_processing", "processing", "page_lookup", "commit",
+    "receipt_to_commit", "notification_call",
+)
+NEWS_ARTICLES_COMMITTED = Counter(
+    "news_articles_committed_total", "New article commits, including commits in a later failed feed run",
+    ["source", "discovery_kind"],
+)
+NEWS_ARTICLE_STAGE_SECONDS = Histogram(
+    "news_article_stage_seconds", "Article stage duration; page lookup is part of processing; notification is server-side only",
+    ["source", "discovery_kind", "stage"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300),
+)
+SOURCE_PAGE_REQUESTS = Counter(
+    "source_page_requests_total", "Actual source-page HTTP attempts; cached lookups excluded",
+    ["source", "status"],
+)
+SOURCE_PAGE_REQUEST_SECONDS = Histogram(
+    "source_page_request_seconds", "Actual source-page HTTP request duration, including failed requests",
+    ["source"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+)
+for _source in NEWS_SOURCES:
+    SOURCE_PAGE_REQUEST_SECONDS.labels(source=_source)
+    for _kind in NEWS_DISCOVERY_KINDS:
+        # Export zeroes before the first article so its first increment is visible.
+        NEWS_ARTICLES_COMMITTED.labels(source=_source, discovery_kind=_kind)
+        for _stage in ARTICLE_STAGES:
+            NEWS_ARTICLE_STAGE_SECONDS.labels(source=_source, discovery_kind=_kind, stage=_stage)
+
+
+def _news_source(source: str) -> str:
+    return source if source in NEWS_SOURCES else "other"
+
+
+def observe_article_commit(trace: dict[str, Any]) -> None:
+    source = _news_source(trace["source"])
+    kind = trace["discovery_kind"]
+    if kind not in NEWS_DISCOVERY_KINDS:
+        return
+    NEWS_ARTICLES_COMMITTED.labels(source=source, discovery_kind=kind).inc()
+    for stage in ARTICLE_STAGES:
+        value = trace.get(f"{stage}_ms")
+        if isinstance(value, (int, float)) and math.isfinite(value) and value >= 0:
+            NEWS_ARTICLE_STAGE_SECONDS.labels(source=source, discovery_kind=kind, stage=stage).observe(value / 1000)
+
+
+def observe_source_page_request(source: str, status_code: int | None, duration_seconds: float) -> None:
+    source = _news_source(source)
+    status = str(status_code) if isinstance(status_code, int) and 100 <= status_code <= 599 else "error"
+    SOURCE_PAGE_REQUESTS.labels(source=source, status=status).inc()
+    SOURCE_PAGE_REQUEST_SECONDS.labels(source=source).observe(max(0, duration_seconds))
 
 PUSH_NOTIFICATIONS_TOTAL = Counter(
     "push_notifications_sent_total",

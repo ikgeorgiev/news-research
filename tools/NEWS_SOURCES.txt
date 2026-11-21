@@ -1,0 +1,248 @@
+SOURCE INTAKE AND WEEKDAY MONITORING
+
+These commands add no source poller and never publish an article. Run them from
+C:\Project\sec-research using backend\.venv\Scripts\python.exe.
+
+Source intake
+
+tools/news_sources.py imports saved Yahoo GraphQL responses, reviewed Godel
+terminal captures, the published FC GNW HTML listing, NEWSnet GNW RSS, and the
+published Guggenheim issuer RSS, and the published XAI distribution RSS into a
+dedicated local review database.
+It does not turn the existing Yahoo RSS source into a direct Yahoo connection.
+It also does not claim to implement an undocumented Godel API.
+
+  python tools/news_sources.py init .tmp/new-source-review.sqlite
+  python tools/news_sources.py import .tmp/new-source-review.sqlite .tmp/capture/manifest.json
+  python tools/news_sources.py report .tmp/new-source-review.sqlite .tmp/reviewed-cases.json .tmp/new-source-report.json
+
+Use a new SQLite filename. An unrelated existing database is rejected before
+any write. Reimporting the identical manifest/payload is idempotent. Distinct
+receipts are retained even when they repeat a story; first sightings remain
+separate by route, clock, receipt kind and new/history classification. A later
+200 cannot clear a saved refusal. There is no live-request command.
+
+Manifest format (version 1)
+
+Required fields: route, request_url, received_at, receipt_kind, classification,
+http_status, payload_file and payload_sha256. payload_file is relative to the
+manifest directory and must remain inside it after path resolution. The digest
+is the SHA-256 of its exact bytes. Payload cap is 4 MiB (Yahoo parser: 1 MiB),
+manifest cap 64 KiB, response cap 250 records. Reports cap at 10,000 observations.
+
+Routes and accepted request URLs are explicit in news_sources.py ROUTES.
+receipt_kind is network_response, retained_response, manual_capture or cached.
+classification is baseline, new, historical or unknown_history. A network
+receipt additionally requires timezone-aware request_started_at and clock_id.
+Yahoo additionally accepts requested_symbol and tab (default: press releases).
+Use synthetic_fixture: true for examples; those are excluded from live receipts.
+
+For Godel, receipt_kind must be manual_capture. Payload is our reviewed format:
+  {"version":1,"entries":[{"local_id":"capture-1","title":"Exact copied headline",
+    "original_source_link":"https://www.businesswire.com/news/home/20261109123456/en/",
+    "observed_at":"2026-11-09T14:00:20Z","displayed_time_local":"2026-11-09 16:00:00",
+    "source_label":"Business Wire","filters":"Record the visible filter state"}]}
+This example is synthetic. A displayed publication time is never used as a
+network receipt. The retained October 30 capture format is also supported.
+Its missing headlines remain missing; they are not borrowed from our database.
+
+Reviewed-case input uses a cases array with positive article_id, title, date,
+wire_identity and/or canonical_url. Exact original link plus headline matches,
+conflicting headlines, ambiguous cases and title/date-only candidates are
+reported separately. Local FC/Godel/WordPress/Yahoo identifiers never become
+wire identities. Related symbols never become validated fund assignments.
+Missing cases in a finite saved response are unobserved, not established misses.
+
+Verified retained replay
+
+.tmp/realtime-research-20261107/source-intake-20261107T1740/retained-source-report.json
+contains 62 historical observations: 30 FC GNW, 10 NEWSnet GNW, 20 Guggenheim,
+and two Godel captures. Guggenheim matches original GNW release 3393802 and
+article 1660. The Godel captures preserve two original BW links, with missing
+headlines explicit. This is offline coverage evidence, not new arrival timing.
+That retained replay did not establish a live direct-Yahoo or Godel response.
+The later bounded connector tests are documented separately in NEWS_LIVE.txt.
+
+November 8 issuer research
+
+The xai-distributions route accepts only the rel=alternate URL actually found
+on the issuer page: https://xainvestments.com/news-distributions/feed/ . Its first
+saved response has ten historical, full-text items. The November 2 items retain
+an unrelated 2024 Business Wire tracking link; that link is NOT original release
+identity. A bounded local check confirmed the MCN and XFLT labels agree with the
+stored November 2 articles. Intake keeps body hashes but assigns no tickers,
+does not publish these items, and counts no startup history as a speed result.
+The route is offline review only; no new background poller was installed.
+
+The Clough general feed was empty. Reaves' advertised media-room RSS returned
+404. A single direct ACCESS Newswire original-body request returned 403, retained
+in the November 8 research record; do not retry through another client or host.
+
+Weekday snapshot
+
+  python tools/news_weekday_snapshot.py .tmp/new-production-snapshot.json --minutes 65
+
+This performs one local /health read (five-second timeout, no redirects), reads
+the actual backend process identities, and uses a repeatable read-only database
+transaction on the verified local cef_news mapping. Each statement has a
+five-second timeout. Choose a window of 1–360 minutes. It reads at most 1,000
+recent articles, 10,000 associated ticker rows and 100 recent failed runs.
+Truncation is explicit. It reads FC state read-only and scans at most 8 MiB of
+timing logs, restricted to current app PIDs and the selected time window.
+
+No website listing/body is requested. No SSE observer, process change, setting
+change or database mutation occurs. first_seen_at and created_at are preserved
+database labels, not renamed as measured commit. The old research timing expiry
+is unchanged; absent traces are reported as gaps. Article body file presence
+is only an inventory check. Audit actual structure with:
+
+  python tools/news_validation.py reader .tmp/new-production-snapshot.json .tmp/new-reader-report.json --archives data/article-bodies
+
+The actual browser Delivery check remains a separate, user-visible bounded
+session. A database snapshot cannot establish physical screen delivery.
+
+GNW production package
+
+.tmp/realtime-research-20261107/source-intake-20261107T1740/activation-plan.json
+tracks the staged/active status. Do not assume it is live from this document.
+It enrolls only the published Guggenheim issuer feed, earliest November 9 at
+08:00 UTC, through the existing GNW scheduler. Normal request window is weekdays
+10:00–24:00 Kyiv with a 30-second closing margin and at least 60 seconds between
+issuer requests. The first full response each weekday is a persisted baseline
+without article insertion or body requests. Same-day restarts reuse it. Source
+refusals and Retry-After remain in the existing durable controls. Oxford stays
+disabled. Activation requires the documented stopped-app maintenance window.
+
+Tests
+
+  python -m unittest discover -s tools/tests -p test_news_sources.py -v
+  python -m unittest discover -s tools/tests -p test_weekday_snapshot.py -v
+
+34 intake tests and four snapshot trace/redirect tests pass. The staged backend
+passes all 818 tests in a task-owned disposable PostgreSQL instance. Network
+requests in intake tests are blocked. Captures and historical repairs are never
+counted as live weekday performance.
+
+November 10 GNW syndicated-body component
+
+tools/news_syndicated_body.py reads one saved, hash-verified FC GNW article body:
+
+  python tools/news_syndicated_body.py CAPTURE_MANIFEST NEW_REVIEW.json
+
+It performs no source request, DB mutation or production ingestion. Its separate
+version-1 manifest uses route financialcontent-gnw-body, the exact request_url,
+expected_title, http_status 200, payload_file, payload_sha256, received_at,
+receipt_kind and classification. Network receipts also require ordered
+request_started_at and clock_id. Body cap is 1 MiB; manifest cap is 64 KiB.
+An example and real historical replay are saved under:
+.tmp/realtime-research-20261110/collector-architecture-20261110T1115
+
+Output preserves paragraphs and tables, exact title/date checks and body exchange
+labels. It remains review-only: source-local IDs, trackers, media and attachments
+cannot establish original wire identity, and symbol labels are not validated
+fund assignments. Even an original-link candidate needs independent review.
+This is an offline body adapter; no GNW route was enabled in the live FC worker.
+
+  python -m unittest discover -s tools/tests -p test_news_syndicated_body.py -v
+
+All 28 new adapter tests and 36 existing intake tests pass. The real FUND replay
+retains three tables and explicitly reports its missing original GNW URL.
+The research report also records the Newsfile search verification challenge;
+do not use an alternate client, guessed endpoint or browser to bypass it.
+
+
+November 10 approved FC/GNW queue activation
+
+The GNW listing/body review route is now enabled inside the existing FinancialContent
+worker through FINANCIALCONTENT_GNW_REVIEW_UNTIL=2026-11-13T22:00:00Z in the project-root
+.env. The earlier offline-reader status above is historical; that CLI still makes
+no requests. Runtime activation evidence is saved in:
+.tmp/realtime-research-20261110/gnw-queue-20261110T1200/activation/results.json
+
+The published gnwcq listing uses a 60-second minimum interval. Only new CEF title
+candidates after the daily baseline can request a body; GNW body starts are at
+least 60 seconds apart, retained across restarts. Listing/body bounds are 15 seconds
+and 4 MiB/1 MiB. Existing host-wide FC controls apply. There is no GNW pagination.
+Daily weekday hours remain 10:00-24:00 Kyiv with the 30-second request margin;
+the GNW addition disables itself at the finite deadline. Existing production
+routes retain their own configuration.
+
+Raw responses and structured bodies are stored in fc_review_body in the existing
+FC SQLite database. Original-wire and fund identity are still pending review:
+no GNW production article or notification is emitted by this addition. Initial
+acceptance saved 30 baseline entries with zero candidate body requests or inserts.
+The following 30 new listing entries were retained as non-selected review rows;
+they establish neither new CEF releases nor a speed improvement.
+
+Read these tables with SQLite mode=ro, query_only and a five-second deadline. Do
+not instantiate Store merely to audit it, clear holds, replay candidates or fetch
+extra bodies. Preserve first sightings and independent publication/receipt clocks.
+Restart recovery now clears only the route's prospective absence bound; original
+observations, queue rows and controls remain. The app PID changed during the
+approved maintenance; future timing scans must verify the current actual PID.
+
+
+November 11 saved GNW reconciliation
+
+The new tool reads the existing FC queue in SQLite mode=ro with query_only and
+a five-second deadline. It makes no source request, PostgreSQL write, notification
+or publication decision. Choose at most seven days; row/body limits fail explicitly.
+
+  python tools/news_gnw_reconcile.py --store data/financialcontent.sqlite --since START_UTC --until END_UTC --cases REVIEWED_CASES.json --archives data/article-bodies --registry data/cef_tickers.csv --output NEW_REPORT.json
+
+To reproduce a report without any database read, replace --store/--since/--until
+with --snapshot PRIOR_REPORT.json. The frozen snapshot includes bounded original
+body bytes and their digests. Output files are exclusive; existing evidence is
+never overwritten. Retained invalid/held bodies stay held even if a newer parser
+could parse them. Daily baselines and historical appearances remain separate.
+
+Reviewed cases must provide the original GNW URL/identity, exact title, second-
+resolution primary publication label, unchanged native archive SHA-256 and quoted
+primary-body fund evidence. The tool checks current registry membership and exact
+body/table agreement. A missing literal original link stays identity review even
+if the body matches; neither that association nor a query/provider ticker enables
+publication. The successful synthetic tests do not establish real CEF coverage.
+
+The November 11 replay and its 35 new tests are recorded under:
+.tmp/realtime-research-20261111/gnw-reconciliation-20261111T1710
+It found no exact title/date association for the five reviewed GAB/GUT/GCV/ECF/BCV
+releases among 534 saved front-page sightings. All five pass the existing title
+selector with complete current names/sponsors. This finite evidence identifies
+the discovery limitation; it is not a global coverage-miss count. No backend
+package was activated by this tooling work. All source holds and the cutoff remain.
+
+  python -m unittest discover -s tools/tests -p test_news_gnw_reconcile.py -v
+
+
+November 11 GNW advertised-feed retention package (STAGED, NOT ACTIVATED)
+
+.tmp/realtime-research-20261111/gnw-discovery-20261111T1725/activation-plan.json
+describes two runtime files that retain literal issuer RSS links from already
+received validated GNW bodies. 39 new and74 relevant existing tests pass; no feed
+is requested or enrolled. Seven saved original pages yielded seven links: existing
+Guggenheim, held403 Oxford, and five other issuers without a validated current CEF
+assignment. This supplies no new live coverage or speed evidence. Existing archives
+are immutable; historical bodies are not refetched to recover metadata.
+
+New retained refusal: the official Gabelli closed-end press-release listing
+https://gabelli.com/insights/gabelli-media/press-releases-closed-end/
+returned403 on November11 at17:24:54.870327UTC during one bounded direct listing
+read. Stop this route; no alternate Gabelli host/path/client/browser replay.
+Evidence: .tmp/realtime-research-20261111/gnw-discovery-20261111T1725/refusals.json
+All prior source refusals and the November13 22UTC validation cutoff remain.
+
+
+November 11 GNW advertised-feed retention activation (COMPLETE)
+
+The user-approved package above was activated at17:57UTC. Its historical staged
+record remains, superseded by the completed activation evidence here:
+.tmp/realtime-research-20261111/gnw-discovery-20261111T1725/activation/results.json
+The two runtime files retain literal advertised GNW issuer RSS links from future
+ordinary validated body reads only. All39 installed checks passed; the first
+natural metadata archive remains pending at acceptance. No new feed enrollment,
+extra source request, historical body replay or speed improvement is established.
+The40 prior readers and all prior article, association and queue records were
+preserved. Actual backend PID43828 was healthy after the bounded10.431711-second
+maintenance gap. Verify current process identity rather than assuming this PID.
+All404/403 and other source holds remain, including Oxford and Gabelli. No repeat
+activation is needed. The November13 22:00UTC validation cutoff is unchanged.

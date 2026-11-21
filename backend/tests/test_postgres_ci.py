@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, inspect, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
 from app.models import RawFeedItem, Source
 from app.raw_feed_items import _upsert_raw_feed_item
@@ -34,11 +35,13 @@ def test_postgres_migration_schema_is_visible(postgres_engine):
     assert {
         "alembic_version",
         "article_tickers",
+        "article_enrichment",
         "articles",
         "feed_poll_state",
         "ingestion_runs",
         "push_subscriptions",
         "raw_feed_items",
+        "source_page_controls",
         "sources",
         "tickers",
     } <= tables
@@ -53,6 +56,14 @@ def test_postgres_migration_schema_is_visible(postgres_engine):
     assert "validation_keywords" in ticker_columns
     assert "extraction_version" in article_ticker_columns
 
+    enrichment_columns = {column["name"] for column in inspector.get_columns("article_enrichment")}
+    assert {"article_id", "source_id", "page_url", "feed_url", "status", "attempts",
+            "available_at", "lease_token", "created_at", "completed_at"} == enrichment_columns
+    assert inspector.get_pk_constraint("article_enrichment")["constrained_columns"] == ["article_id"]
+    assert "ix_article_enrichment_due" in {
+        index["name"] for index in inspector.get_indexes("article_enrichment")
+    }
+
     index_names = {index["name"] for index in inspector.get_indexes("raw_feed_items")}
     assert {
         "uq_raw_feed_items_source_guid_nn",
@@ -62,15 +73,13 @@ def test_postgres_migration_schema_is_visible(postgres_engine):
 
 
 def test_postgres_raw_feed_item_upsert_uses_psycopg_conflict_handling(postgres_engine):
-    session_factory = sessionmaker(
-        bind=postgres_engine,
-        autoflush=False,
-        autocommit=False,
-    )
-    db = session_factory()
-    try:
+    # Let the upsert commit normally while discarding the test's rows on exit.
+    with postgres_engine.connect() as connection, Session(
+        connection, autoflush=False, join_transaction_mode="create_savepoint"
+    ) as db:
+        connection.begin()
         source = Source(
-            code="ci-postgres",
+            code=f"ci-postgres-{uuid4().hex[:12]}",
             name="CI Postgres",
             base_url="https://example.com",
             enabled=True,
@@ -119,5 +128,3 @@ def test_postgres_raw_feed_item_upsert_uses_psycopg_conflict_handling(postgres_e
         assert row.feed_url == second_feed_url
         assert row.raw_guid == "guid-1"
         assert row.raw_payload_json["_alt_feed_urls"] == [first_feed_url]
-    finally:
-        db.close()

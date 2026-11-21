@@ -1,8 +1,9 @@
 from functools import lru_cache
+from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -42,6 +43,21 @@ class Settings(BaseSettings):
     ingest_cooldown_seconds: float = Field(default=2.0, ge=0.0)
 
     scheduler_enabled: bool = True
+    ingestion_independent_sources: bool = True
+    source_plan_refresh_seconds: float = Field(default=30.0, ge=1.0)
+    ingestion_maintenance_seconds: float = Field(default=60.0, ge=1.0)
+    postcommit_enrichment_enabled: bool = True
+    research_timing_log_path: str | None = None
+    research_timing_log_until: datetime | None = None
+    research_feed_receipts_enabled: bool = False
+    research_feed_receipt_dates: str = ""
+    research_feed_receipt_start_hour_utc: int = Field(default=8, ge=0, le=23)
+    research_feed_receipt_end_hour_utc: int = Field(default=22, ge=1, le=24)
+    news_validation_timing_enabled: bool = False
+    news_validation_timing_log_path: str | None = None
+    news_validation_timing_dates: str = ""
+    news_validation_timing_start_hour_utc: int = Field(default=8, ge=0, le=23)
+    news_validation_timing_end_hour_utc: int = Field(default=22, ge=1, le=24)
     admin_api_key: str | None = None
     ingestion_advisory_lock_key: int = 1_715_171_517
     migration_advisory_lock_key: int = 1_715_171_519
@@ -90,9 +106,22 @@ class Settings(BaseSettings):
         description="How often to run raw_feed_items pruning (0 disables auto-prune).",
     )
 
+    # Production FC is opt-in; importing reviewed controls is required before HTTP.
+    source_enable_financialcontent: bool = False
+    source_enable_free_discovery: bool = False
+    free_discovery_state_path: str = str(Path(__file__).resolve().parents[2] / "data" / "free-discovery.sqlite")
+    gnw_custom_feeds_path: str | None = None
+    # Explicitly bounded review collection; None keeps this route disabled.
+    # Missing original GNW identities never become production articles.
+    financialcontent_gnw_review_until: AwareDatetime | None = None
+    financialcontent_state_path: str = str(Path(__file__).resolve().parents[2] / "data" / "financialcontent.sqlite")
+    article_body_archive_dir: str = str(Path(__file__).resolve().parents[2] / "data" / "article-bodies")
+
     source_enable_yahoo: bool = True
     source_enable_prn: bool = True
     source_enable_gn: bool = True
+    # Set to the UTC enrollment time to enable fresh Guggenheim issuer releases.
+    guggenheim_issuer_feed_start: AwareDatetime | None = None
     source_enable_bw: bool = True
 
     # Admin/maintenance body-fetch timeout for article page scrapes

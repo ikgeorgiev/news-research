@@ -7,6 +7,9 @@ import time
 from collections import OrderedDict
 from urllib.parse import parse_qs, urlparse
 
+from app.body_cache import ArticleBodyCache
+from app.reviewed_table_rows import reviewed_aberdeen_table_symbols, reviewed_invesco_table_symbols
+from app.page_access import get_page_access
 from app.constants import (
     CONFIDENCE_CONTEXT,
     CONFIDENCE_EXCHANGE,
@@ -37,6 +40,7 @@ from app.sources import (
     _fetch_source_page_html as _fetch_source_page_html_impl,
     _is_businesswire_article_url as _is_businesswire_article_url_impl,
     _is_source_article_url as _is_source_article_url_impl,
+    _normalized_businesswire_fetch_url,
 )
 from app.utils import extract_article_body, html_to_plain_text, strip_noise_elements
 
@@ -48,10 +52,36 @@ SOURCE_PAGE_HEADERS = {
 SOURCE_PAGE_CACHE_TTL_SECONDS = 6 * 60 * 60
 SOURCE_PAGE_FAILURE_CACHE_TTL_SECONDS = 60
 SOURCE_PAGE_CACHE_MAX_ITEMS = 1024
+_article_body_cache = ArticleBodyCache()
 
 EXCHANGE_PATTERN = re.compile(
     r"\b(?:NYSE(?:\s+(?:American|Arca|MKT))?|NASDAQ|AMEX|OTC(?:QB|QX)?)\s*[:\-]\s*([A-Z]{1,5})\b"
 )
+# Only complete, bounded parenthesized lists carry the exchange label to
+# subsequent symbols. Ordinary prose, URL slugs and body-only lists do not.
+EXCHANGE_GROUP_PATTERN = re.compile(
+    r"\((?:NYSE(?:[ \t\u00a0]+(?:American|Arca|MKT))?|NASDAQ|AMEX|OTC(?:QB|QX)?)"
+    r"[ \t\u00a0]*[:\-][ \t\u00a0]*([^()\r\n]{1,240})\)"
+)
+EXCHANGE_GROUP_VALUE_PATTERN = re.compile(
+    r"(?!AND\b|OR\b)[A-Z]{1,5}(?:[ \t\u00a0]*,[ \t\u00a0]*(?!AND\b|OR\b)[A-Z]{1,5})*"
+    r"(?:[ \t\u00a0]*,?[ \t\u00a0]+(?:and|AND|&)[ \t\u00a0]+(?!AND\b|OR\b)[A-Z]{1,5})?"
+)
+
+
+def _explicit_exchange_group_symbols(segment: str) -> list[str]:
+    symbols: list[str] = []
+    for match in EXCHANGE_GROUP_PATTERN.finditer(segment):
+        value = match.group(1).strip(" \t\u00a0")
+        if EXCHANGE_GROUP_VALUE_PATTERN.fullmatch(value) is None:
+            continue
+        tokens = re.split(r"[ \t\u00a0]*(?:,|\band\b|\bAND\b|&)[ \t\u00a0]*", value)
+        distinct = list(dict.fromkeys(token for token in tokens if token))
+        if len(distinct) >= 2:
+            symbols.extend(distinct)
+    return list(dict.fromkeys(symbols))
+
+
 PAREN_SYMBOL_PATTERN = re.compile(r"\(([A-Z]{1,5})\)")
 TOKEN_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
 TABLE_CELL_SYMBOL_PATTERN = re.compile(
@@ -246,12 +276,25 @@ def _source_page_fetch_requires_network(
     now_fn=time.time,
 ) -> bool:
     fetch_url = _canonical_source_article_url_impl(url)
+    if config.source_code == "businesswire":
+        fetch_url = _normalized_businesswire_fetch_url(fetch_url)
     if not _is_source_article_url(fetch_url, config.hostname_suffix):
         return False
 
     now = now_fn()
     with _source_page_cache_lock:
         cached = _source_page_cache.get(fetch_url)
+        if cached is not None and cached[1] is not None and now-cached[0] <= SOURCE_PAGE_CACHE_TTL_SECONDS:
+            return False
+        store = get_page_access()
+        if store is None:
+            return False
+        try:
+            from datetime import datetime, timezone
+            if store.inspect(fetch_url, config, datetime.fromtimestamp(now, timezone.utc)) is not None:
+                return False
+        except Exception:
+            return False
         if cached is None:
             return True
         fetched_at, cached_html = cached
@@ -304,6 +347,14 @@ def _extract_table_symbol_contexts_from_html(
                 upper_text = cell_text.upper()
                 if upper_text in known_symbols and upper_text not in STOPWORDS:
                     row_symbols.add(upper_text)
+                # Some distribution tables embed the exchange and ticker in
+                # the fund-name cell instead of using a separate symbol cell.
+                # Keep these as table candidates so normal fund validation
+                # still applies even if readable-body extraction drops tables.
+                for exchange_match in EXCHANGE_PATTERN.finditer(cell_text):
+                    symbol = exchange_match.group(1)
+                    if symbol in known_symbols and symbol not in STOPWORDS:
+                        row_symbols.add(symbol)
             if row_has_header:
                 header_texts.extend(row_texts)
                 continue
@@ -329,7 +380,7 @@ def _strip_noise_elements(html_text: str) -> str:
 
 
 def _extract_article_body(html_text: str) -> str | None:
-    return extract_article_body(html_text)
+    return _article_body_cache.extract(html_text, extract_article_body)
 
 
 def _is_timezone_token_in_time_context(text: str, start: int, end: int) -> bool:
@@ -540,7 +591,7 @@ def _accept_candidate(
             if _has_timezone_title_summary_support(profile, title_summary_matches):
                 return ("table_symbol", CONFIDENCE_TABLE_VALIDATED)
             return ("table_symbol", CONFIDENCE_UNVALIDATED)
-        if _standard_keyword_support(combined_matches):
+        if _standard_keyword_support(combined_matches | table_context_matches):
             return ("table_symbol", CONFIDENCE_TABLE_VALIDATED)
         return ("table_symbol", CONFIDENCE_UNVALIDATED)
 
@@ -590,6 +641,28 @@ def _extract_source_fallback_tickers(
     if not html_text:
         return None
 
+    # The ingestion caller may retain this exact response for the reader after
+    # its transaction commits. No fetch, ticker decision or cache is added.
+    from app.page_body_capture import retain_page_body
+    retain_page_body(link, config.source_code, html_text)
+    return _extract_source_html_tickers(
+        title, summary, link, feed_url, known_symbols, html_text, config,
+        symbol_keywords=symbol_keywords,
+    )
+
+
+def _extract_source_html_tickers(
+    title: str,
+    summary: str,
+    link: str,
+    feed_url: str,
+    known_symbols: set[str],
+    html_text: str,
+    config: SourcePageConfig,
+    *,
+    symbol_keywords: dict[str, SymbolKeywordProfile | frozenset[str]] | None = None,
+) -> dict[str, tuple[str, float]]:
+    """Validate already-fetched HTML with current ticker context; no network I/O."""
     table_html = _strip_noise_elements(html_text)
     trafilatura_text = _extract_article_body(html_text)
     plain_text = (
@@ -666,6 +739,20 @@ def _extract_source_fallback_tickers(
         if existing is None or confidence > existing[1]:
             hits[symbol] = (config.table_match_type, confidence)
 
+    if config.table_match_type == 'prn_table' and symbol_keywords is not None:
+        eligible_names = {
+            symbol: profile.reviewed_table_names
+            for symbol in known_symbols
+            if (profile := _coerce_symbol_keyword_profile(symbol_keywords.get(symbol))).reviewed_table_names
+        }
+        reviewed_symbols = (
+            reviewed_invesco_table_symbols(html_text, link, title, eligible_names)
+            | reviewed_aberdeen_table_symbols(html_text, link, title, eligible_names)
+        )
+        for symbol in reviewed_symbols:
+            existing = hits.get(symbol)
+            if existing is None or existing[1] < CONFIDENCE_TABLE_VALIDATED:
+                hits[symbol] = (config.table_match_type, CONFIDENCE_TABLE_VALIDATED)
     return hits
 
 
@@ -709,7 +796,10 @@ def _collect_segment_hits(
     for segment, token_channel in segments:
         if not segment:
             continue
-        for symbol in EXCHANGE_PATTERN.findall(segment):
+        exchange_symbols = EXCHANGE_PATTERN.findall(segment)
+        if token_channel == EVIDENCE_CHANNEL_TITLE_SUMMARY_TOKEN:
+            exchange_symbols.extend(_explicit_exchange_group_symbols(segment))
+        for symbol in exchange_symbols:
             upper = symbol.upper()
             decision = _accept_candidate(
                 CandidateEvidence(symbol=upper, channel=EVIDENCE_CHANNEL_EXCHANGE),

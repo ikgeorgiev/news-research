@@ -1,0 +1,17 @@
+**
+!frontend/
+!frontend/**
+!deploy/
+!deploy/hetzner/
+!deploy/hetzner/frontend.Dockerfile
+!deploy/hetzner/frontend.Dockerfile.dockerignore
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/**/*.test.*
+frontend/tests/
+frontend/test-results/
+frontend/playwright-report/
+**/.env*
+**/__pycache__/

@@ -1,0 +1,74 @@
+NEWS VALIDATION TOOLS
+
+Run these commands from the repository root. They use Python's standard library,
+read saved files, and create one new JSON report. They do not import the running
+app, connect to PostgreSQL, fetch news, change archives or start a collector.
+No backend restart is needed. Existing output files are never overwritten.
+
+Browser delivery report
+
+1. In the app, open Delivery check and start a bounded check during normal use.
+2. Stop it or let it expire, then download the JSON before reloading the page.
+3. Run:
+
+   backend\.venv\Scripts\python.exe tools\news_validation.py delivery C:\path\to\download.json C:\path\to\new-report.json
+
+The report gives eligible automatic rows, measured and unobserved viewport
+outcomes, the numerator/denominator within 60 seconds, median and nearest-rank
+p95, outliers, provider/date groups, exclusions and truncation/clock warnings.
+Durations use the collector's monotonic clock. Publication and server labels
+are never subtracted to invent commit or publisher-to-screen timestamps.
+
+The measured denominator excludes baseline/history/manual loads and stories
+held behind click-to-load. Unobserved rows are censored, not counted as fast
+or slow. A recording exported while active is an incomplete observation.
+Automatic-new classification inherits the collector's browser/server-clock
+assumption and still needs independent verification of new releases. A source
+label in this report is the displayed provider, not proof of route availability.
+
+Reader coverage report
+
+Supply a saved article snapshot with either an articles or items array. Each
+row needs id and title; provider/provider_name, url/canonical_url, published_at
+and summary supply the comparison context. Inputs are bounded to 5 MiB and
+1,000 articles; individual archives are bounded to 1 MiB.
+
+   backend\.venv\Scripts\python.exe tools\news_validation.py reader C:\path\to\articles.json C:\path\to\new-reader-report.json --archives data\article-bodies
+
+Optionally add --cases C:\path\to\reviewed-cases.json to preserve study outcome
+and cohort context. Reviewed cases use a cases array with article_id, optional
+wire_identity/canonical_url, mode and original_366_cohort. Legacy bare PRN IDs
+are accepted only if their original PRN URL independently confirms the number.
+The saved study documents and identity strings are never rewritten.
+
+Each article is classified as archive_validated, archive_missing or
+archive_invalid. Validation checks article/title identity, original wire URL,
+publication labels and bounded renderable paragraphs/lists/tables. The report
+includes each archive digest, table/cell counts, provider fractions, missing
+case IDs and original manual/history context. Valid structure does not prove
+the entire publisher text is present. No missing body is fetched by this tool.
+
+Reproduce the November 7 historical audit with a NEW output filename:
+
+   backend\.venv\Scripts\python.exe tools\news_validation.py reader .tmp\realtime-research-20261107\user-work-20261107T1353\db-body-audit.json .tmp\new-reader-audit.json --archives data\article-bodies --cases .tmp\realtime-research-20261107\final-close-20261107T1040\all-release-cases.json
+
+The initial audit input contains 96 article rows from the October 27–November 6
+publication windows, captured November 7 at 14:08 UTC. The archive directory is
+read at command execution. This combines a dated article snapshot and current
+saved reader availability; it is not an observation of the original delivery.
+
+Tests and frontend compatibility
+
+   backend\.venv\Scripts\python.exe -m unittest discover -s tools/tests -p test_news_validation.py -v
+
+The suite blocks socket connections. On Windows, the real file-symlink test
+may be skipped if the current user lacks symlink creation privileges.
+
+To produce a SYNTHETIC compatibility fixture using the actual TypeScript
+DeliveryCheck class (requires the existing frontend TypeScript dependency):
+
+   node tools\tests\export_delivery_fixture.cjs .tmp\new-synthetic-export.json
+   backend\.venv\Scripts\python.exe tools\news_validation.py delivery .tmp\new-synthetic-export.json .tmp\new-synthetic-report.json
+
+This fixture uses made-up stories and clocks, opens no browser, and is labelled
+synthetic in both input and output. Its numbers must never enter live results.

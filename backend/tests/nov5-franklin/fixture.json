@@ -1,0 +1,2643 @@
+{
+  "entries": [
+    {
+      "id": 52955,
+      "article_id": 1675,
+      "source": "businesswire",
+      "raw_guid": "20261105966541en",
+      "raw_title": "Franklin Managed Municipal Income Trust Announces Final Results of Remarketed Preferred Shares Tender Offer and Variable Rate Demand Preferred Shares Offering",
+      "raw_link": "http://www.businesswire.com/news/home/20261105966541/en/Franklin-Managed-Municipal-Income-Trust-Announces-Final-Results-of-Remarketed-Preferred-Shares-Tender-Offer-and-Variable-Rate-Demand-Preferred-Shares-Offering?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+      "raw_pub_date": "2026-11-05 13:00:00+00:00",
+      "raw_payload_json": {
+        "title": "Franklin Managed Municipal Income Trust Announces Final Results of Remarketed Preferred Shares Tender Offer and Variable Rate Demand Preferred Shares Offering",
+        "link": "http://www.businesswire.com/news/home/20261105966541/en/Franklin-Managed-Municipal-Income-Trust-Announces-Final-Results-of-Remarketed-Preferred-Shares-Tender-Offer-and-Variable-Rate-Demand-Preferred-Shares-Offering?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "published": "Thu, 5 Nov 2026 13:00:00 UT",
+        "summary": "NEW YORK--(BUSINESS WIRE)--Category: Fund Announcement",
+        "source": "Business Wire",
+        "language": null
+      }
+    },
+    {
+      "id": 52956,
+      "article_id": 1676,
+      "source": "businesswire",
+      "raw_guid": "20261105876264en",
+      "raw_title": "Franklin Municipal Opportunities Trust Announces Final Results of Remarketed Preferred Shares Tender Offer and Variable Rate Demand Preferred Shares Offering",
+      "raw_link": "http://www.businesswire.com/news/home/20261105876264/en/Franklin-Municipal-Opportunities-Trust-Announces-Final-Results-of-Remarketed-Preferred-Shares-Tender-Offer-and-Variable-Rate-Demand-Preferred-Shares-Offering?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+      "raw_pub_date": "2026-11-05 13:00:00+00:00",
+      "raw_payload_json": {
+        "title": "Franklin Municipal Opportunities Trust Announces Final Results of Remarketed Preferred Shares Tender Offer and Variable Rate Demand Preferred Shares Offering",
+        "link": "http://www.businesswire.com/news/home/20261105876264/en/Franklin-Municipal-Opportunities-Trust-Announces-Final-Results-of-Remarketed-Preferred-Shares-Tender-Offer-and-Variable-Rate-Demand-Preferred-Shares-Offering?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "published": "Thu, 5 Nov 2026 13:00:00 UT",
+        "summary": "NEW YORK--(BUSINESS WIRE)--Category: Fund Announcement",
+        "source": "Business Wire",
+        "language": null
+      }
+    }
+  ],
+  "feed_url": "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtYXg==",
+  "registry": [
+    {
+      "id": 1,
+      "symbol": "ACP",
+      "fund_name": "abrdn Income Credit Strategies Fund",
+      "sponsor": "abrdn Investments Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 290,
+      "symbol": "ACV",
+      "fund_name": "Virtus Diversified Inc & Conv Fund",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 2,
+      "symbol": "ADX",
+      "fund_name": "Adams Diversified Equity Fund",
+      "sponsor": "Adams Diversified Equity Fund Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 291,
+      "symbol": "AEF",
+      "fund_name": "abrdn Emerging Markets ex-China Fund",
+      "sponsor": "abrdn Investments Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 3,
+      "symbol": "AFB",
+      "fund_name": "AllianceBernstein National Mun Inc",
+      "sponsor": "AllianceBernstein L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 4,
+      "symbol": "AGD",
+      "fund_name": "abrdn Global Dynamic Dividend",
+      "sponsor": "abrdn Investments Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 5,
+      "symbol": "AIO",
+      "fund_name": "Virtus AI & Tech Opp Fund",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 6,
+      "symbol": "AOD",
+      "fund_name": "abrdn Total Dynamic Dividend",
+      "sponsor": "abrdn Investments Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 7,
+      "symbol": "ARDC",
+      "fund_name": "Ares Dynamic Credit Allocation Fund",
+      "sponsor": "Ares Capital Management II LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 8,
+      "symbol": "ASA",
+      "fund_name": "ASA Gold and Precious Metals Limited",
+      "sponsor": "ASA",
+      "validation_keywords": null
+    },
+    {
+      "id": 9,
+      "symbol": "ASG",
+      "fund_name": "Liberty All-Star Growth",
+      "sponsor": "ALPS Advisors Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 10,
+      "symbol": "ASGI",
+      "fund_name": "abrdn Global Infrastructure Income Fund",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 11,
+      "symbol": "AVK",
+      "fund_name": "Advent Convertible & Income Fund",
+      "sponsor": "Advent Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 12,
+      "symbol": "AWF",
+      "fund_name": "AllianceBernstein Global High Income",
+      "sponsor": "AllianceBernstein L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 292,
+      "symbol": "AWP",
+      "fund_name": "abrdn Global Premier Properties",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 293,
+      "symbol": "BANX",
+      "fund_name": "ArrowMark Financial Corp",
+      "sponsor": "ArrowMark Asset Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 13,
+      "symbol": "BBN",
+      "fund_name": "BlackRock Taxable Municipal Bond Trust",
+      "sponsor": "BlackRock Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 14,
+      "symbol": "BCAT",
+      "fund_name": "BlackRock Capital Allocation Term Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 294,
+      "symbol": "BCV",
+      "fund_name": "Bancroft Fund",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 15,
+      "symbol": "BCX",
+      "fund_name": "BlackRock Resources&Commodities Strategy",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 16,
+      "symbol": "BDJ",
+      "fund_name": "BlackRock Enhanced Dividend Achievers",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 17,
+      "symbol": "BGB",
+      "fund_name": "Blackstone Strategic Credit 2027 term",
+      "sponsor": "Blackstone Liquid Credit Strategies LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 18,
+      "symbol": "BGH",
+      "fund_name": "Barings Global Short Duration High Yield",
+      "sponsor": "Barings LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 19,
+      "symbol": "BGR",
+      "fund_name": "BlackRock Energy and Resources",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 20,
+      "symbol": "BGT",
+      "fund_name": "Blackrock Floating Rate Income",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 21,
+      "symbol": "BGX",
+      "fund_name": "Blackstone Long-Short Credit Income",
+      "sponsor": "Blackstone Liquid Credit Strategies LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 22,
+      "symbol": "BGY",
+      "fund_name": "BlackRock Enhanced Intl Div Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 23,
+      "symbol": "BHK",
+      "fund_name": "BlackRock Core Bond",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 295,
+      "symbol": "BHV",
+      "fund_name": "BlackRock VA Municipal Bond",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 296,
+      "symbol": "BIT",
+      "fund_name": "BlackRock Multi-Sector Income Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 297,
+      "symbol": "BKT",
+      "fund_name": "BlackRock Income",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 24,
+      "symbol": "BLW",
+      "fund_name": "BlackRock Limited Duration Income",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 25,
+      "symbol": "BME",
+      "fund_name": "BlackRock Health Sciences",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 26,
+      "symbol": "BMEZ",
+      "fund_name": "BlackRock Health Sciences Term Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 298,
+      "symbol": "BMN",
+      "fund_name": "BlackRock 2037 Municipal Target term",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 27,
+      "symbol": "BOE",
+      "fund_name": "BlackRock Enhanced Glbl Div Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 299,
+      "symbol": "BPRE",
+      "fund_name": "Bluerock Private Real Estate Fund",
+      "sponsor": "Bluerock Fund Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 300,
+      "symbol": "BRW",
+      "fund_name": "Saba Capital Income & Opportunities Fund",
+      "sponsor": "Saba Capital Management, LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 28,
+      "symbol": "BSL",
+      "fund_name": "Blackstone Senior Floating Rt 2027 term",
+      "sponsor": "Blackstone Liquid Credit Strategies LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 29,
+      "symbol": "BST",
+      "fund_name": "BlackRock Science and Technology Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 30,
+      "symbol": "BSTZ",
+      "fund_name": "BlackRock Science and Technology Term",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 31,
+      "symbol": "BTO",
+      "fund_name": "JHancock Financial Opportunities",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 32,
+      "symbol": "BTT",
+      "fund_name": "BlackRock Municipal 2030 Target Term",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 301,
+      "symbol": "BTX",
+      "fund_name": "BlackRock Tech and Private Equity Term",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 33,
+      "symbol": "BTZ",
+      "fund_name": "BlackRock Credit Allocation Income Trust",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 34,
+      "symbol": "BUI",
+      "fund_name": "BlackRock Util, Infra & Power Opp",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 35,
+      "symbol": "BWG",
+      "fund_name": "BrandywineGLOBAL – Global Inc Opp Fund",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 36,
+      "symbol": "BXMX",
+      "fund_name": "Nuveen S&P 500 Buy-Write Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 37,
+      "symbol": "CAF",
+      "fund_name": "Morgan Stanley China A Share",
+      "sponsor": "Morgan Stanley",
+      "validation_keywords": null
+    },
+    {
+      "id": 38,
+      "symbol": "CCD",
+      "fund_name": "Calamos Dynamic Convertible and Income",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 302,
+      "symbol": "CCIF",
+      "fund_name": "Carlyle Credit Income Ord",
+      "sponsor": "Carlyle Global Credit Inv Mgmt",
+      "validation_keywords": null
+    },
+    {
+      "id": 39,
+      "symbol": "CEE",
+      "fund_name": "The Central and Eastern Europe Fund",
+      "sponsor": "DWS",
+      "validation_keywords": "dws,central and eastern europe fund"
+    },
+    {
+      "id": 40,
+      "symbol": "CEF",
+      "fund_name": "Sprott Physical Gold and Silver Trust",
+      "sponsor": "Sprott Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 41,
+      "symbol": "CET",
+      "fund_name": "Central Securities Corporation",
+      "sponsor": "Central Securities Corp",
+      "validation_keywords": null
+    },
+    {
+      "id": 303,
+      "symbol": "CEV",
+      "fund_name": "Eaton Vance CA Muni Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 304,
+      "symbol": "CFND",
+      "fund_name": "C1 Fund Inc.",
+      "sponsor": "C1 Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 42,
+      "symbol": "CGO",
+      "fund_name": "Calamos Global Total Return",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 43,
+      "symbol": "CHI",
+      "fund_name": "Calamos Convertible Opp Inc",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 44,
+      "symbol": "CHW",
+      "fund_name": "Calamos Global Dynamic Income Fund",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 45,
+      "symbol": "CHY",
+      "fund_name": "Calamos Convertible & High Income Fund",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 46,
+      "symbol": "CIF",
+      "fund_name": "MFS Intermediate High Income",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 47,
+      "symbol": "CII",
+      "fund_name": "BlackRock Enhanced Large Cap Core Fund",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 48,
+      "symbol": "CIK",
+      "fund_name": "Credit Suisse Asset Mgmt Income",
+      "sponsor": "UBS Asset Management (Americas) LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 49,
+      "symbol": "CLM",
+      "fund_name": "Cornerstone Strategic Investment Fund",
+      "sponsor": "Cornerstone Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 50,
+      "symbol": "CMU",
+      "fund_name": "MFS High Yield Municipal",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 305,
+      "symbol": "CPZ",
+      "fund_name": "Calamos L/S Equity & Dynamic Inc Trust",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 51,
+      "symbol": "CRF",
+      "fund_name": "Cornerstone Total Return Fund",
+      "sponsor": "Cornerstone Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 52,
+      "symbol": "CSQ",
+      "fund_name": "Calamos Strategic Total Return",
+      "sponsor": "Calamos Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 53,
+      "symbol": "CXE",
+      "fund_name": "MFS® High Income Municipal",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 306,
+      "symbol": "CXH",
+      "fund_name": "MFS Investment Grade Municipal",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 54,
+      "symbol": "DBL",
+      "fund_name": "Doubleline Opportunistic Cred",
+      "sponsor": "DoubleLine",
+      "validation_keywords": null
+    },
+    {
+      "id": 55,
+      "symbol": "DFP",
+      "fund_name": "Flah & Crum Dynamic Pref & Income Fund",
+      "sponsor": "Flaherty & Crumrine Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 56,
+      "symbol": "DHF",
+      "fund_name": "BNY Mellon High Yield Strategies Fund",
+      "sponsor": "BNY Mellon",
+      "validation_keywords": null
+    },
+    {
+      "id": 57,
+      "symbol": "DHY",
+      "fund_name": "Credit Suisse High Yield Credit",
+      "sponsor": "UBS Asset Management (Americas) LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 58,
+      "symbol": "DIAX",
+      "fund_name": "Nuveen Dow 30 Dynamic Overwrite",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 59,
+      "symbol": "DLY",
+      "fund_name": "DoubleLine Yield Opportunities Fund",
+      "sponsor": "DoubleLine Capital LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 307,
+      "symbol": "DMA",
+      "fund_name": "Destra Multi-Alternative",
+      "sponsor": "Destra Capital Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 60,
+      "symbol": "DMB",
+      "fund_name": "BNY Mellon Muni Bond Infrastructure Fund",
+      "sponsor": "BNY Mellon",
+      "validation_keywords": null
+    },
+    {
+      "id": 61,
+      "symbol": "DMO",
+      "fund_name": "Western Asset Mortgage Opp Fund Inc.",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 62,
+      "symbol": "DNP",
+      "fund_name": "DNP Select Income",
+      "sponsor": "Duff & Phelps Inv Mgmt Co (IL)",
+      "validation_keywords": "duff,phelps"
+    },
+    {
+      "id": 63,
+      "symbol": "DPG",
+      "fund_name": "Duff & Phelps Utility and Infra Fund Inc",
+      "sponsor": "Duff & Phelps Inv Mgmt Co (IL)",
+      "validation_keywords": null
+    },
+    {
+      "id": 64,
+      "symbol": "DSL",
+      "fund_name": "DoubleLine Income Solutions Fund",
+      "sponsor": "DoubleLine Capital LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 65,
+      "symbol": "DSM",
+      "fund_name": "BNY Mellon Strategic Muni Bond",
+      "sponsor": "BNY Mellon",
+      "validation_keywords": null
+    },
+    {
+      "id": 66,
+      "symbol": "DSU",
+      "fund_name": "BlackRock Debt Strategies",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 308,
+      "symbol": "DTF",
+      "fund_name": "DTF Tax-Free Income 2028 Term",
+      "sponsor": "Duff & Phelps",
+      "validation_keywords": null
+    },
+    {
+      "id": 309,
+      "symbol": "DXYZ",
+      "fund_name": "Destiny Tech100 Inc",
+      "sponsor": "Destiny Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 67,
+      "symbol": "EAD",
+      "fund_name": "Allspring Income Opps",
+      "sponsor": "Allspring Global Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 68,
+      "symbol": "EARN",
+      "fund_name": "Ellington Credit Company",
+      "sponsor": "Ellington Credit Co Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 310,
+      "symbol": "ECAT",
+      "fund_name": "BlackRock ESG Capital Allocation Term",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 69,
+      "symbol": "ECC",
+      "fund_name": "Eagle Point Credit Company LLC",
+      "sponsor": "Eagle Point Credit Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 70,
+      "symbol": "ECF",
+      "fund_name": "Ellsworth Growth and Income Fund",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 71,
+      "symbol": "EDD",
+      "fund_name": "Morgan Stanley Emrgng Mkts Domestic Debt",
+      "sponsor": "Morgan Stanley Investment Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 72,
+      "symbol": "EDF",
+      "fund_name": "Virtus Stone Harbor Emerging Markets Inc",
+      "sponsor": "Virtus Investment Advisors (VIA)",
+      "validation_keywords": null
+    },
+    {
+      "id": 73,
+      "symbol": "EEA",
+      "fund_name": "European Equity Fund",
+      "sponsor": "DWS",
+      "validation_keywords": null
+    },
+    {
+      "id": 74,
+      "symbol": "EFR",
+      "fund_name": "Eaton Vance Senior Floating Rate",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 75,
+      "symbol": "EFT",
+      "fund_name": "Eaton Vance Floating-Rate Income",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 311,
+      "symbol": "EHI",
+      "fund_name": "Western Asset Global High Income",
+      "sponsor": "Franklin Templeton Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 76,
+      "symbol": "EIC",
+      "fund_name": "Eagle Point Income Co Inc",
+      "sponsor": "Eagle Point Income Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 77,
+      "symbol": "EIM",
+      "fund_name": "Eaton Vance Municipal Bond",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 78,
+      "symbol": "EMD",
+      "fund_name": "Western Asset Emerging Markets Debt",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": "western asset,western asset emerging markets debt,franklin templeton,franklin templeton fund adviser"
+    },
+    {
+      "id": 79,
+      "symbol": "EMF",
+      "fund_name": "Templeton Emerging Markets",
+      "sponsor": "Franklin Templeton Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 312,
+      "symbol": "EMO",
+      "fund_name": "ClearBridge Energy Midstream Opportunity",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 80,
+      "symbol": "EOD",
+      "fund_name": "Allspring Global Dividend Opp Fd",
+      "sponsor": "Allspring Global Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 81,
+      "symbol": "EOI",
+      "fund_name": "Eaton Vance Enhanced Equity Income",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 82,
+      "symbol": "EOS",
+      "fund_name": "Eaton Vance Enhanced Equity Income II",
+      "sponsor": "Eaton Vance",
+      "validation_keywords": null
+    },
+    {
+      "id": 313,
+      "symbol": "EOT",
+      "fund_name": "Eaton Vance National Municipal Opprs Tr",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 83,
+      "symbol": "ERC",
+      "fund_name": "Allspring Multi-Sec Inc",
+      "sponsor": "Allspring Global Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 84,
+      "symbol": "ERH",
+      "fund_name": "Allspring Util & High In",
+      "sponsor": "Allspring Global Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 85,
+      "symbol": "ETB",
+      "fund_name": "Eaton Vance Tax-Managed Buy-Write Income",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 86,
+      "symbol": "ETG",
+      "fund_name": "Eaton Vance Tax Adv Global Dividend Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 87,
+      "symbol": "ETJ",
+      "fund_name": "Eaton Vance Risk-Mgd Divers Eq Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 88,
+      "symbol": "ETO",
+      "fund_name": "Eaton Vance Tax-Advantaged Glbl Div Opp",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 89,
+      "symbol": "ETV",
+      "fund_name": "Eaton Vance Tax-Managed Buy-Write Opp",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 90,
+      "symbol": "ETW",
+      "fund_name": "Eaton Vance Tx-Mgd Glbl Buy-Write Opp",
+      "sponsor": "Eaton Vance",
+      "validation_keywords": null
+    },
+    {
+      "id": 314,
+      "symbol": "ETX",
+      "fund_name": "EV Municipal Income 2028 Term Trust",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 91,
+      "symbol": "ETY",
+      "fund_name": "Eaton Vance Tax-Managed Divrs Equity Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 92,
+      "symbol": "EVF",
+      "fund_name": "Eaton Vance Senior Income",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 93,
+      "symbol": "EVG",
+      "fund_name": "Eaton Vance Short Duration Divers Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 94,
+      "symbol": "EVN",
+      "fund_name": "Eaton Vance Municipal Income",
+      "sponsor": "Eaton Vance",
+      "validation_keywords": null
+    },
+    {
+      "id": 95,
+      "symbol": "EVT",
+      "fund_name": "Eaton Vance Tax Advantaged Dividend Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 96,
+      "symbol": "EVV",
+      "fund_name": "Eaton Vance Limited Duration Income",
+      "sponsor": "Eaton Vance",
+      "validation_keywords": null
+    },
+    {
+      "id": 97,
+      "symbol": "EXG",
+      "fund_name": "Eaton Vance Tax-Mgd Glb Divrs Equity Inc",
+      "sponsor": "Eaton Vance Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 315,
+      "symbol": "FAX",
+      "fund_name": "abrdn Asia-Pacific Income Fund Inc",
+      "sponsor": "abrdn Asia Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 98,
+      "symbol": "FCO",
+      "fund_name": "abrdn Global Income Fund, Inc.",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 99,
+      "symbol": "FCT",
+      "fund_name": "First Trust Senior FR Inc II",
+      "sponsor": "First Trust Advisors L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 100,
+      "symbol": "FFA",
+      "fund_name": "First Trust Enhanced Equity Income",
+      "sponsor": "First Trust Advisors L.P.",
+      "validation_keywords": "first trust"
+    },
+    {
+      "id": 101,
+      "symbol": "FFC",
+      "fund_name": "Flah&Crum Preferred Securities",
+      "sponsor": "Flaherty & Crumrine Inc",
+      "validation_keywords": "flaherty crumrine,flaherty crumrine preferred securities"
+    },
+    {
+      "id": 102,
+      "symbol": "FINS",
+      "fund_name": "Angel Oak Financial Strats Income Term",
+      "sponsor": "Angel Oak Capital Advisors, LLC",
+      "validation_keywords": "angel oak,strats"
+    },
+    {
+      "id": 103,
+      "symbol": "FLC",
+      "fund_name": "Flah&Crum Total Return Fund",
+      "sponsor": "Flaherty & Crumrine Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 104,
+      "symbol": "FMN",
+      "fund_name": "Federated Premier Municipal Income",
+      "sponsor": "Federated Advisers",
+      "validation_keywords": null
+    },
+    {
+      "id": 316,
+      "symbol": "FMY",
+      "fund_name": "First Trust Mortgage Income",
+      "sponsor": "First Trust Advisors L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 105,
+      "symbol": "FOF",
+      "fund_name": "Cohen & Steers Closed-End Opportunity",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 106,
+      "symbol": "FPF",
+      "fund_name": "First Trust Inter Dur Pref & Income Fund",
+      "sponsor": "First Trust Advisors L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 107,
+      "symbol": "FRA",
+      "fund_name": "BlackRock Floating Rate Inc Strategies",
+      "sponsor": "BlackRock Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 317,
+      "symbol": "FSCO",
+      "fund_name": "FS Credit Opportunities Corp.",
+      "sponsor": "FS Global Advisor LLC",
+      "validation_keywords": "fs credit,fs credit opportunities,fs global advisor"
+    },
+    {
+      "id": 318,
+      "symbol": "FSSL",
+      "fund_name": "FS Specialty Lending Fund",
+      "sponsor": "FS Specialty Lending Advisor LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 108,
+      "symbol": "FT",
+      "fund_name": "Franklin Universal Trust",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 109,
+      "symbol": "FTF",
+      "fund_name": "Franklin Limited Duration Income Trust",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 319,
+      "symbol": "FTHY",
+      "fund_name": "FIRST TRUST HY OPPORTUNITIES 2027 Term",
+      "sponsor": "First Trust Advisors L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 110,
+      "symbol": "FUND",
+      "fund_name": "Sprott Focus Trust",
+      "sponsor": "Sprott Asset Management USA Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 111,
+      "symbol": "GAB",
+      "fund_name": "Gabelli Equity",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 112,
+      "symbol": "GAM",
+      "fund_name": "General American Investors",
+      "sponsor": "General American Investors Co Inc",
+      "validation_keywords": "general american investors"
+    },
+    {
+      "id": 113,
+      "symbol": "GBAB",
+      "fund_name": "Guggenheim Tax Muni & Inv Grade Debt Tr",
+      "sponsor": "Guggenheim Funds Investment Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 114,
+      "symbol": "GCV",
+      "fund_name": "Gabelli Conv Inc Secs",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 320,
+      "symbol": "GDL",
+      "fund_name": "GDL Fund",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 115,
+      "symbol": "GDO",
+      "fund_name": "Western Asset Global Corp Opp",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 116,
+      "symbol": "GDV",
+      "fund_name": "Gabelli Dividend & Income",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 117,
+      "symbol": "GF",
+      "fund_name": "New Germany",
+      "sponsor": "DWS",
+      "validation_keywords": null
+    },
+    {
+      "id": 118,
+      "symbol": "GGN",
+      "fund_name": "GAMCO Global Gold Natural Resources&Inc",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 321,
+      "symbol": "GGT",
+      "fund_name": "Gabelli Multimedia",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 322,
+      "symbol": "GGZ",
+      "fund_name": "Gabelli Global Small & Mid Cap Value Tru",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 119,
+      "symbol": "GHY",
+      "fund_name": "PGIM Global High Yield Fund, Inc.",
+      "sponsor": "PGIM",
+      "validation_keywords": null
+    },
+    {
+      "id": 120,
+      "symbol": "GLO",
+      "fund_name": "Clough Global Opportunities",
+      "sponsor": "Clough Capital Partners L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 121,
+      "symbol": "GLQ",
+      "fund_name": "Clough Global Equity",
+      "sponsor": "Clough Capital Partners L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 323,
+      "symbol": "GLU",
+      "fund_name": "Gabelli Global Utility & Income",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 122,
+      "symbol": "GLV",
+      "fund_name": "Clough Global Dividend and Income",
+      "sponsor": "Clough Capital Partners L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 123,
+      "symbol": "GNT",
+      "fund_name": "GAMCO Natural Resources, Gold & Inc Tr",
+      "sponsor": "Gabelli Funds LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 124,
+      "symbol": "GOF",
+      "fund_name": "Guggenheim Strategic Opp Fund",
+      "sponsor": "Guggenheim Funds Investment Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 324,
+      "symbol": "GRF",
+      "fund_name": "Eagle Capital Growth",
+      "sponsor": "Sims Capital Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 125,
+      "symbol": "GRX",
+      "fund_name": "Gabelli Healthcare & Wellness Trust",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 325,
+      "symbol": "GUG",
+      "fund_name": "Guggenheim Active Allocation Fund",
+      "sponsor": "Guggenheim Funds Investment Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 126,
+      "symbol": "GUT",
+      "fund_name": "Gabelli Utility Trust",
+      "sponsor": "Gabelli",
+      "validation_keywords": null
+    },
+    {
+      "id": 127,
+      "symbol": "HEQ",
+      "fund_name": "John Hancock Diversified Income Fund",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 326,
+      "symbol": "HERZ",
+      "fund_name": "Herzfeld Credit Income Fund",
+      "sponsor": "Thomas J Herzfeld Advisors Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 128,
+      "symbol": "HFRO",
+      "fund_name": "Highland Opportunities and Income Ord",
+      "sponsor": "NexPoint Asset Management, L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 129,
+      "symbol": "HGLB",
+      "fund_name": "Highland Global Allocation Fund",
+      "sponsor": "NexPoint Asset Management, L.P.",
+      "validation_keywords": null
+    },
+    {
+      "id": 130,
+      "symbol": "HIO",
+      "fund_name": "Western Asset High Income Opportunity",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 131,
+      "symbol": "HIX",
+      "fund_name": "Western Asset High Income II",
+      "sponsor": "Franklin Templeton Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 132,
+      "symbol": "HPF",
+      "fund_name": "JHancock Preferred Income II",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 133,
+      "symbol": "HPI",
+      "fund_name": "JHancock Preferred Income",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 134,
+      "symbol": "HPS",
+      "fund_name": "JHancock Preferred Income III",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 135,
+      "symbol": "HQH",
+      "fund_name": "abrdn Healthcare Investors",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 136,
+      "symbol": "HQL",
+      "fund_name": "abrdn Life Sciences Investors",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 137,
+      "symbol": "HTD",
+      "fund_name": "JHancock Tax-Advantaged Dividend Inc",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 138,
+      "symbol": "HYI",
+      "fund_name": "Western Asset High Yield Opp Fund",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 139,
+      "symbol": "HYT",
+      "fund_name": "BlackRock Corporate High Yield Fund",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 140,
+      "symbol": "IAE",
+      "fund_name": "Voya Asia Pacific High Div Eq Inc Fd",
+      "sponsor": "Voya Investments, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 327,
+      "symbol": "IAF",
+      "fund_name": "abrdn Australia Equity Fund Inc",
+      "sponsor": "abrdn Asia Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 141,
+      "symbol": "IDE",
+      "fund_name": "Voya Infrastructure Industrials&Matls Fd",
+      "sponsor": "Voya Investments, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 142,
+      "symbol": "IFN",
+      "fund_name": "The India Fund Inc",
+      "sponsor": "abrdn Asia Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 143,
+      "symbol": "IGA",
+      "fund_name": "Voya Global Advantage and Premium Opp Fd",
+      "sponsor": "Voya Investments, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 144,
+      "symbol": "IGD",
+      "fund_name": "Voya Global Equity Dividend&Prm Opp Fd",
+      "sponsor": "Voya Investments, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 328,
+      "symbol": "IGI",
+      "fund_name": "Western Asset Invstm Grd Opp Tr Inc",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 145,
+      "symbol": "IGR",
+      "fund_name": "CBRE Global Real Estate Income",
+      "sponsor": "CBRE Investment Management Listed Real Assets LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 146,
+      "symbol": "IHD",
+      "fund_name": "Voya Emerging Markets High Div Eq Fd",
+      "sponsor": "Voya Investments, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 147,
+      "symbol": "IIF",
+      "fund_name": "Morgan Stanley India Investment",
+      "sponsor": "Morgan Stanley Investment Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 148,
+      "symbol": "IIM",
+      "fund_name": "Invesco Value Muni Income",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 149,
+      "symbol": "IQI",
+      "fund_name": "Invesco Quality Municipal Income Trust",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 150,
+      "symbol": "ISD",
+      "fund_name": "PGIM High Yield Bond Fund, Inc.",
+      "sponsor": "PGIM",
+      "validation_keywords": null
+    },
+    {
+      "id": 151,
+      "symbol": "JCE",
+      "fund_name": "Nuveen Core Equity Alpha",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 152,
+      "symbol": "JFR",
+      "fund_name": "Nuveen Floating Rate Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 153,
+      "symbol": "JGH",
+      "fund_name": "Nuveen Global High Income Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 154,
+      "symbol": "JHI",
+      "fund_name": "JHancock Investors",
+      "sponsor": "John Hancock",
+      "validation_keywords": null
+    },
+    {
+      "id": 329,
+      "symbol": "JHS",
+      "fund_name": "JHancock Income Secs",
+      "sponsor": "John Hancock Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 155,
+      "symbol": "JLS",
+      "fund_name": "Nuveen Mortgage and Income Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 330,
+      "symbol": "JMM",
+      "fund_name": "Nuveen Multi-Market Income Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 156,
+      "symbol": "JOF",
+      "fund_name": "Japan Smaller Cap Fund",
+      "sponsor": "Nomura Asset Management Co Ltd",
+      "validation_keywords": null
+    },
+    {
+      "id": 157,
+      "symbol": "JPC",
+      "fund_name": "Nuveen Pref & Income Opps Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 158,
+      "symbol": "JQC",
+      "fund_name": "Nuveen Credit Strategies Income Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 159,
+      "symbol": "JRI",
+      "fund_name": "Nuveen Real Asset Inc and Grwt",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 160,
+      "symbol": "JRS",
+      "fund_name": "Nuveen Real Estate Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 331,
+      "symbol": "KF",
+      "fund_name": "Korea Fund",
+      "sponsor": "JPMorgan Asset Management (Asia Pacific) Limited",
+      "validation_keywords": null
+    },
+    {
+      "id": 161,
+      "symbol": "KIO",
+      "fund_name": "KKR Income Opportunities Fund",
+      "sponsor": "Kohlberg Kravis Roberts & Co.",
+      "validation_keywords": null
+    },
+    {
+      "id": 162,
+      "symbol": "KTF",
+      "fund_name": "DWS Municipal Income",
+      "sponsor": "DWS Investment Management Americas, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 163,
+      "symbol": "KYN",
+      "fund_name": "Kayne Anderson Energy Infrastructure",
+      "sponsor": "KA Fund Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 164,
+      "symbol": "LDP",
+      "fund_name": "Cohen & Steers Ltd Duration Pref & Inc",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 165,
+      "symbol": "LEO",
+      "fund_name": "BNY Mellon Strategic Municipals",
+      "sponsor": "BNY Mellon",
+      "validation_keywords": null
+    },
+    {
+      "id": 166,
+      "symbol": "LGI",
+      "fund_name": "Lazard Global Total Return and Income",
+      "sponsor": "Lazard Asset Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 167,
+      "symbol": "MCI",
+      "fund_name": "Barings Corporate Investors",
+      "sponsor": "Barings LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 168,
+      "symbol": "MCN",
+      "fund_name": "XAI Madison Equity Premium Income Fund",
+      "sponsor": "XA Investments LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 169,
+      "symbol": "MCR",
+      "fund_name": "MFS Charter Income",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 170,
+      "symbol": "MEGI",
+      "fund_name": "NYLI CBRE Glb Infra Megatrends Term Fund",
+      "sponsor": "New York Life Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 171,
+      "symbol": "MFM",
+      "fund_name": "MFS Municipal Income",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 172,
+      "symbol": "MGF",
+      "fund_name": "MFS Government Markets Inc",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 173,
+      "symbol": "MHD",
+      "fund_name": "BlackRock Muniholdings",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 332,
+      "symbol": "MHF",
+      "fund_name": "Western Asset Municipal High Income",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 174,
+      "symbol": "MIN",
+      "fund_name": "MFS Intermediate Income",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 175,
+      "symbol": "MIY",
+      "fund_name": "BlackRock MuniYield MI Quality",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 176,
+      "symbol": "MMD",
+      "fund_name": "NYLI MacKay DefinedTerm Muni Opps Fund",
+      "sponsor": "New York Life Investment Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 177,
+      "symbol": "MMT",
+      "fund_name": "MFS Multimarket Income",
+      "sponsor": "MFS",
+      "validation_keywords": null
+    },
+    {
+      "id": 178,
+      "symbol": "MMU",
+      "fund_name": "Western Asset Managed Municipals",
+      "sponsor": "Franklin Templeton Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 179,
+      "symbol": "MPA",
+      "fund_name": "BlackRock MuniYield PA Quality",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 333,
+      "symbol": "MPV",
+      "fund_name": "Barings Participation Invs",
+      "sponsor": "Barings LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 180,
+      "symbol": "MQY",
+      "fund_name": "BlackRock Muniyield Quality",
+      "sponsor": "BlackRock Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 181,
+      "symbol": "MSD",
+      "fund_name": "Morgan Stanley Emerging Markets Debt",
+      "sponsor": "Morgan Stanley Investment Management, Inc.",
+      "validation_keywords": "morgan stanley,morgan stanley emerging markets debt,emerging markets debt"
+    },
+    {
+      "id": 182,
+      "symbol": "MUA",
+      "fund_name": "BlackRock Muniassets",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 183,
+      "symbol": "MUC",
+      "fund_name": "BlackRock MuniHoldings CA Qty",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 184,
+      "symbol": "MUJ",
+      "fund_name": "BlackRock MuniHoldings NJ Qty",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 334,
+      "symbol": "MXE",
+      "fund_name": "Mexico Equity & Income",
+      "sponsor": "Pichardo Asset Management SA De CV",
+      "validation_keywords": null
+    },
+    {
+      "id": 185,
+      "symbol": "MXF",
+      "fund_name": "Mexico Fund",
+      "sponsor": "Impulsora Del Fondo Mexico, SC",
+      "validation_keywords": null
+    },
+    {
+      "id": 186,
+      "symbol": "MYI",
+      "fund_name": "BlackRock MuniYield Qty III",
+      "sponsor": "BlackRock",
+      "validation_keywords": null
+    },
+    {
+      "id": 187,
+      "symbol": "MYN",
+      "fund_name": "BlackRock MuniYield NY Quality",
+      "sponsor": "BlackRock Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 188,
+      "symbol": "NAC",
+      "fund_name": "Nuveen CA Quality Muni Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 189,
+      "symbol": "NAD",
+      "fund_name": "Nuveen Quality Muni Income Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 190,
+      "symbol": "NAN",
+      "fund_name": "Nuveen NY Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 335,
+      "symbol": "NAZ",
+      "fund_name": "Nuveen AZ Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 191,
+      "symbol": "NBB",
+      "fund_name": "Nuveen Taxable Municipal Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 192,
+      "symbol": "NBH",
+      "fund_name": "Neuberger Municipal Fund",
+      "sponsor": "Neuberger Berman",
+      "validation_keywords": null
+    },
+    {
+      "id": 193,
+      "symbol": "NBXG",
+      "fund_name": "Neuberger Brmn Nxt Gnrtn Cnnctvty",
+      "sponsor": "Neuberger Berman",
+      "validation_keywords": null
+    },
+    {
+      "id": 194,
+      "symbol": "NCA",
+      "fund_name": "Nuveen CA Municipal Value",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 336,
+      "symbol": "NCV",
+      "fund_name": "Virtus Convertible & Income Fund",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 337,
+      "symbol": "NCZ",
+      "fund_name": "Virtus Convertible & Income Fund II",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 195,
+      "symbol": "NDMO",
+      "fund_name": "Nuveen Dynamic Municipal Opportunities",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 196,
+      "symbol": "NEA",
+      "fund_name": "Nuveen AMT-Free Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 197,
+      "symbol": "NFJ",
+      "fund_name": "AllianzGI Div Interest & Prem Common",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 198,
+      "symbol": "NHS",
+      "fund_name": "Neuberger High Yield Strategies",
+      "sponsor": "Neuberger Berman",
+      "validation_keywords": null
+    },
+    {
+      "id": 199,
+      "symbol": "NIE",
+      "fund_name": "Virtus Equity & Convertible Inc Fund",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 338,
+      "symbol": "NIM",
+      "fund_name": "Nuveen Select Maturity Muni",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 200,
+      "symbol": "NKX",
+      "fund_name": "Nuveen CA AMT - Free Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 339,
+      "symbol": "NMAI",
+      "fund_name": "Nuveen Multi-Asset Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 201,
+      "symbol": "NMCO",
+      "fund_name": "Nuveen Municipal Credit Opps Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 340,
+      "symbol": "NMI",
+      "fund_name": "Nuveen Municipal Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 202,
+      "symbol": "NML",
+      "fund_name": "NB Energy Infra and Income Fund Inc",
+      "sponsor": "Neuberger Berman",
+      "validation_keywords": null
+    },
+    {
+      "id": 341,
+      "symbol": "NMS",
+      "fund_name": "Nuveen MN Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 342,
+      "symbol": "NMT",
+      "fund_name": "Nuveen MA Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 203,
+      "symbol": "NMZ",
+      "fund_name": "Nuveen Municipal High Income Opp Fd",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 343,
+      "symbol": "NNY",
+      "fund_name": "Nuveen NY Municipal Value",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 344,
+      "symbol": "NOM",
+      "fund_name": "Nuveen MO Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 345,
+      "symbol": "NPCT",
+      "fund_name": "Nuveen Core Plus Impact Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 346,
+      "symbol": "NPFD",
+      "fund_name": "Nuveen Variable Rate Pref & Inc Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 204,
+      "symbol": "NPV",
+      "fund_name": "Nuveen VA Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 205,
+      "symbol": "NQP",
+      "fund_name": "Nuveen PA Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 206,
+      "symbol": "NRK",
+      "fund_name": "Nuveen NY AMT - Free Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 207,
+      "symbol": "NRO",
+      "fund_name": "Neuberger Real Estate Securities Income",
+      "sponsor": "Neuberger Berman",
+      "validation_keywords": null
+    },
+    {
+      "id": 208,
+      "symbol": "NUV",
+      "fund_name": "Nuveen Municipal Value",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 209,
+      "symbol": "NUW",
+      "fund_name": "Nuveen AMT-Free Municipal Value Fund",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 210,
+      "symbol": "NVG",
+      "fund_name": "Nuveen AMT-Free Muni Credit Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 347,
+      "symbol": "NXG",
+      "fund_name": "NXG NextGen Infrastructure Inc",
+      "sponsor": "Cushing Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 211,
+      "symbol": "NXJ",
+      "fund_name": "Nuveen NJ Quality Muni Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 212,
+      "symbol": "NXP",
+      "fund_name": "Nuveen Select Tax Free Inc",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 213,
+      "symbol": "NZF",
+      "fund_name": "Nuveen Municipal Credit Income",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 214,
+      "symbol": "OCCI",
+      "fund_name": "OFS Credit Company Inc",
+      "sponsor": "OFS Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 215,
+      "symbol": "OIA",
+      "fund_name": "Invesco Municipal Inc Opp I",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 216,
+      "symbol": "OPP",
+      "fund_name": "RiverNorth/DoubleLine Strategic Opp Fund",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 348,
+      "symbol": "OXLC",
+      "fund_name": "Oxford Lane Capital Corp",
+      "sponsor": "Oxford Lane Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 349,
+      "symbol": "PAI",
+      "fund_name": "Western Asset Income",
+      "sponsor": "Franklin Templeton Investments",
+      "validation_keywords": null
+    },
+    {
+      "id": 217,
+      "symbol": "PAXS",
+      "fund_name": "PIMCO Access Income",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 218,
+      "symbol": "PCF",
+      "fund_name": "High Income Securities",
+      "sponsor": "Bulldog Investors LLP",
+      "validation_keywords": null
+    },
+    {
+      "id": 219,
+      "symbol": "PCM",
+      "fund_name": "PCM Fund",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": "pimco,pacific investment management,pacific investment management company"
+    },
+    {
+      "id": 220,
+      "symbol": "PCN",
+      "fund_name": "PIMCO Corporate & Income Strgy",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 221,
+      "symbol": "PCQ",
+      "fund_name": "PIMCO CA Municipal Income",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 350,
+      "symbol": "PDCC",
+      "fund_name": "Pearl Diver Credit Company Inc",
+      "sponsor": "Pearl Diver Capital LLP",
+      "validation_keywords": null
+    },
+    {
+      "id": 222,
+      "symbol": "PDI",
+      "fund_name": "PIMCO Dynamic Income Fund",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 223,
+      "symbol": "PDO",
+      "fund_name": "PIMCO Dynamic Income Opportunities Fund",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 224,
+      "symbol": "PDT",
+      "fund_name": "JHancock Premium Dividend Fund",
+      "sponsor": "John Hancock",
+      "validation_keywords": null
+    },
+    {
+      "id": 351,
+      "symbol": "PDX",
+      "fund_name": "PIMCO Dynamic Income Strategy Fund",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 225,
+      "symbol": "PEO",
+      "fund_name": "Adams Natural Resources Fund",
+      "sponsor": "Adams Natural Resources Fund Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 226,
+      "symbol": "PFD",
+      "fund_name": "Flaherty & Crumrine Preferred Income",
+      "sponsor": "Flaherty & Crumrine",
+      "validation_keywords": null
+    },
+    {
+      "id": 227,
+      "symbol": "PFL",
+      "fund_name": "PIMCO Income Strategy",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 228,
+      "symbol": "PFN",
+      "fund_name": "PIMCO Income Strategy II",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 229,
+      "symbol": "PFO",
+      "fund_name": "Flaherty & Crumrine Preferred Income Opp",
+      "sponsor": "Flaherty & Crumrine Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 230,
+      "symbol": "PGP",
+      "fund_name": "PIMCO Global StocksPLUS & Income",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 231,
+      "symbol": "PGZ",
+      "fund_name": "Principal Real Estate Income Fund",
+      "sponsor": "Principal Funds",
+      "validation_keywords": null
+    },
+    {
+      "id": 232,
+      "symbol": "PHK",
+      "fund_name": "PIMCO High Income",
+      "sponsor": "Pacific Investment Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 233,
+      "symbol": "PHYS",
+      "fund_name": "Sprott Physical Gold Trust Unit",
+      "sponsor": "Sprott Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 234,
+      "symbol": "PIM",
+      "fund_name": "Putnam Master Interm Income",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 235,
+      "symbol": "PML",
+      "fund_name": "PIMCO Municipal Income II",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 236,
+      "symbol": "PMM",
+      "fund_name": "Putnam Managed Muni Income",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 237,
+      "symbol": "PMO",
+      "fund_name": "Putnam Muni Opportunities",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 238,
+      "symbol": "PNI",
+      "fund_name": "PIMCO NY Municipal Income II",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 239,
+      "symbol": "PPT",
+      "fund_name": "Putnam Premier Income",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 240,
+      "symbol": "PSF",
+      "fund_name": "Cohen & Steers Select Preferred & Inc",
+      "sponsor": "Cohen & Steers",
+      "validation_keywords": null
+    },
+    {
+      "id": 241,
+      "symbol": "PSLV",
+      "fund_name": "Sprott Physical Silver Trust Unit",
+      "sponsor": "Sprott Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 242,
+      "symbol": "PTA",
+      "fund_name": "Cohen & Steers Tax-adv Prd Sec and Inc",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 243,
+      "symbol": "PTY",
+      "fund_name": "PIMCO Corporate & Income Opportunity Fd",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 367,
+      "symbol": "PWRL",
+      "fund_name": "Powerlaw Corp.",
+      "sponsor": "Powerlaw Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 244,
+      "symbol": "QQQX",
+      "fund_name": "Nuveen NASDAQ 100 Dynamic Overwrite",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 245,
+      "symbol": "RA",
+      "fund_name": "Brookfield Real Assets Income Fund Inc.",
+      "sponsor": "Brookfield Public Securities Group LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 352,
+      "symbol": "RCG",
+      "fund_name": "RENN Fund ord",
+      "sponsor": "Horizon Kinetics Asset Management LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 246,
+      "symbol": "RCS",
+      "fund_name": "PIMCO Strategic Income Fund",
+      "sponsor": "PIMCO",
+      "validation_keywords": null
+    },
+    {
+      "id": 247,
+      "symbol": "RFI",
+      "fund_name": "Cohen & Steers Total Return",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 248,
+      "symbol": "RFM",
+      "fund_name": "RiverNorth Flexible Municipal Income",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 249,
+      "symbol": "RFMZ",
+      "fund_name": "RiverNorth Flexible Municipal Income II",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 250,
+      "symbol": "RGT",
+      "fund_name": "Royce Global Trust, Inc.",
+      "sponsor": "Royce Investment Partners",
+      "validation_keywords": null
+    },
+    {
+      "id": 251,
+      "symbol": "RIV",
+      "fund_name": "RiverNorth Opportunities Fund",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 252,
+      "symbol": "RLTY",
+      "fund_name": "Cohen & Steers Real Estate Opp & Inc Fd",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 353,
+      "symbol": "RMI",
+      "fund_name": "RiverNorth Opp Muni Income Fund Inc",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 354,
+      "symbol": "RMM",
+      "fund_name": "RiverNorth Managed Duration Muni Inc Fd",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 355,
+      "symbol": "RMMZ",
+      "fund_name": "RiverNorth Manage Dur Muni Inc Fd II Inc",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 253,
+      "symbol": "RMT",
+      "fund_name": "Royce Micro-Cap Trust",
+      "sponsor": "Royce Investment Partners",
+      "validation_keywords": null
+    },
+    {
+      "id": 254,
+      "symbol": "RNP",
+      "fund_name": "Cohen & Steers REIT & Preferred Inc Fd",
+      "sponsor": "Cohen & Steers Capital Management, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 255,
+      "symbol": "RQI",
+      "fund_name": "Cohen & Steers Qual Inc Realty",
+      "sponsor": "Cohen & Steers",
+      "validation_keywords": null
+    },
+    {
+      "id": 356,
+      "symbol": "RSF",
+      "fund_name": "RiverNorth Capital and Inc Fund",
+      "sponsor": "RiverNorth Capital Management, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 256,
+      "symbol": "RVT",
+      "fund_name": "Royce Small-Cap Trust",
+      "sponsor": "Royce Investment Partners",
+      "validation_keywords": null
+    },
+    {
+      "id": 357,
+      "symbol": "SABA",
+      "fund_name": "Saba Capital Income & Ops Fund II",
+      "sponsor": "Saba Capital Management, LP",
+      "validation_keywords": "saba capital,saba capital income"
+    },
+    {
+      "id": 257,
+      "symbol": "SBI",
+      "fund_name": "Western Asset Intermediate Muni",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 358,
+      "symbol": "SCD",
+      "fund_name": "LMP Capital and Income",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 258,
+      "symbol": "SDHY",
+      "fund_name": "PGIM Short Duration High Yield Opps",
+      "sponsor": "PGIM",
+      "validation_keywords": null
+    },
+    {
+      "id": 359,
+      "symbol": "SOR",
+      "fund_name": "Source Capital",
+      "sponsor": "First Pacific Advisors, LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 259,
+      "symbol": "SPE",
+      "fund_name": "Special Opportunities",
+      "sponsor": "Bulldog Investors LLP",
+      "validation_keywords": null
+    },
+    {
+      "id": 360,
+      "symbol": "SPMC",
+      "fund_name": "Sound Point Meridian Capital Inc",
+      "sponsor": "Sound Point Meridian Management Company LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 260,
+      "symbol": "SPPP",
+      "fund_name": "Sprott Physical Platinum & Palladium Tr",
+      "sponsor": "Sprott Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 261,
+      "symbol": "SPXX",
+      "fund_name": "Nuveen S&P 500 Dynamic Overwrite",
+      "sponsor": "Nuveen Fund Advisors, LLC.",
+      "validation_keywords": null
+    },
+    {
+      "id": 361,
+      "symbol": "SRV",
+      "fund_name": "NXG Cushing Midstream Energy Fund",
+      "sponsor": "Cushing Asset Management LP",
+      "validation_keywords": null
+    },
+    {
+      "id": 362,
+      "symbol": "STEW",
+      "fund_name": "SRH Total Return Fund",
+      "sponsor": "Paralel Advisors LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 262,
+      "symbol": "STK",
+      "fund_name": "Columbia Seligman Premium Technology Gr",
+      "sponsor": "Columbia Mgmt Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 263,
+      "symbol": "SWZ",
+      "fund_name": "Total Return Securities Fund",
+      "sponsor": "Bulldog Investors LLP",
+      "validation_keywords": null
+    },
+    {
+      "id": 363,
+      "symbol": "TBLD",
+      "fund_name": "Thornburg Income Builder Opp Trust",
+      "sponsor": "Thornburg Investment Management Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 264,
+      "symbol": "TDF",
+      "fund_name": "Templeton Dragon",
+      "sponsor": "Templeton Asset Management Ltd.",
+      "validation_keywords": null
+    },
+    {
+      "id": 265,
+      "symbol": "TEI",
+      "fund_name": "Templeton Emerg Mkts Income",
+      "sponsor": "Franklin Advisers, Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 266,
+      "symbol": "THQ",
+      "fund_name": "abrdn Healthcare Opportunities Fund",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 267,
+      "symbol": "THW",
+      "fund_name": "abrdn World Healthcare Fund",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 268,
+      "symbol": "TSI",
+      "fund_name": "TCW Strategic Income",
+      "sponsor": "TCW Investment Management Co LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 269,
+      "symbol": "TWN",
+      "fund_name": "Taiwan Fund",
+      "sponsor": "Nomura Asset Management USA Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 270,
+      "symbol": "TY",
+      "fund_name": "Tri-Continental",
+      "sponsor": "Columbia Mgmt Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 271,
+      "symbol": "TYG",
+      "fund_name": "Tortoise Energy Infrastructure Corp.",
+      "sponsor": "Tortoise Capital Advisors, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 272,
+      "symbol": "USA",
+      "fund_name": "Liberty All-Star Equity",
+      "sponsor": "ALPS Advisors Inc",
+      "validation_keywords": "liberty all-star,liberty all-star equity"
+    },
+    {
+      "id": 364,
+      "symbol": "UTF",
+      "fund_name": "Cohen & Steers Infrastructure",
+      "sponsor": "Cohen & Steers",
+      "validation_keywords": null
+    },
+    {
+      "id": 273,
+      "symbol": "UTG",
+      "fund_name": "Reaves Utility Income",
+      "sponsor": "Reaves Asset Management",
+      "validation_keywords": null
+    },
+    {
+      "id": 274,
+      "symbol": "VBF",
+      "fund_name": "Invesco Bond",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 275,
+      "symbol": "VCV",
+      "fund_name": "Invesco CA Value",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 276,
+      "symbol": "VFL",
+      "fund_name": "abrdn National Municipal Income Fund",
+      "sponsor": "abrdn Inc.",
+      "validation_keywords": null
+    },
+    {
+      "id": 277,
+      "symbol": "VGI",
+      "fund_name": "Virtus Global Multi-Sector Income Fund",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 278,
+      "symbol": "VGM",
+      "fund_name": "Invesco Tr Inv Gr Muni",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 279,
+      "symbol": "VKI",
+      "fund_name": "Invesco Adv Muni Inc II",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 280,
+      "symbol": "VKQ",
+      "fund_name": "Invesco Municipal",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 365,
+      "symbol": "VLT",
+      "fund_name": "Invesco High Income II",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 281,
+      "symbol": "VMO",
+      "fund_name": "Invesco Muni Opp",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 282,
+      "symbol": "VPV",
+      "fund_name": "Invesco PA Value",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 366,
+      "symbol": "VTN",
+      "fund_name": "Invesco Tr Inv Gr NY",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 283,
+      "symbol": "VVR",
+      "fund_name": "Invesco Senior Income",
+      "sponsor": "Invesco Advisers, Inc",
+      "validation_keywords": null
+    },
+    {
+      "id": 284,
+      "symbol": "WDI",
+      "fund_name": "Western Asset Diversified Inc Fund",
+      "sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 285,
+      "symbol": "WEA",
+      "fund_name": "Western Asset Premier Bond",
+      "sponsor": "Western Asset Management Company Pte Ltd. – Singapore",
+      "validation_keywords": null
+    },
+    {
+      "id": 286,
+      "symbol": "WIA",
+      "fund_name": "Western Asset Inflation-Linked Income Fd",
+      "sponsor": "Western Asset Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 287,
+      "symbol": "WIW",
+      "fund_name": "Western Asset Infl-Linked Opps & Inc Fd",
+      "sponsor": "Western Asset Management Company, LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 288,
+      "symbol": "XFLT",
+      "fund_name": "XAI Octagon FR & Alternative Inc Trust",
+      "sponsor": "XA Investments LLC",
+      "validation_keywords": null
+    },
+    {
+      "id": 289,
+      "symbol": "ZTR",
+      "fund_name": "Virtus Total Return Fund Inc",
+      "sponsor": "Virtus Investment Advisers, LLC",
+      "validation_keywords": null
+    }
+  ],
+  "reviewed_names": [
+    {
+      "symbol": "PMM",
+      "registry_fund_name": "Putnam Managed Muni Income",
+      "registry_sponsor": "Franklin Advisers, Inc.",
+      "aliases": [
+        "Franklin Managed Municipal Income Trust"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260731601239/en/Franklin-Templeton-Announces-Availability-of-19-a-Notices-for-Certain-Closed-End-Funds?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-07-31 12:00:00+00:00",
+        "quote": "Franklin Managed Municipal Income Trust* (NYSE: PMM)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1042
+      }
+    },
+    {
+      "symbol": "PMO",
+      "registry_fund_name": "Putnam Muni Opportunities",
+      "registry_sponsor": "Franklin Advisers, Inc.",
+      "aliases": [
+        "Franklin Municipal Opportunities Trust"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260731601239/en/Franklin-Templeton-Announces-Availability-of-19-a-Notices-for-Certain-Closed-End-Funds?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-07-31 12:00:00+00:00",
+        "quote": "Franklin Municipal Opportunities Trust* (NYSE: PMO)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1042
+      }
+    }
+  ],
+  "primary_corroboration": "backend/tests/fixtures/franklin_same_headline.json"
+}

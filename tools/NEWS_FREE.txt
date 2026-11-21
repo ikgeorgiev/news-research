@@ -1,0 +1,66 @@
+FREE NEWS SOURCES
+
+The ordinary scheduler uses independent source schedules on PostgreSQL, keeping
+INGEST_COOLDOWN_SECONDS and the existing per-feed/source controls. Its existing
+advisory lock covers the whole coordinator lifetime. Manual ingestion skips
+while this owner is active. SQLite retains the serial batch mode. Source feeds
+within a wire source are serial; INGESTION_MAX_WORKERS bounds simultaneous jobs.
+When INGESTION_PARALLEL_YAHOO=true, individual Yahoo chunks have independent
+schedules within that same budget. Due wire jobs receive priority over queued
+Yahoo chunks. Already running bounded requests are not interrupted.
+
+Source plans refresh every SOURCE_PLAN_REFRESH_SECONDS (default 30). Maintenance
+runs separately every INGESTION_MAINTENANCE_SECONDS (default 60), with at most
+one maintenance task. INGESTION_INDEPENDENT_SOURCES=false selects the prior batch
+behavior. The health endpoint exposes source status and maintenance separately.
+Existing aggregate ingestion-cycle metrics now record source cycles; do not
+compare their cycle count directly with the earlier whole-batch count.
+
+SOURCE_ENABLE_FREE_DISCOVERY enables an application-owned review worker for
+the documented Press Release Feed closed-end keyword query and published XAI
+distribution RSS. Its default is false. FREE_DISCOVERY_STATE_PATH defaults to
+data/free-discovery.sqlite. Collection uses the ordinary weekday 10:00–24:00
+Kyiv window with a closing margin, not the expired validation study.
+The metadata query uses a stable UTC date window beginning three days before
+the current day, with up to 100 newest results and no pagination. This avoids
+the provider's documented timeout for broad keyword searches over its archive.
+
+The worker uses one request at a time, a minimum 300 seconds per host, full
+advertised cache lifetime and Retry-After, a total 15-second/1-MiB read bound,
+and no redirects, cookies, environment credentials, retries or body follow-ups.
+Client errors (except 408/429), redirects, invalid schemas and interrupted in-flight
+requests persist as holds. There is no automatic hold-clearance command.
+Health reports worker lifecycle and discovery availability separately.
+
+Each restart/day establishes a new response baseline. Transient failures reset
+the baseline, so absence is not inferred across gaps. Duplicate observations,
+changed records, changed provider IDs, history and unknown dates stay separate.
+Matching metadata does not prove original body tickers. These routes create no
+production article or notification. They are finite backup discovery, not all
+367 funds or demonstrated real-time coverage.
+
+Read the saved candidates without network access:
+
+  backend\.venv\Scripts\python.exe tools/news_free_sources.py report --store data/free-discovery.sqlite --limit 100
+
+The report opens SQLite in mode=ro, query_only, with a five-second deadline.
+
+Optional user-supplied GNW Reader Account RSS feeds can be registered in a JSON
+file selected by GNW_CUSTOM_FEEDS_PATH. No feed URL is generated or guessed.
+The empty template below is valid; add at most eight actual supplied URLs as
+objects with url and provenance="user_supplied_reader_feed". Custom feeds
+initially enter the same review queue. This is a connection point, not account
+registration or enrollment in production delivery.
+
+  {"version": 1, "feeds": []}
+
+  backend\.venv\Scripts\python.exe tools/news_free_sources.py check-config path/to/feeds.json
+
+The existing Guggenheim/public feed cannot be enrolled twice, and the retained
+Oxford hold is rejected. Same-host custom feeds share backoff and refusal state.
+Current custom-feed support is GNW RSS only. BW Atom/NX/SFTP requires actual
+publisher-provided access details and confirmed zero-cost eligibility; none
+were available, so no fictional BW connector or credentials were created.
+
+Changing runtime flags requires the normal controlled backend activation. No
+setting here restarts the old Yahoo comparison, Godel capture or closed study.

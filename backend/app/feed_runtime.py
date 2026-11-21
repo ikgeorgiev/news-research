@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import contextlib
+import math
 import random
 import threading
 import time
@@ -30,6 +32,28 @@ _tickers_csv_mtime_cache: dict[str, float] = {}
 _tickers_csv_mtime_cache_lock = threading.Lock()
 _last_raw_feed_prune_monotonic: float | None = None
 _last_raw_feed_prune_lock = threading.Lock()
+
+
+def _fetch_issuer_feed(url: str, timeout_seconds: float, headers: dict[str, str]) -> httpx.Response:
+    """Read one publisher feed with a total deadline and a decoded byte limit."""
+    timeout = min(15.0, timeout_seconds) if timeout_seconds > 0 else 15.0
+
+    async def fetch() -> httpx.Response:
+        async with asyncio.timeout(timeout), httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            async with client.stream("GET", url, headers={**REQUEST_HEADERS, **headers}) as response:
+                if response.status_code != 304:
+                    response.raise_for_status()
+                    if response.status_code != 200:
+                        raise ValueError(f"Unexpected issuer feed status {response.status_code}")
+                body = bytearray()
+                async for chunk in response.aiter_bytes(32768):
+                    if len(body) + len(chunk) > 4 * 1024 * 1024:
+                        raise ValueError("Issuer feed exceeds 4 MiB")
+                    body.extend(chunk)
+                validators = {k: response.headers[k] for k in ("etag", "last-modified") if k in response.headers}
+                return httpx.Response(response.status_code, request=response.request, headers=validators, content=bytes(body))
+
+    return asyncio.run(fetch())
 
 
 def _fetch_feed_with_retries(
@@ -244,10 +268,13 @@ def _update_feed_http_cache(
         return
     etag = headers.get("ETag")
     last_modified = headers.get("Last-Modified")
-    if etag:
-        feed_state.etag = str(etag)
-    if last_modified:
-        feed_state.last_modified = str(last_modified)
+    # A 304 updates only the metadata it supplies. A full replacement
+    # invalidates any cached validator the origin no longer sends.
+    full_response = getattr(response, "status_code", 200) == 200
+    if full_response or etag:
+        feed_state.etag = etag
+    if full_response or last_modified:
+        feed_state.last_modified = last_modified
 
 
 def _compute_feed_failure_backoff_seconds(
@@ -261,7 +288,10 @@ def _compute_feed_failure_backoff_seconds(
     if base <= 0.0 or cap <= 0.0:
         return 0.0
     exponent = max(0, int(failure_count) - 1)
-    return min(base * (2**exponent), cap)
+    try:
+        return min(math.ldexp(base, exponent), cap)
+    except OverflowError:
+        return cap
 
 
 def _mark_feed_failure_backoff(

@@ -49,8 +49,16 @@ dev-*.sh
 .tmp/
 **/.tmp/
 .research-src/
+.playwright-mcp/
 dropped_yahoo_entries.json
 websub_results.json
 
 # Database files
 *.db
+
+# Generated, validated local article reader archives
+data/article-bodies/
+
+# Local collector databases, journals and singleton locks
+data/financialcontent.sqlite*
+data/free-discovery.sqlite*

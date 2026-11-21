@@ -121,6 +121,29 @@ def article_latest_source_id(
     )
 
 
+def _article_recorded_source_value(
+    value_col,
+    *,
+    article_id_col,
+    provider_name_col,
+):
+    # Tracking parameters can prevent an exact raw/canonical URL match.
+    # Keep the article's recorded provider when its raw provenance supports it,
+    # instead of allowing a later syndicated copy to change the badge/filter.
+    return (
+        select(value_col)
+        .select_from(RawFeedItem)
+        .join(Source, Source.id == RawFeedItem.source_id)
+        .where(
+            RawFeedItem.article_id == article_id_col,
+            func.lower(Source.name) == func.lower(provider_name_col),
+        )
+        .order_by(RawFeedItem.id.asc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 def article_resolved_provider_name(
     *,
     article_id_col=Article.id,
@@ -152,6 +175,11 @@ def article_resolved_provider_name(
     )
     return func.coalesce(
         canonical_provider,
+        _article_recorded_source_value(
+            Source.name,
+            article_id_col=article_id_col,
+            provider_name_col=fallback_provider_name_col,
+        ),
         latest_provider,
         fallback_provider_name_col,
     )
@@ -204,12 +232,17 @@ def provider_filter_condition(
         canonical_url_col=canonical_url_col,
     )
     latest_source_id = article_latest_source_id(article_id_col=article_id_col)
+    recorded_source_id = _article_recorded_source_value(
+        Source.id,
+        article_id_col=article_id_col,
+        provider_name_col=provider_name_col,
+    )
     provider_name_match = article_provider_name_matches(
         provider_name,
         provider_name_col=provider_name_col,
     )
     return or_(
-        func.coalesce(canonical_source_id, latest_source_id).in_(source_ids),
+        func.coalesce(canonical_source_id, recorded_source_id, latest_source_id).in_(source_ids),
         and_(~has_raw_provenance, provider_name_match),
     )
 

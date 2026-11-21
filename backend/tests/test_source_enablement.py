@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
-from app.ingestion import run_ingestion_cycle, sync_runtime_state
+from app.ingestion import _run_feed_ingestion, run_ingestion_cycle, sync_runtime_state
 from app.models import Source
 from app.sources import (
     FeedDef,
@@ -397,4 +397,49 @@ def test_run_ingestion_cycle_parallel_mode_allows_yahoo_concurrency_when_enabled
         engine.dispose()
         if db_path.exists():
             db_path.unlink()
+
+
+def test_wire_feed_starts_while_first_yahoo_request_is_still_running(monkeypatch, tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'feed-start-order.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(autoflush=False, autocommit=False, bind=engine)
+    feeds = [
+        SourceFeed(
+            code="yahoo", name="Yahoo Finance", base_url="https://example.com",
+            feeds=[FeedDef(url=f"https://example.com/yahoo/{i}") for i in range(6)],
+        ),
+        SourceFeed(
+            code="businesswire", name="Business Wire", base_url="https://example.com",
+            feeds=[FeedDef(url="https://example.com/wire")],
+        ),
+    ]
+    wire_started = threading.Event()
+    wire_progress_during_yahoo = []
+
+    def fake_ingest(_db, *, source, feed_url, **_kwargs):
+        if feed_url.endswith("/yahoo/0"):
+            wire_progress_during_yahoo.append(wire_started.wait(timeout=1))
+        elif source.code == "businesswire":
+            wire_started.set()
+        return {
+            "source": source.code, "feed_url": feed_url, "status": "success",
+            "items_seen": 0, "items_inserted": 0, "notify_failed": False, "error": None,
+        }
+
+    monkeypatch.setattr("app.ingestion.ingest_feed", fake_ingest)
+    try:
+        with session_factory() as db:
+            seed_sources(db, feeds)
+            # Exercise the production worker path using an isolated test database.
+            monkeypatch.setattr(engine.dialect, "name", "postgresql")
+            results, *_ = _run_feed_ingestion(
+                db, _settings(ingestion_max_workers=2), source_feeds=feeds,
+            )
+        assert len(results) == 7
+        assert wire_progress_during_yahoo == [True]
+    finally:
+        engine.dispose()
 

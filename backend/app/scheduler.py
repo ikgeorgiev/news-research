@@ -24,6 +24,12 @@ class IngestionScheduler:
         self._lock = threading.Lock()
         self._shutdown = threading.Event()
         self._thread: threading.Thread | None = None
+        self._coordinator = None
+
+    def snapshot(self) -> dict:
+        if self._coordinator is not None:
+            return self._coordinator.snapshot()
+        return {"mode": "batch", "status": "running" if self._thread and self._thread.is_alive() else "stopped"}
 
     def start(self) -> None:
         if not self.settings.scheduler_enabled:
@@ -51,11 +57,20 @@ class IngestionScheduler:
     def shutdown(self) -> None:
         self._shutdown.set()
         if self._thread is not None:
-            self._thread.join(timeout=10)
+            self._thread.join(timeout=35)
+            if self._thread.is_alive():
+                logger.error("Scheduler still draining; retain its identity and leader lock")
+                return
             self._thread = None
+        from app.monitoring import INGESTION_SCHEDULER_ENABLED
+        INGESTION_SCHEDULER_ENABLED.set(0)
         logger.info("Ingestion scheduler stopped")
 
     def _loop(self) -> None:
+        if (getattr(self.settings, "ingestion_independent_sources", True)
+                and get_engine().dialect.name == "postgresql"):
+            self._independent_loop()
+            return
         while not self._shutdown.is_set():
             try:
                 result = self.run_once()
@@ -77,6 +92,38 @@ class IngestionScheduler:
             if self._shutdown.wait(timeout=self.settings.ingest_cooldown_seconds):
                 break
 
+    def _independent_loop(self) -> None:
+        from app.source_scheduler import SourceCoordinator
+        while not self._shutdown.is_set():
+            if not self._lock.acquire(blocking=False):
+                self._shutdown.wait(max(0.1, self.settings.ingest_cooldown_seconds))
+                continue
+            try:
+                # One owner for all sources; manual run_once and other app
+                # instances use the same existing advisory-lock key.
+                epoch_stop = threading.Event()
+                self._coordinator = SourceCoordinator(self.settings, self.session_factory, epoch_stop)
+                def coordinate(lock_conn):
+                    backend_pid = lock_conn.exec_driver_sql("SELECT pg_backend_pid()").scalar()
+                    lock_conn.commit()
+                    def heartbeat():
+                        if self._shutdown.is_set():
+                            epoch_stop.set()
+                            return
+                        if lock_conn.invalidated:
+                            raise RuntimeError("Ingestion leader connection lost")
+                        current_pid = lock_conn.exec_driver_sql("SELECT pg_backend_pid()").scalar()
+                        lock_conn.commit()
+                        if current_pid != backend_pid:
+                            raise RuntimeError("Ingestion leader connection changed")
+                    self._coordinator.run(heartbeat)
+                self._run_with_global_lock(coordinate)
+            except Exception:
+                logger.exception("Independent ingestion ownership ended; pending work drained")
+            finally:
+                self._lock.release()
+            self._shutdown.wait(max(0.1, self.settings.ingest_cooldown_seconds))
+
     def run_once(self) -> IngestionCycleResult | None:
         started_at = time.perf_counter()
         if not self._lock.acquire(blocking=False):
@@ -94,7 +141,7 @@ class IngestionScheduler:
         finally:
             self._lock.release()
 
-    def _run_with_global_lock(self) -> IngestionCycleResult | None:
+    def _run_with_global_lock(self, operation=None) -> IngestionCycleResult | None:
         engine = get_engine()
 
         # Skip advisory lock for non-PostgreSQL (e.g. SQLite in tests).
@@ -122,6 +169,8 @@ class IngestionScheduler:
                 record_ingestion_skip("advisory_lock")
                 return None
             try:
+                if operation is not None:
+                    return operation(lock_conn)
                 with self.session_factory() as db:
                     return run_ingestion_cycle(db, self.settings)
             finally:
@@ -132,6 +181,8 @@ class IngestionScheduler:
                         logger.warning("Ingestion advisory unlock returned false (key=%s)", lock_key)
                 except Exception:
                     logger.exception("Failed to release ingestion advisory lock")
+                    # Never return a possibly lock-owning connection to the pool.
+                    lock_conn.invalidate()
 
 
 def get_scheduler() -> IngestionScheduler | None:

@@ -55,7 +55,16 @@ def test_businesswire_fallback_extracts_table_symbols(monkeypatch):
     assert hits["DSM"][0] == "bw_table"
     assert hits["DSM"][1] == 0.84
 
-def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, clean_page_cache):
+@pytest.mark.parametrize("counter_warm", [False, True])
+def test_businesswire_page_fetch_obeys_durable_backoff_after_failed_cache_ttl(monkeypatch, clean_page_cache, counter_warm):
+    from app.monitoring import SOURCE_PAGE_REQUESTS
+
+    # Metric initialization also reads wall time; cache timing must not depend
+    # on whether another test has initialized this label first.
+    SOURCE_PAGE_REQUESTS.remove("businesswire", "unknown")
+    if counter_warm:
+        SOURCE_PAGE_REQUESTS.labels(source="businesswire", status="unknown")
+
     class FakeResponse:
         def __init__(self, is_success: bool, text: str):
             self.is_success = is_success
@@ -75,12 +84,10 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
             return FakeResponse(is_success=False, text="")
         return FakeResponse(is_success=True, text="<html>ok</html>")
 
-    timestamps = [1000.0, 1000.0, 1000.5, 1000.5]
+    clock = {"now": 1000.0}
 
     def fake_time() -> float:
-        if timestamps:
-            return timestamps.pop(0)
-        return 1000.5
+        return clock["now"]
 
     monkeypatch.setattr(
         "app.http_client.get_http_client",
@@ -93,6 +100,13 @@ def test_businesswire_page_fetch_retries_after_failed_cache_ttl(monkeypatch, cle
     first = _fetch_source_page_html(
         "https://www.businesswire.com/news/home/abc", 5, bw_config
     )
+    clock["now"] = 1000.5
+    held = _fetch_source_page_html(
+        "https://www.businesswire.com/news/home/abc", 5, bw_config
+    )
+    assert held is None and calls["count"] == 1
+    # Expiring the in-memory entry cannot bypass durable transient backoff.
+    clock["now"] = 1061.0
     second = _fetch_source_page_html(
         "https://www.businesswire.com/news/home/abc", 5, bw_config
     )

@@ -1,0 +1,802 @@
+{
+  "schema": 1,
+  "purpose": "Body-fetch hints only, guarded by active symbol and exact fresh registry name and sponsor. Never map predecessor symbols to a merger survivor.",
+  "aliases": [
+    {
+      "symbol": "XFLT",
+      "registry_fund_name": "XAI Octagon FR & Alternative Inc Trust",
+      "registry_sponsor": "XA Investments LLC",
+      "aliases": [
+        "XAI Floating Rate & Alternative Income Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/xai-floating-rate-alternative-income-234100262.html?.tsrc=rss",
+        "date": "2026-10-22 23:41:00+00:00",
+        "quote": "XAI Floating Rate & Alternative Income Trust (NYSE: XFLT)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1575
+      }
+    },
+    {
+      "symbol": "CCIF",
+      "registry_fund_name": "Carlyle Credit Income Ord",
+      "registry_sponsor": "Carlyle Global Credit Inv Mgmt",
+      "aliases": [
+        "Carlyle Credit Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/carlyle-credit-income-fund-schedules-200500992.html?.tsrc=rss",
+        "date": "2026-10-22 20:05:00+00:00",
+        "quote": "Carlyle Credit Income Fund (\u201cwe,\u201d \u201cus,\u201d \u201cour,\u201d \u201cCCIF\u201d or the \u201cFund\u201d) (NYSE: CCIF)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1516
+      }
+    },
+    {
+      "symbol": "TBLD",
+      "registry_fund_name": "Thornburg Income Builder Opp Trust",
+      "registry_sponsor": "Thornburg Investment Management Inc",
+      "aliases": [
+        "Thornburg Income Builder Opportunities Trust"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/thornburg-income-builder-opportunities-trust-announces-distribution-302891749.html",
+        "date": "2026-10-01 20:01:00+00:00",
+        "quote": "Thornburg Income Builder Opportunities Trust (the \"Trust\") (NASDAQ: TBLD)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1460
+      }
+    },
+    {
+      "symbol": "MMD",
+      "registry_fund_name": "NYLI MacKay DefinedTerm Muni Opps Fund",
+      "registry_sponsor": "New York Life Investment Management LLC",
+      "aliases": [
+        "NYLIM MacKay DefinedTerm Muni Opportunities Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20261001903728/en/NYLIM-MacKay-DefinedTerm-Muni-Opportunities-Fund-Declares-Monthly-Dividend-Distributions-for-the-Months-of-October-November-and-December-2026?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-10-01 13:00:00+00:00",
+        "quote": "NYLIM MacKay DefinedTerm Muni Opportunities Fund (the \u201cFund\u201d) (NYSE:MMD)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1439
+      }
+    },
+    {
+      "symbol": "BTO",
+      "registry_fund_name": "JHancock Financial Opportunities",
+      "registry_sponsor": "John Hancock Investment Management LLC",
+      "aliases": [
+        "John Hancock Financial Opportunities Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/john-hancock-financial-opportunities-fund-notice-to-shareholders--sources-of-distribution-under-section-19a-302894984.html",
+        "date": "2026-09-30 20:11:00+00:00",
+        "quote": "John Hancock Financial Opportunities Fund (NYSE: BTO)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1398
+      }
+    },
+    {
+      "symbol": "HTD",
+      "registry_fund_name": "JHancock Tax-Advantaged Dividend Inc",
+      "registry_sponsor": "John Hancock Investment Management LLC",
+      "aliases": [
+        "John Hancock Tax-Advantaged Dividend Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/john-hancock-tax-advantaged-dividend-income-fund-notice-to-shareholders--sources-of-distribution-under-section-19a-302894986.html",
+        "date": "2026-09-30 20:11:00+00:00",
+        "quote": "John Hancock Tax-Advantaged Dividend Income Fund (NYSE: HTD)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1418
+      }
+    },
+    {
+      "symbol": "SPE",
+      "registry_fund_name": "Special Opportunities",
+      "registry_sponsor": "Bulldog Investors LLP",
+      "aliases": [
+        "Special Opportunities Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/special-opportunities-fund-announces-distributions-202300135.html?.tsrc=rss",
+        "date": "2026-09-28 20:23:00+00:00",
+        "quote": "Special Opportunities Fund, Inc. (NYSE: SPE)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1479
+      }
+    },
+    {
+      "symbol": "FMN",
+      "registry_fund_name": "Federated Premier Municipal Income",
+      "registry_sponsor": "Federated Advisers",
+      "aliases": [
+        "Federated Hermes Premier Municipal Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/month-end-portfolio-data-now-available-for-federated-hermes-premier-municipal-income-fund-302879400.html",
+        "date": "2026-09-15 16:38:00+00:00",
+        "quote": "Federated Hermes Premier Municipal Income Fund (NYSE: FMN)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1372
+      }
+    },
+    {
+      "symbol": "JOF",
+      "registry_fund_name": "Japan Smaller Cap Fund",
+      "registry_sponsor": "Nomura Asset Management Co Ltd",
+      "aliases": [
+        "Japan Smaller Capitalization Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/japan-smaller-capitalization-fund-inc-203200468.html?.tsrc=rss",
+        "date": "2026-09-10 20:32:00+00:00",
+        "quote": "Japan Smaller Capitalization Fund, Inc. (NYSE: JOF)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1295
+      }
+    },
+    {
+      "symbol": "NIE",
+      "registry_fund_name": "Virtus Equity & Convertible Inc Fund",
+      "registry_sponsor": "Virtus Investment Advisers, LLC",
+      "aliases": [
+        "Virtus Equity & Convertible Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/virtus-equity-convertible-income-fund-210500396.html?.tsrc=rss",
+        "date": "2026-09-02 21:05:00+00:00",
+        "quote": "Virtus Equity & Convertible Income Fund (NYSE: NIE)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1257
+      }
+    },
+    {
+      "symbol": "HFRO",
+      "registry_fund_name": "Highland Opportunities and Income Ord",
+      "registry_sponsor": "NexPoint Asset Management, L.P.",
+      "aliases": [
+        "Highland Opportunities and Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/highland-opportunities-and-income-fund-announces-investor-update-call-302868182.html",
+        "date": "2026-09-02 21:00:00+00:00",
+        "quote": "Highland Opportunities and Income Fund (NYSE: HFRO)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1254
+      }
+    },
+    {
+      "symbol": "NFJ",
+      "registry_fund_name": "AllianzGI Div Interest & Prem Common",
+      "registry_sponsor": "Virtus Investment Advisers, LLC",
+      "aliases": [
+        "Virtus Dividend, Interest & Premium Strategy Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260902480579/en/Virtus-Dividend-Interest-Premium-Strategy-Fund-Announces-Distribution-and-Discloses-Sources-of-Distribution-%E2%80%93-Section-19-a-Notice",
+        "date": "2026-09-02 20:55:00+00:00",
+        "quote": "Virtus Dividend, Interest & Premium Strategy Fund (NYSE: NFJ)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1256
+      }
+    },
+    {
+      "symbol": "PDT",
+      "registry_fund_name": "JHancock Premium Dividend Fund",
+      "registry_sponsor": "John Hancock",
+      "aliases": [
+        "John Hancock Premium Dividend Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/john-hancock-premium-dividend-fund-notice-to-shareholders--sources-of-distribution-under-section-19a-302865320.html",
+        "date": "2026-08-31 20:10:00+00:00",
+        "quote": "John Hancock Premium Dividend Fund (NYSE: PDT)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1221
+      }
+    },
+    {
+      "symbol": "AFB",
+      "registry_fund_name": "AllianceBernstein National Mun Inc",
+      "registry_sponsor": "AllianceBernstein L.P.",
+      "aliases": [
+        "AllianceBernstein National Municipal Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/alliancebernstein-national-municipal-income-fund-inc-releases-monthly-portfolio-update-302858563.html",
+        "date": "2026-08-24 20:06:00+00:00",
+        "quote": "AllianceBernstein National Municipal Income Fund, Inc. [NYSE: AFB]",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1160
+      }
+    },
+    {
+      "symbol": "GNT",
+      "registry_fund_name": "GAMCO Natural Resources, Gold & Inc Tr",
+      "registry_sponsor": "Gabelli Funds LLC",
+      "aliases": [
+        "GAMCO Natural Resources, Gold & Income Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/gamco-natural-resources-gold-income-164600400.html?.tsrc=rss",
+        "date": "2026-08-12 16:46:00+00:00",
+        "quote": "GAMCO Natural Resources, Gold & Income Trust (NYSE:GNT)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1122
+      }
+    },
+    {
+      "symbol": "GGZ",
+      "registry_fund_name": "Gabelli Global Small & Mid Cap Value Tru",
+      "registry_sponsor": "Gabelli",
+      "aliases": [
+        "Gabelli Global Small and Mid Cap Value Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/gabelli-global-small-mid-cap-160700320.html?.tsrc=rss",
+        "date": "2026-08-12 16:07:00+00:00",
+        "quote": "Gabelli Global Small and Mid Cap Value Trust (NYSE:GGZ)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1124
+      }
+    },
+    {
+      "symbol": "GGT",
+      "registry_fund_name": "Gabelli Multimedia",
+      "registry_sponsor": "Gabelli",
+      "aliases": [
+        "Gabelli Multimedia Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/gabelli-multimedia-trust-reinforces-maintenance-155700469.html?.tsrc=rss",
+        "date": "2026-08-12 15:57:00+00:00",
+        "quote": "Gabelli Multimedia Trust Inc. (NYSE:GGT)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1115
+      }
+    },
+    {
+      "symbol": "BCV",
+      "registry_fund_name": "Bancroft Fund",
+      "registry_sponsor": "Gabelli Funds LLC",
+      "aliases": [
+        "Bancroft Fund Ltd."
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/bancroft-fund-ltd-increases-quarterly-144100089.html?.tsrc=rss",
+        "date": "2026-08-12 14:41:00+00:00",
+        "quote": "Bancroft Fund Ltd. (NYSE American: BCV)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1111
+      }
+    },
+    {
+      "symbol": "GCV",
+      "registry_fund_name": "Gabelli Conv Inc Secs",
+      "registry_sponsor": "Gabelli",
+      "aliases": [
+        "Gabelli Convertible and Income Securities Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/gabelli-convertible-income-securities-fund-143700902.html?.tsrc=rss",
+        "date": "2026-08-12 14:37:00+00:00",
+        "quote": "Gabelli Convertible and Income Securities Fund Inc. (NYSE: GCV)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1118
+      }
+    },
+    {
+      "symbol": "GRX",
+      "registry_fund_name": "Gabelli Healthcare & Wellness Trust",
+      "registry_sponsor": "Gabelli",
+      "aliases": [
+        "Gabelli Healthcare & WellnessRx Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/healthcare/articles/gabelli-healthcare-wellnessrx-trust-declares-141600688.html?.tsrc=rss",
+        "date": "2026-08-12 14:16:00+00:00",
+        "quote": "Gabelli Healthcare & WellnessRx Trust (NYSE:GRX)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1119
+      }
+    },
+    {
+      "symbol": "GAB",
+      "registry_fund_name": "Gabelli Equity",
+      "registry_sponsor": "Gabelli",
+      "aliases": [
+        "Gabelli Equity Trust"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/gabelli-equity-trust-10-distribution-131400505.html?.tsrc=rss",
+        "date": "2026-08-12 13:14:00+00:00",
+        "quote": "Gabelli Equity Trust Inc. (NYSE:GAB)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1120
+      }
+    },
+    {
+      "symbol": "FPF",
+      "registry_fund_name": "First Trust Inter Dur Pref & Income Fund",
+      "registry_sponsor": "First Trust Advisors L.P.",
+      "aliases": [
+        "First Trust Intermediate Duration Preferred & Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://finance.yahoo.com/markets/stocks/articles/first-trust-intermediate-duration-preferred-201000721.html?.tsrc=rss",
+        "date": "2026-07-20 20:10:00+00:00",
+        "quote": "First Trust Intermediate Duration Preferred & Income Fund (the \"Fund\") (NYSE: FPF)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 932
+      }
+    },
+    {
+      "symbol": "FTHY",
+      "registry_fund_name": "FIRST TRUST HY OPPORTUNITIES 2027 Term",
+      "registry_sponsor": "First Trust Advisors L.P.",
+      "aliases": [
+        "First Trust High Yield Opportunities 2027 Term Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260720482386/en/First-Trust-High-Yield-Opportunities-2027-Term-Fund-Declares-its-Monthly-Common-Share-Distribution-of-0.125-Per-Share-for-August?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-07-20 20:10:00+00:00",
+        "quote": "First Trust High Yield Opportunities 2027 Term Fund (the \"Fund\") (NYSE: FTHY)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 934
+      }
+    },
+    {
+      "symbol": "RQI",
+      "registry_fund_name": "Cohen & Steers Qual Inc Realty",
+      "registry_sponsor": "Cohen & Steers",
+      "aliases": [
+        "Cohen & Steers Quality Income Realty Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/cohen--steers-quality-income-realty-fund-inc-announces-preliminary-results-of-transferable-rights-offering-302827585.html",
+        "date": "2026-07-16 13:00:00+00:00",
+        "quote": "Cohen & Steers Quality Income Realty Fund, Inc. (NYSE: RQI)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 912
+      }
+    },
+    {
+      "symbol": "TWN",
+      "registry_fund_name": "Taiwan Fund",
+      "registry_sponsor": "Nomura Asset Management USA Inc",
+      "aliases": [
+        "Taiwan Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/the-taiwan-fund-inc-announces-3rd-quarter-earnings-302826830.html",
+        "date": "2026-07-15 20:14:00+00:00",
+        "quote": "Taiwan Fund, Inc. (the \"Fund\") (NYSE: TWN)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 874
+      }
+    },
+    {
+      "symbol": "GF",
+      "registry_fund_name": "New Germany",
+      "registry_sponsor": "DWS",
+      "aliases": [
+        "New Germany Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260630686777/en/The-New-Germany-Fund-Inc.-Announces-Results-of-the-Fund%E2%80%99s-Annual-Meeting-of-Stockholders?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-06-30 18:59:00+00:00",
+        "quote": "New Germany Fund, Inc. (NYSE: GF)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 779
+      }
+    },
+    {
+      "symbol": "STK",
+      "registry_fund_name": "Columbia Seligman Premium Technology Gr",
+      "registry_sponsor": "Columbia Mgmt Investment Advisers, LLC",
+      "aliases": [
+        "Columbia Seligman Premium Technology Growth Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260616647338/en/Columbia-Seligman-Premium-Technology-Growth-Fund-Inc.-Holds-16th-Annual-Meeting-of-Stockholders?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-06-16 18:18:00+00:00",
+        "quote": "Columbia Seligman Premium Technology Growth Fund, Inc. (the \u201cFund\u201d) (NYSE: STK)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 674
+      }
+    },
+    {
+      "symbol": "TY",
+      "registry_fund_name": "Tri-Continental",
+      "registry_sponsor": "Columbia Mgmt Investment Advisers, LLC",
+      "aliases": [
+        "Tri-Continental Corporation"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260616635037/en/Tri-Continental-Corporation-Holds-96th-Annual-Meeting-of-Stockholders?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-06-16 17:43:00+00:00",
+        "quote": "Tri-Continental Corporation (the \u201cCorporation\u201d) (NYSE: TY)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 673
+      }
+    },
+    {
+      "symbol": "DPG",
+      "registry_fund_name": "Duff & Phelps Utility and Infra Fund Inc",
+      "registry_sponsor": "Duff & Phelps Inv Mgmt Co (IL)",
+      "aliases": [
+        "Duff & Phelps Utility and Infrastructure Fund Inc."
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260615032484/en/Duff-Phelps-Utility-and-Infrastructure-Fund-Inc.-Announces-Increase-to-Monthly-Distribution-Renewal-of-the-Share-Repurchase-Plan-and-Sources-of-Distribution-%E2%80%93-Section-19-a-Notice",
+        "date": "2026-06-15 20:05:00+00:00",
+        "quote": "Duff & Phelps Utility and Infrastructure Fund Inc. (NYSE: DPG)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 662
+      }
+    },
+    {
+      "symbol": "VLT",
+      "registry_fund_name": "Invesco High Income II",
+      "registry_sponsor": "Invesco Advisers, Inc",
+      "aliases": [
+        "Invesco High Income Trust II"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/invesco-high-income-trust-ii-announces-portfolio-management-changes-302790300.html",
+        "date": "2026-06-03 13:50:00+00:00",
+        "quote": "Invesco High Income Trust II (NYSE: VLT)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 540
+      }
+    },
+    {
+      "symbol": "BSL",
+      "registry_fund_name": "Blackstone Senior Floating Rt 2027 term",
+      "registry_sponsor": "Blackstone Liquid Credit Strategies LLC",
+      "aliases": [
+        "Blackstone Senior Floating Rate 2027 Term Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260529087397/en/Blackstone-Credit-Insurance-Announces-Extension-of-Reinvestment-Period-Ahead-of-May-31-2027-Scheduled-Dissolution-Date-for-Blackstone-Senior-Floating-Rate-2027-Term-Fund?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-05-29 20:15:00+00:00",
+        "quote": "Blackstone Senior Floating Rate 2027 Term Fund (NYSE: BSL,",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 494
+      }
+    },
+    {
+      "symbol": "PAI",
+      "registry_fund_name": "Western Asset Income",
+      "registry_sponsor": "Franklin Templeton Investments",
+      "aliases": [
+        "Western Asset Investment Grade Income Fund Inc."
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260521709580/en/Western-Asset-Investment-Grade-Income-Fund-Inc.-Announces-Financial-Position-as-of-March-31-2026",
+        "date": "2026-05-21 12:00:00+00:00",
+        "quote": "Western Asset Investment Grade Income Fund Inc. (NYSE: PAI)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 406
+      }
+    },
+    {
+      "symbol": "WDI",
+      "registry_fund_name": "Western Asset Diversified Inc Fund",
+      "registry_sponsor": "Franklin Templeton Fund Adviser, LLC",
+      "aliases": [
+        "Western Asset Diversified Income Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260521382327/en/Western-Asset-Diversified-Income-Fund-Announces-Financial-Position-as-of-March-31-2026",
+        "date": "2026-05-21 12:00:00+00:00",
+        "quote": "Western Asset Diversified Income Fund (NYSE: WDI)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 404
+      }
+    },
+    {
+      "symbol": "MPV",
+      "registry_fund_name": "Barings Participation Invs",
+      "registry_sponsor": "Barings LLC",
+      "aliases": [
+        "Barings Participation Investors"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260514319801/en/Barings-Participation-Investors-Reports-Preliminary-First-Quarter-2026-Results-and-Announces-Quarterly-Cash-Dividend-Of-0.37-Per-Share?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-05-14 19:30:00+00:00",
+        "quote": "Barings Participation Investors (NYSE: MPV)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 349
+      }
+    },
+    {
+      "symbol": "TDF",
+      "registry_fund_name": "Templeton Dragon",
+      "registry_sponsor": "Templeton Asset Management Ltd.",
+      "aliases": [
+        "Templeton Dragon Fund"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260506661403/en/Templeton-Dragon-Fund-Inc.-Announces-Commitment-to-Share-Repurchases-in-Response-to-Fund-Discount?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-05-06 13:00:00+00:00",
+        "quote": "Templeton Dragon Fund, Inc. [NYSE: TDF]",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 287
+      }
+    },
+    {
+      "symbol": "DBL",
+      "registry_fund_name": "Doubleline Opportunistic Cred",
+      "registry_sponsor": "DoubleLine",
+      "aliases": [
+        "DoubleLine Opportunistic Credit Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/doubleline-opportunistic-credit-fund-declares-october-2026-distribution-302895573.html",
+        "date": "2026-10-01 13:00:00+00:00",
+        "quote": "DoubleLine Opportunistic Credit Fund (the \"Fund\"), which is traded on the New York Stock Exchange under the symbol DBL,",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1389
+      }
+    },
+    {
+      "symbol": "FINS",
+      "registry_fund_name": "Angel Oak Financial Strats Income Term",
+      "registry_sponsor": "Angel Oak Capital Advisors, LLC",
+      "aliases": [
+        "Angel Oak Financial Strategies Income Term Trust"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260901670548/en/Angel-Oak-Financial-Strategies-Income-Term-Trust-Declares-September-2026-Distribution?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-09-01 20:15:00+00:00",
+        "quote": "Angel Oak Financial Strategies Income Term Trust (the \u201cFund\u201d), a closed-end fund traded on the New York Stock Exchange under the symbol FINS,",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1200
+      }
+    },
+    {
+      "symbol": "EARN",
+      "registry_fund_name": "Ellington Credit Company",
+      "registry_sponsor": "Ellington Credit Co Management LLC",
+      "aliases": [
+        "Ellington Credit Company",
+        "Ellington Credit"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260807692367/en/Ellington-Credit-Declares-Monthly-Common-Distribution?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-08-10 12:00:00+00:00",
+        "quote": "Ellington Credit Company (NYSE: EARN)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1102
+      }
+    },
+    {
+      "symbol": "SOR",
+      "registry_fund_name": "Source Capital",
+      "registry_sponsor": "First Pacific Advisors, LP",
+      "aliases": [
+        "Source Capital"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260721253037/en/Source-Capital-Declares-September-October-and-November-2026-Distribution-on-Common-Stock?feedref=JjAwJuNHiystnCoBq_hl-aH2gtkQQ1l6W3ZaPesXFm57cpar2z2OJ_5SQGMGwVHJgBtFNItNzWaC-E-WdoEDnkz6i6lCdteeEqxiTxGYcX8eF_GK2rQqAnK3e1SETIZU",
+        "date": "2026-07-21 18:00:00+00:00",
+        "quote": "Source Capital (NYSE: SOR)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 943
+      }
+    },
+    {
+      "symbol": "PMM",
+      "registry_fund_name": "Putnam Managed Muni Income",
+      "registry_sponsor": "Franklin Advisers, Inc.",
+      "aliases": [
+        "Franklin Managed Municipal Income Trust"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260731601239/en/Franklin-Templeton-Announces-Availability-of-19-a-Notices-for-Certain-Closed-End-Funds?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-07-31 12:00:00+00:00",
+        "quote": "Franklin Managed Municipal Income Trust* (NYSE: PMM)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1042
+      }
+    },
+    {
+      "symbol": "PMO",
+      "registry_fund_name": "Putnam Muni Opportunities",
+      "registry_sponsor": "Franklin Advisers, Inc.",
+      "aliases": [
+        "Franklin Municipal Opportunities Trust"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20260731601239/en/Franklin-Templeton-Announces-Availability-of-19-a-Notices-for-Certain-Closed-End-Funds?feedref=JjAwJuNHiystnCoBq_hl-ZZ1ua8m9ZX4TD5aLVLwt6AeH-ZmphitUoXj3mYmcbi3j_R0p0VFN6GsXdq8PYoIcFEYGffXvFUnUBNNmxNkJdnQqLx557vS7ZRxiEolcr-hh9JfWjVGztDf2zjv-uzXFw%3D%3D",
+        "date": "2026-07-31 12:00:00+00:00",
+        "quote": "Franklin Municipal Opportunities Trust* (NYSE: PMO)",
+        "tier": "primary_wire_raw_summary",
+        "article_id": 1042
+      }
+    },
+    {
+      "symbol": "SABA",
+      "registry_fund_name": "Saba Capital Income & Ops Fund II",
+      "registry_sponsor": "Saba Capital Management, LP",
+      "aliases": [
+        "Saba Capital Income & Opportunities Fund II"
+      ],
+      "evidence": {
+        "source_url": "http://www.businesswire.com/news/home/20261028215981/en/Update-to-Previously-Announced-Special-Dividend-and-Monthly-Dividend",
+        "date": "2026-10-28 21:45:00+00:00",
+        "quote": "Saba Capital Income & Opportunities Fund II (NYSE: SABA)",
+        "tier": "stored_article_summary_wire_origin",
+        "article_id": 1608
+      }
+    },
+    {
+      "symbol": "MMT",
+      "registry_fund_name": "MFS Multimarket Income",
+      "registry_sponsor": "MFS",
+      "aliases": [
+        "Aberdeen Multi-Market Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/mfs-multimarket-income-trust-announces-completion-of-reorganization-change-in-investment-adviser-and-name-change-to-aberdeen-multi-market-income-fund-mmt-302805462.html",
+        "tier": "direct primary PRNewswire page body",
+        "effective_date": "2026-06-22",
+        "status": "verified completed rename; registry stale"
+      }
+    },
+    {
+      "symbol": "MGF",
+      "registry_fund_name": "MFS Government Markets Inc",
+      "registry_sponsor": "MFS",
+      "aliases": [
+        "Aberdeen Government Markets Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/mfs-government-markets-income-trust-announces-change-in-investment-adviser-and-name-change-to-aberdeen-government-markets-income-fund-mgf-302817067.html",
+        "tier": "direct primary PRNewswire page body",
+        "effective_date": "2026-07-02 after NYSE close",
+        "status": "verified completed rename; registry stale"
+      }
+    },
+    {
+      "symbol": "MIN",
+      "registry_fund_name": "MFS Intermediate Income",
+      "registry_sponsor": "MFS",
+      "aliases": [
+        "Aberdeen Intermediate Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/mfs-intermediate-income-trust-announces-change-in-investment-adviser-and-name-change-to-aberdeen-intermediate-income-fund-min-302817037.html",
+        "tier": "primary PRNewswire search-index full body; not directly opened",
+        "effective_date": "2026-07-02 after NYSE close",
+        "status": "primary indexed completed-rename announcement; registry stale"
+      }
+    },
+    {
+      "symbol": "NFJ",
+      "registry_fund_name": "AllianzGI Div Interest & Prem Common",
+      "registry_sponsor": "Virtus Investment Advisers, LLC",
+      "aliases": [
+        "Virtus Dividend, Interest & Premium Strategy Fund"
+      ],
+      "evidence": {
+        "source_url": "https://ir.virtus.com/news/news-details/2026/Virtus-Dividend-Interest--Premium-Strategy-Fund-Announces-Tender-Offer/default.aspx",
+        "tier": "direct Virtus issuer press release",
+        "effective_date": "2021-02-01 historical rename; current name reconfirmed 2026-04-17",
+        "status": "current issuer body verified; registry stale"
+      }
+    },
+    {
+      "symbol": "CIK",
+      "registry_fund_name": "Credit Suisse Asset Mgmt Income",
+      "registry_sponsor": "UBS Asset Management (Americas) LLC",
+      "aliases": [
+        "UBS Asset Management Income Fund, Inc."
+      ],
+      "evidence": {
+        "source_url": "https://us-fund.ubs.com/en/fund_list/cat/closed_end",
+        "tier": "direct current UBS issuer closed-end fund list",
+        "effective_date": "announced on or about 2026-09-04; current issuer list confirms present name",
+        "status": "current issuer name verified; registry stale"
+      }
+    },
+    {
+      "symbol": "DHY",
+      "registry_fund_name": "Credit Suisse High Yield Credit",
+      "registry_sponsor": "UBS Asset Management (Americas) LLC",
+      "aliases": [
+        "UBS Asset Management High Yield Credit Fund"
+      ],
+      "evidence": {
+        "source_url": "https://us-fund.ubs.com/en/fund_list/cat/closed_end",
+        "tier": "direct current UBS issuer closed-end fund list plus primary indexed reverse-split announcement",
+        "effective_date": "2026-09-04 announced; current issuer list confirms present name",
+        "status": "current issuer name verified; registry stale"
+      }
+    },
+    {
+      "symbol": "NBXG",
+      "registry_fund_name": "Neuberger Brmn Nxt Gnrtn Cnnctvty",
+      "registry_sponsor": "Neuberger Berman",
+      "aliases": [
+        "Neuberger Next Generation Connectivity Fund Inc."
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/neuberger-next-generation-connectivity-fund-announces-monthly-distribution-302839235.html",
+        "tier": "primary PRNewswire indexed full body and directly opened August release",
+        "effective_date": null,
+        "status": "current full public name verified in July/September2026 releases"
+      }
+    },
+    {
+      "symbol": "NML",
+      "registry_fund_name": "NB Energy Infra and Income Fund Inc",
+      "registry_sponsor": "Neuberger Berman",
+      "aliases": [
+        "Neuberger Energy Infrastructure and Income Fund Inc."
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news/neuberger-berman/",
+        "tier": "direct primary PRNewswire issuer index; exact body page not separately opened",
+        "effective_date": null,
+        "status": "current canonical name paired with ticker in primary issuer distribution index"
+      }
+    },
+    {
+      "symbol": "FFC",
+      "registry_fund_name": "Flah&Crum Preferred Securities",
+      "registry_sponsor": "Flaherty & Crumrine Inc",
+      "aliases": [
+        "Flaherty & Crumrine Preferred and Income Securities Fund Incorporated"
+      ],
+      "evidence": {
+        "source_url": "https://www.preferredincome.com/wp-content/uploads/2025/03/dfp-def14a_041625.pdf",
+        "tier": "primary issuer proxy document search-index table",
+        "date": "2025-01-16 record date",
+        "note": "Full current name includes Income missing from registry; exact reviewed alias, not global insertion."
+      }
+    },
+    {
+      "symbol": "MFM",
+      "registry_fund_name": "MFS Municipal Income",
+      "registry_sponsor": "MFS",
+      "aliases": [
+        "Aberdeen Municipal Income Fund"
+      ],
+      "evidence": {
+        "source_url": "https://www.prnewswire.com/news-releases/mfs-municipal-income-trust-announces-completion-of-reorganization-change-in-investment-adviser-and-name-change-to-aberdeen-municipal-income-fund-mfm-302793338.html",
+        "tier": "retained_primary_wire_summary_and_release_title",
+        "article_id": 592,
+        "date": "2026-06-08",
+        "note": "Exact survivor rename only. Do not alias acquired CMU/CXE/CXH to MFM. Separate release from corrected June22 MMT release."
+      }
+    }
+  ],
+  "anonymous_titles": [
+    {
+      "guard_symbol": "SABA",
+      "registry_fund_name": "Saba Capital Income & Ops Fund II",
+      "registry_sponsor": "Saba Capital Management, LP",
+      "title": "Update to Previously Announced Special Dividend and Monthly Dividend",
+      "evidence": "http://www.businesswire.com/news/home/20261028215981/en/Update-to-Previously-Announced-Special-Dividend-and-Monthly-Dividend",
+      "scope": "Exact historic headline is a body-fetch hint only, no ticker assignment. Priorreleasewasaftercutoff; no retainedFCcopy or earlybodyclaim."
+    }
+  ],
+  "governance_patterns": [
+    {
+      "guard_symbol": "XFLT",
+      "registry_fund_name": "XAI Octagon FR & Alternative Inc Trust",
+      "registry_sponsor": "XA Investments LLC",
+      "required_terms": [
+        "shareholders",
+        "vote",
+        "sub-adviser or sub-advisor"
+      ],
+      "evidence": "Retained article946 and primary indexed GlobeNewswire release3331305. Full fund name and XFLT are in summary; headlinehasnone.",
+      "scope": "Body-fetch only; do not infer a ticker from governance wording."
+    }
+  ]
+}

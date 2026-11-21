@@ -425,12 +425,14 @@ def test_alembic_upgrade_head_creates_expected_schema(scratch_dir: Path):
 
             assert sorted(inspector.get_table_names()) == [
                 "alembic_version",
+                "article_enrichment",
                 "article_tickers",
                 "articles",
                 "feed_poll_state",
                 "ingestion_runs",
                 "push_subscriptions",
                 "raw_feed_items",
+                "source_page_controls",
                 "sources",
                 "tickers",
             ]
@@ -582,6 +584,7 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
             for table_name in (
                 "feed_poll_state",
                 "push_subscriptions",
+                "source_page_controls",
                 "sources",
                 "ingestion_runs",
                 "raw_feed_items",
@@ -603,12 +606,14 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
 
         assert set(inspector.get_table_names()) == {
             "alembic_version",
+            "article_enrichment",
             "article_tickers",
             "articles",
             "feed_poll_state",
             "ingestion_runs",
             "push_subscriptions",
             "raw_feed_items",
+            "source_page_controls",
             "sources",
             "tickers",
         }

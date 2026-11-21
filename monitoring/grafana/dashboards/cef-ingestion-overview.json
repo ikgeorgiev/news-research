@@ -355,6 +355,216 @@
       ],
       "title": "Latest Feed Runs",
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 8
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (source, discovery_kind) (increase(news_articles_committed_total{job=\"backend\"}[1h]))",
+          "legendFormat": "{{source}} / {{discovery_kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "New article commits by source (1h)",
+      "type": "timeseries",
+      "description": "Counter increase since this metric was installed; no historical backfill. Includes articles committed before a later feed failure. Pending-enrichment replays are separate. Counts are scrape-based estimates and can lose unsampled work on process restart."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, source, discovery_kind) (rate(news_article_stage_seconds_bucket{job=\"backend\",stage=\"receipt_to_commit\"}[15m])))",
+          "legendFormat": "{{source}} / {{discovery_kind}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, source, discovery_kind) (rate(news_article_stage_seconds_bucket{job=\"backend\",stage=\"receipt_to_commit\"}[15m])))",
+          "legendFormat": "{{source}} / {{discovery_kind}} p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Article receipt to commit by source (15m)",
+      "type": "timeseries",
+      "description": "From the app's feed-response receipt to database commit, not publication time or UI delivery. Pending-enrichment timestamps start at the retry response and exclude historical queue age. Quantiles are bucket estimates; compare with commit counts and do not rank sparse samples."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, source, discovery_kind, stage) (rate(news_article_stage_seconds_bucket{job=\"backend\",stage!=\"receipt_to_commit\"}[15m])))",
+          "legendFormat": "{{source}} / {{discovery_kind}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Article stages p95 (15m)",
+      "type": "timeseries",
+      "description": "Page lookup is part of processing; receipt-to-commit is shown separately. Do not sum percentiles. Notification call measures server work only, not browser receipt or render. No samples means no estimate."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (source, status) (increase(source_page_requests_total{job=\"backend\"}[15m]))",
+          "legendFormat": "{{source}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Source-page HTTP outcomes (15m)",
+      "type": "timeseries",
+      "description": "Actual page HTTP requests, including unmapped items. Cache hits excluded. A 403 means the page request was refused; it does not establish a feed outage. error means no HTTP status. New status series and process restarts can omit the first unsampled request from increase()."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 45,
+        "w": 12,
+        "h": 8
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(source_page_request_seconds_bucket{job=\"backend\"}[15m])))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Source-page HTTP p95 (15m)",
+      "type": "timeseries",
+      "description": "Actual HTTP duration including failures; excludes cached lookups. This is request speed, not news freshness. Quantiles are bucket estimates."
     }
   ],
   "refresh": "10s",
@@ -376,6 +586,6 @@
   "timezone": "browser",
   "title": "CEF Ingestion Overview",
   "uid": "cef-ingestion-overview",
-  "version": 101,
+  "version": 102,
   "weekStart": ""
 }

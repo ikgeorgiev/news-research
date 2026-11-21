@@ -1,11 +1,15 @@
 "use client"
 
-import { MouseEvent, RefObject } from "react"
+import { MouseEvent, RefObject, useState } from "react"
 
 import { NewsItem } from "@/lib/types"
 
 import { CheckIcon } from "./page-icons"
-import { formatDetailedDate, toSafeExternalUrl } from "./page-helpers"
+import { ArticleSummary } from "./article-summary"
+import { ArticleReader } from "./article-reader"
+import { articleLink } from "@/lib/article-link"
+import { formatDetailedDate } from "./page-helpers"
+import { useDeliveryViewport } from "@/hooks/use-delivery-viewport"
 
 type NewsFeedSectionProps = {
   expandedIds: Set<number>
@@ -15,6 +19,7 @@ type NewsFeedSectionProps = {
   loadPendingArticles: () => void
   loading: boolean
   loadingMore: boolean
+  markAsRead: (item: NewsItem) => void
   markAsReadAndOpen: (item: NewsItem, event: MouseEvent) => void
   nextCursor: string | null
   pendingNewItems: NewsItem[]
@@ -32,6 +37,7 @@ export function NewsFeedSection({
   loadPendingArticles,
   loading,
   loadingMore,
+  markAsRead,
   markAsReadAndOpen,
   nextCursor,
   pendingNewItems,
@@ -40,6 +46,12 @@ export function NewsFeedSection({
   toggleSummary,
   viewMode,
 }: NewsFeedSectionProps) {
+  const [readingItem, setReadingItem] = useState<NewsItem | null>(null)
+  const openReader = (item: NewsItem) => {
+    markAsRead(item)
+    setReadingItem(item)
+  }
+  useDeliveryViewport(feedContainerRef, items)
   return (
     <section className="feed-container" ref={feedContainerRef}>
       {pendingNewItems.length > 0 && (
@@ -59,10 +71,11 @@ export function NewsFeedSection({
       {items.map((item) => {
         const isRead = readKeys.has(item.read_key)
         const isExpanded = viewMode === "full" || expandedIds.has(item.id)
-        const safeItemUrl = toSafeExternalUrl(item.url)
+        const link = articleLink(item)
+        const safeItemUrl = link?.url
 
         return (
-          <article key={item.id} className={`feed-row-wrapper ${isRead ? "read" : "unread"}`}>
+          <article key={item.id} data-news-id={item.id} className={`feed-row-wrapper ${isRead ? "read" : "unread"}`}>
             <div className="feed-row" onClick={() => toggleSummary(item)}>
               <div className="main-col">
                 <div className="headline-content">
@@ -72,7 +85,8 @@ export function NewsFeedSection({
                       target="_blank"
                       rel="noreferrer"
                       aria-disabled={!safeItemUrl}
-                      onClick={(event) => markAsReadAndOpen(item, event)}
+                      title={link ? `Open ${link.publisher}` : undefined}
+                      onClick={(event) => markAsReadAndOpen({ ...item, url: safeItemUrl ?? "" }, event)}
                     >
                       {item.title}
                     </a>
@@ -80,8 +94,9 @@ export function NewsFeedSection({
                 </div>
                 <div className="metadata-row">
                   <div className="source-and-tickers">
-                    <span className="source" title={item.provider}>
+                    <span className="source" title={link?.original && item.provider !== link.publisher ? `${link.publisher} · received via ${item.provider}` : item.provider}>
                       {item.provider}
+                      {link?.original && item.provider !== link.publisher && <span className="source-origin"> · {link.publisher}</span>}
                     </span>
                     <div className="ticker-rack">
                       {item.tickers.length > 0 ? (
@@ -100,6 +115,10 @@ export function NewsFeedSection({
               </div>
 
               <div className="actions">
+                <button className="feed-reader-button" aria-label={`Read in app: ${item.title}`} onClick={event => {
+                  event.stopPropagation()
+                  openReader(item)
+                }}>Read</button>
                 <button
                   className="icon-button"
                   title={isRead ? "Mark as unread" : "Mark as read"}
@@ -112,7 +131,7 @@ export function NewsFeedSection({
 
             {isExpanded && (
               <div className="feed-row-details">
-                {item.summary && <div className="summary-text">{item.summary}</div>}
+                <ArticleSummary item={item} openArticle={markAsReadAndOpen} openReader={openReader} />
                 <p>
                   <strong>Seen by system:</strong> {formatDetailedDate(item.first_seen_at)}
                 </p>
@@ -131,6 +150,7 @@ export function NewsFeedSection({
           {loadingMore ? "Loading..." : nextCursor ? "Load More" : "End of results"}
         </button>
       </div>
+      {readingItem && <ArticleReader key={readingItem.id} item={readingItem} openArticle={markAsReadAndOpen} onClose={() => setReadingItem(null)} />}
     </section>
   )
 }

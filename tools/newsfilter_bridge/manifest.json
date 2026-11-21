@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "CEF Newsfilter news bridge",
+  "version": "0.3.1",
+  "description": "Copies selected news responses from your signed-in Newsfilter tab during a bounded comparison session.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "webNavigation",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://newsfilter.io/*",
+    "http://127.0.0.1:8767/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://newsfilter.io/search*",
+        "https://newsfilter.io/latest/*",
+        "https://newsfilter.io/latest-news/*"
+      ],
+      "js": [
+        "session-policy.js",
+        "observer.js",
+        "early.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://newsfilter.io/search*",
+        "https://newsfilter.io/latest/*",
+        "https://newsfilter.io/latest-news/*"
+      ],
+      "js": [
+        "relay.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
