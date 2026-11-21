@@ -63,6 +63,9 @@ def test_postgres_migration_schema_is_visible(postgres_engine):
     assert "ix_article_enrichment_due" in {
         index["name"] for index in inspector.get_indexes("article_enrichment")
     }
+    run_indexes = {idx["name"]: idx["column_names"] for idx in inspector.get_indexes("ingestion_runs")}
+    assert run_indexes["ix_ingestion_runs_started_at"] == ["started_at"]
+    assert run_indexes["ix_runs_source_started"] == ["source_id", "started_at"]
 
     index_names = {index["name"] for index in inspector.get_indexes("raw_feed_items")}
     assert {

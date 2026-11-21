@@ -143,7 +143,7 @@ class IngestionRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
     feed_url: Mapped[str] = mapped_column(Text, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="running", index=True)
     items_seen: Mapped[int] = mapped_column(Integer, default=0)

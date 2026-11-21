@@ -483,6 +483,32 @@ def test_legacy_schema_snapshot_matches_alembic_baseline_revision(
             db_path.unlink()
 
 
+def test_ingestion_run_time_index_upgrade_and_downgrade(scratch_dir: Path):
+    database_url = f"sqlite:///{(scratch_dir / 'run-index.db').as_posix()}"
+    config = migrate._build_alembic_config(database_url)
+    engine = create_engine(database_url)
+
+    def indexes():
+        return {idx["name"]: idx["column_names"] for idx in inspect(engine).get_indexes("ingestion_runs")}
+
+    try:
+        command.upgrade(config, "20261031_0004")
+        original = indexes()
+        assert original["ix_runs_source_started"] == ["source_id", "started_at"]
+        assert "ix_ingestion_runs_started_at" not in original
+
+        command.upgrade(config, "20261121_0005")
+        assert indexes() == {**original, "ix_ingestion_runs_started_at": ["started_at"]}
+        model_indexes = database.Base.metadata.tables["ingestion_runs"].indexes
+        assert any(idx.name == "ix_ingestion_runs_started_at" and list(idx.columns.keys()) == ["started_at"]
+                   for idx in model_indexes)
+
+        command.downgrade(config, "20261031_0004")
+        assert indexes() == original
+    finally:
+        engine.dispose()
+
+
 def test_run_migrations_bootstraps_legacy_schema_before_stamping(
     scratch_dir: Path,
 ):
@@ -580,7 +606,7 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
             # The real pre-Alembic database contained the complete application
             # topology. Keep unrelated tables current in this focused fixture
             # while the three tables above exercise legacy column patching.
-            # Migration 0002 must remain responsible for its unique indexes.
+            # Remove indexes introduced after the baseline so their migrations create them.
             for table_name in (
                 "feed_poll_state",
                 "push_subscriptions",
@@ -594,6 +620,7 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
                 "uq_raw_feed_items_source_guid_nn",
                 "uq_raw_feed_items_source_link_pub_date_nn",
                 "uq_raw_feed_items_source_link_guidless_undated",
+                "ix_ingestion_runs_started_at",
             ):
                 connection.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
 
