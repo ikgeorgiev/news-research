@@ -429,6 +429,7 @@ def test_alembic_upgrade_head_creates_expected_schema(scratch_dir: Path):
                 "article_tickers",
                 "articles",
                 "feed_poll_state",
+                "ingestion_poll_daily",
                 "ingestion_runs",
                 "push_subscriptions",
                 "raw_feed_items",
@@ -449,6 +450,28 @@ def test_alembic_upgrade_head_creates_expected_schema(scratch_dir: Path):
     finally:
         if db_path.exists():
             db_path.unlink()
+
+
+def test_downgrade_preserves_daily_poll_counts(scratch_dir: Path):
+    url = f"sqlite:///{(scratch_dir / 'poll-history.db').as_posix()}"
+    config = migrate._build_alembic_config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(Source.__table__.insert().values(
+                id=1, code="yahoo", name="Yahoo", base_url="https://example.invalid",
+            ))
+            connection.execute(text(
+                "INSERT INTO ingestion_poll_daily (day, source_id, runs, items_seen, backoff_skips) "
+                "VALUES ('2026-11-01', 1, 100, 50, 3)"
+            ))
+        with pytest.raises(RuntimeError, match="Daily poll counts exist"):
+            command.downgrade(config, "20261121_0005")
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT runs FROM ingestion_poll_daily")) == 100
+    finally:
+        engine.dispose()
 
 
 def test_legacy_schema_snapshot_matches_alembic_baseline_revision(
@@ -621,6 +644,7 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
                 "uq_raw_feed_items_source_link_pub_date_nn",
                 "uq_raw_feed_items_source_link_guidless_undated",
                 "ix_ingestion_runs_started_at",
+                "ix_ingestion_runs_routine",
             ):
                 connection.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
 
@@ -637,6 +661,7 @@ def test_run_migrations_bootstraps_legacy_schema_before_stamping(
             "article_tickers",
             "articles",
             "feed_poll_state",
+            "ingestion_poll_daily",
             "ingestion_runs",
             "push_subscriptions",
             "raw_feed_items",

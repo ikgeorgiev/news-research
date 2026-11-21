@@ -97,6 +97,7 @@ class Settings(BaseSettings):
         description="Maximum delay for per-feed exponential failure backoff.",
     )
     raw_feed_retention_days: int = Field(default=30, ge=1, le=3650)
+    ingestion_run_detail_days: int = Field(default=2, ge=0, le=3650)
     raw_feed_prune_batch_size: int = Field(default=5000, ge=100, le=50000)
     raw_feed_prune_max_batches: int = Field(default=5, ge=1, le=100)
     raw_feed_prune_interval_seconds: int = Field(

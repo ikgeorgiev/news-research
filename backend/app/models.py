@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -149,6 +151,31 @@ class IngestionRun(Base):
     items_seen: Mapped[int] = mapped_column(Integer, default=0)
     items_inserted: Mapped[int] = mapped_column(Integer, default=0)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# Keep the maintenance lookup small even as actionable history accumulates.
+# Use the same fixed predicate in the lookup so prepared queries can use the index.
+ROUTINE_POLL_PREDICATE = text("""
+    finished_at IS NOT NULL AND items_inserted = 0 AND (
+        (status = 'success' AND (error_text IS NULL OR error_text = ''))
+        OR (status = 'skipped_backoff' AND items_seen = 0)
+    )
+""")
+Index(
+    "ix_ingestion_runs_routine", IngestionRun.finished_at,
+    postgresql_where=ROUTINE_POLL_PREDICATE, sqlite_where=ROUTINE_POLL_PREDICATE,
+)
+
+
+class IngestionPollDaily(Base):
+    """Only polls already removed from the detailed run table."""
+    __tablename__ = "ingestion_poll_daily"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True)
+    runs: Mapped[int] = mapped_column(BigInteger)
+    items_seen: Mapped[int] = mapped_column(BigInteger)
+    backoff_skips: Mapped[int] = mapped_column(BigInteger)
 
 
 class PushSubscription(Base):

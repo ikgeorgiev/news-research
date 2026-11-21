@@ -34,6 +34,7 @@ def _settings(**overrides):
         "feed_failure_backoff_base_seconds": 30.0,
         "feed_failure_backoff_max_seconds": 600.0,
         "raw_feed_retention_days": 30,
+        "ingestion_run_detail_days": 2,
         "raw_feed_prune_batch_size": 5000,
         "raw_feed_prune_max_batches": 1,
         "raw_feed_prune_interval_seconds": 3600,

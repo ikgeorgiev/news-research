@@ -14,10 +14,12 @@ from app.article_maintenance import (
 from app.config import get_settings
 from app.database import get_db
 from app.deps import require_admin_api_key
+from app.ingestion_history import MAX_RECENT_RUNS, daily_ingestion_activity
 from app.models import IngestionRun, Source
 from app.scheduler import get_scheduler
 from app.schemas import (
     DedupeResponse,
+    IngestionDay,
     IngestionRunItem,
     IngestionRunResponse,
     PurgeFalsePositiveResponse,
@@ -74,12 +76,12 @@ def admin_run_ingestion():
 
 @admin_router.get("/admin/ingest/status", response_model=IngestionRunResponse)
 def admin_ingestion_status(
-    limit: int = Query(default=100, ge=1, le=300), db: Session = Depends(get_db)
+    limit: int = Query(default=100, ge=1, le=MAX_RECENT_RUNS), db: Session = Depends(get_db)
 ):
     rows = db.execute(
         select(IngestionRun, Source.code)
         .join(Source, Source.id == IngestionRun.source_id)
-        .order_by(IngestionRun.started_at.desc())
+        .order_by(IngestionRun.started_at.desc(), IngestionRun.id.desc())
         .limit(limit)
     ).all()
 
@@ -98,6 +100,11 @@ def admin_ingestion_status(
         for run, source_code in rows
     ]
     return IngestionRunResponse(items=items)
+
+
+@admin_router.get("/admin/ingest/daily", response_model=list[IngestionDay])
+def admin_daily_ingestion(days: int = Query(default=30, ge=1, le=366), db: Session = Depends(get_db)):
+    return daily_ingestion_activity(db, days=days)
 
 
 @admin_router.post("/admin/dedupe/businesswire-url-variants", response_model=DedupeResponse)

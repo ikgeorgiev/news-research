@@ -24,6 +24,7 @@ from app.feed_runtime import (
     prune_raw_feed_items,
     reconcile_stale_ingestion_runs,
 )
+from app.ingestion_history import compact_ingestion_runs
 from app.ticker_context import load_ticker_context
 from app.models import (
     Source,
@@ -344,7 +345,7 @@ def _run_stale_revalidation(db: Session, settings: Settings) -> None:
         db.rollback()
 
 
-def _run_raw_feed_pruning(db: Session, settings: Settings) -> None:
+def _maintain_feed_history(db: Session, settings: Settings) -> None:
     prune_interval_seconds = settings.raw_feed_prune_interval_seconds
     if _should_run_raw_feed_prune(prune_interval_seconds):
         pruned_raw_items = prune_raw_feed_items(
@@ -360,6 +361,12 @@ def _run_raw_feed_pruning(db: Session, settings: Settings) -> None:
                 pruned_raw_items,
                 settings.raw_feed_retention_days,
             )
+
+    if settings.ingestion_run_detail_days:
+        count = compact_ingestion_runs(db, detail_days=settings.ingestion_run_detail_days)
+        db.commit()
+        if count:
+            logger.info("Added %s routine RSS polls to the daily counts", count)
 
 
 def _run_push_alerts(
@@ -383,6 +390,7 @@ def _run_push_alerts(
             if locked_stats is not None:
                 return locked_stats
         except Exception:  # Broad catch: push failures must not abort ingestion
+            db.rollback()
             logger.exception("Push alert processing failed after ingestion cycle")
     return push_alerts
 
@@ -410,13 +418,13 @@ def run_ingestion_cycle(db: Session, settings: Settings) -> IngestionCycleResult
         ticker_sync=ticker_sync,
     )
     _run_stale_revalidation(db, settings)
-    _run_raw_feed_pruning(db, settings)
     push_alerts = _run_push_alerts(
         db,
         settings,
         total_inserted=total_inserted,
         notify_failed=notify_failed,
     )
+    _maintain_feed_history(db, settings)
 
     return {
         "total_feeds": len(per_feed),

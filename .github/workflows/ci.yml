@@ -82,6 +82,7 @@ jobs:
           pytest -q tests/test_postgres_ci.py tests/test_postgres_ingestion_latency.py
           tests/test_article_enrichment.py tests/test_fc_postgres.py
           tests/test_page_access.py tests/test_source_scheduler_postgres.py
+          tests/test_ingestion_history.py
           tests/test_ingestion_runtime_sync.py::test_postgres_prune_retains_row_attached_while_waiting_for_lock
 
   frontend:

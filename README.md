@@ -292,6 +292,7 @@ For frontend on `3000` instead:
 
 - `POST /api/v1/admin/ingest/run-once` — trigger one ingestion cycle
 - `GET /api/v1/admin/ingest/status` — recent ingestion run history
+- `GET /api/v1/admin/ingest/daily?days=30` — totals by UTC day and source for the last 1–366 days, including archived polls, items seen and inserted, failures, and backoff skips
 - `POST /api/v1/admin/tickers/reload` — reload CSV + auto-remap unmapped articles
 - `POST /api/v1/admin/remap/{source_code}` — re-extract tickers for a source (`businesswire`, `prnewswire`, `globenewswire`)
 - `POST /api/v1/admin/revalidate` — revalidate stale ArticleTicker rows against current extraction logic
@@ -342,6 +343,11 @@ Ingestion reliability controls are configurable via env vars:
 - `INGESTION_STALE_RUN_TIMEOUT_SECONDS` marks stale `running` jobs as failed.
 - `FEED_FETCH_MAX_ATTEMPTS` / `FEED_FETCH_BACKOFF_SECONDS` / `FEED_FETCH_BACKOFF_JITTER_SECONDS` control feed retry behavior.
 - `RAW_FEED_RETENTION_DAYS` / `RAW_FEED_PRUNE_BATCH_SIZE` / `RAW_FEED_PRUNE_MAX_BATCHES` bound raw feed table growth.
+- `INGESTION_RUN_DETAIL_DAYS` keeps individual polls for today and this many preceding full UTC days (default `2`). Set it to `0` to disable further compaction. The most recent 300 runs always keep their details.
+
+The scheduler adds older routine RSS polls to one daily count per source. Eligible polls are successful checks that inserted no articles and have no diagnostic note, or ordinary backoff skips. Failures, diagnostic notes, runs that inserted articles, issuer baselines and unfinished runs retain their full records. Use the daily endpoint for historical totals and the status endpoint for individual recent polls.
+
+Maintenance processes up to 5,000 eligible polls per pass. The independent scheduler runs maintenance every 60 seconds by default. Batch ingestion runs it once per cycle. Each batch updates the counts and removes the corresponding details in the same transaction. PostgreSQL autovacuum makes the freed space available for subsequent writes.
 
 ## Ticker Universe
 

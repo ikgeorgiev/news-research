@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from app.feed_runtime import _load_tickers_from_csv_if_changed
 from app.ingestion import (
     _run_feed_ingestion, _run_post_ingestion_remaps, _run_push_alerts,
-    _run_raw_feed_pruning, _run_stale_revalidation, sync_runtime_state,
+    _maintain_feed_history, _run_stale_revalidation, sync_runtime_state,
 )
 from app.monitoring import record_ingestion_failure, record_ingestion_success
 
@@ -103,7 +103,7 @@ class SourceCoordinator:
             if not self.stop.is_set():
                 _run_stale_revalidation(db, self.settings)
             if not self.stop.is_set():
-                _run_raw_feed_pruning(db, self.settings)
+                _maintain_feed_history(db, self.settings)
 
     def run(self, heartbeat=lambda: None):
         workers = max(1, self.settings.ingestion_max_workers)

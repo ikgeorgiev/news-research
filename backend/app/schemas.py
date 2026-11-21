@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from ipaddress import ip_address
 from socket import inet_aton
 from typing import Annotated
@@ -79,6 +79,16 @@ class IngestionRunItem(BaseModel):
 
 class IngestionRunResponse(BaseModel):
     items: list[IngestionRunItem]
+
+
+class IngestionDay(BaseModel):
+    day: date
+    source: str
+    runs: int
+    items_seen: int
+    items_inserted: int
+    failed_runs: int
+    backoff_skips: int
 
 
 class RunIngestionResponse(BaseModel):

@@ -38,6 +38,7 @@ def test_postgres_migration_schema_is_visible(postgres_engine):
         "article_enrichment",
         "articles",
         "feed_poll_state",
+        "ingestion_poll_daily",
         "ingestion_runs",
         "push_subscriptions",
         "raw_feed_items",
